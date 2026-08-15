@@ -79,13 +79,20 @@ export default async function PropertiesPage() {
 
       {(properties ?? []).length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-          No properties yet. Create one above, draw one on the{" "}
+          No properties yet. The fastest start:{" "}
+          <Link
+            href="/import/county"
+            className="font-medium text-kelly-700 hover:underline"
+          >
+            import your parcels from county records
+          </Link>{" "}
+          (no files needed). You can also create one above, draw on the{" "}
           <Link href="/map" className="font-medium text-kelly-700 hover:underline">
             map
           </Link>
           , or{" "}
           <Link href="/import" className="font-medium text-kelly-700 hover:underline">
-            import boundaries
+            upload boundary files
           </Link>
           .
         </div>

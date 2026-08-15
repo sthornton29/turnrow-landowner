@@ -891,7 +891,8 @@ export default function MapView({
         <div className="absolute inset-x-0 top-16 z-10 mx-auto w-fit max-w-[90%] rounded-lg bg-white/95 px-4 py-3 text-center shadow-lg md:top-3">
           <p className="text-sm font-medium text-gray-800">Nothing on the map yet</p>
           <p className="text-xs text-gray-500">
-            Use the Add button on the left, or import files from the Import page.
+            Fastest start: Import, then {'"'}Import from county records{'"'}. Or
+            draw with the Add button on the left.
           </p>
         </div>
       ) : null}

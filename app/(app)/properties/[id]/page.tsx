@@ -39,7 +39,7 @@ export default async function PropertyDetailPage({
   ] = await Promise.all([
     supabase
       .from("parcels")
-      .select("id, parcel_number, county, notes, acres")
+      .select("id, parcel_number, county, notes, acres, deeded_acres, source")
       .eq("property_id", id)
       .order("parcel_number"),
     supabase
@@ -142,10 +142,17 @@ export default async function PropertyDetailPage({
                   <span className="font-medium text-gray-900">
                     Parcel {p.parcel_number}
                   </span>
-                  <span className="text-sm text-pine-900">{formatAcres(p.acres)} ac</span>
+                  <span className="text-sm text-pine-900">
+                    {formatAcres(p.acres)} ac
+                    {p.deeded_acres !== null
+                      ? ` (deeded ${formatAcres(p.deeded_acres)})`
+                      : ""}
+                  </span>
                 </div>
-                {p.county ? (
-                  <p className="text-sm text-gray-500">{p.county}</p>
+                {p.county || p.source ? (
+                  <p className="text-sm text-gray-500">
+                    {[p.county, p.source].filter(Boolean).join(" · ")}
+                  </p>
                 ) : null}
                 {p.notes ? (
                   <p className="mt-1 text-sm text-gray-600">{p.notes}</p>

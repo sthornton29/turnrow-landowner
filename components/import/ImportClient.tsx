@@ -248,6 +248,22 @@ export default function ImportClient({
         </p>
       </div>
 
+      <Link
+        href="/import/county"
+        className="flex items-center justify-between rounded-xl border border-kelly-100 bg-kelly-50 p-4 transition hover:border-kelly-500"
+      >
+        <span>
+          <span className="block font-semibold text-pine-900">
+            Import from county records
+          </span>
+          <span className="block text-sm text-gray-600">
+            No files needed: search your county{"'"}s public parcel records by
+            owner name and import real boundaries in minutes.
+          </span>
+        </span>
+        <span className="text-kelly-600">&rarr;</span>
+      </Link>
+
       <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-8 text-center transition hover:border-kelly-500 hover:bg-kelly-50">
         <span className="text-sm font-medium text-gray-700">
           {parsing ? "Reading files..." : "Tap to choose files"}

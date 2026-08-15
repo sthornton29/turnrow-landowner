@@ -118,6 +118,13 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     if (!a.is_active) rows.push(["Status", "Inactive / removed"]);
   } else {
     push("County", "county" in r ? r.county : null);
+    if (entityType === "parcel") {
+      const deeded = r.deeded_acres as number | null | undefined;
+      if (deeded !== null && deeded !== undefined) {
+        rows.push(["Deeded acres", formatAcres(deeded)]);
+      }
+      push("Source", r.source);
+    }
   }
   return rows;
 }

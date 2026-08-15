@@ -11,7 +11,7 @@ export default async function ParcelsPage() {
   const [{ data: parcels }, { data: properties }] = await Promise.all([
     supabase
       .from("parcels")
-      .select("id, property_id, parcel_number, county, notes, acres")
+      .select("id, property_id, parcel_number, county, notes, acres, deeded_acres, source")
       .order("parcel_number"),
     supabase.from("properties").select("id, name"),
   ]);
@@ -48,12 +48,18 @@ export default async function ParcelsPage() {
                 <span className="font-medium text-gray-900">
                   Parcel {p.parcel_number}
                 </span>
-                <span className="text-sm text-pine-900">{formatAcres(p.acres)} ac</span>
+                <span className="text-sm text-pine-900">
+                  {formatAcres(p.acres)} ac
+                  {p.deeded_acres !== null
+                    ? ` (deeded ${formatAcres(p.deeded_acres)})`
+                    : ""}
+                </span>
               </div>
               <p className="text-sm text-gray-500">
                 {propName.get(p.property_id) ?? "Unknown property"}
                 {p.county ? ` · ${p.county}` : ""}
               </p>
+              {p.source ? <p className="text-xs text-gray-400">{p.source}</p> : null}
               {p.notes ? <p className="mt-1 text-sm text-gray-600">{p.notes}</p> : null}
               <RowEditor entityType="parcel" row={p} />
             </li>

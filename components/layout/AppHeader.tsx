@@ -18,8 +18,15 @@ const NAV = [
   { href: "/settings/members", label: "Members" },
 ];
 
-export default function AppHeader() {
+export default function AppHeader({
+  isPlatformAdmin = false,
+}: {
+  isPlatformAdmin?: boolean;
+}) {
   const pathname = usePathname();
+  const nav = isPlatformAdmin
+    ? [...NAV, { href: "/admin/gis", label: "Admin" }]
+    : NAV;
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-gray-200 bg-white">
@@ -48,7 +55,7 @@ export default function AppHeader() {
         </span>
 
         <nav className="ml-auto hidden items-center gap-1 md:flex">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active =
               pathname === item.href || pathname.startsWith(item.href + "/");
             return (

@@ -13,6 +13,7 @@
     "@mapbox/mapbox-gl-draw": "^1.5.1",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
+    "@terraformer/arcgis": "^2.2.2",
     "@tmcw/togeojson": "^7.1.2",
     "jszip": "^3.10.1",
     "mapbox-gl": "^3.28.1",

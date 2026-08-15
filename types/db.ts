@@ -18,6 +18,7 @@ export interface Profile {
   role: Role | null;
   full_name: string | null;
   email: string;
+  is_platform_admin: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +54,8 @@ export interface ParcelGeo {
   county: string | null;
   notes: string | null;
   acres: number | null;
+  deeded_acres: number | null;
+  source: string | null;
   boundary_geojson: MultiPolygon | null;
   created_at: string;
   updated_at: string;

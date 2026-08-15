@@ -1,6 +1,6 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-15 (end of Phase 4)
+Last updated: 2026-08-15 (end of Phase 5)
 
 ## What this product is
 
@@ -141,6 +141,23 @@ missing unique (id, organization_id) on parcels):
   memo. Batch payment from the completeness view writes one row per
   selected statement sharing date and check number.
 
+Phase 5 (migration 0005):
+
+- profiles.is_platform_admin (settable only via SQL; profile updates are
+  column-restricted) + private.is_platform_admin() for RLS.
+- county_gis_services: the app's first GLOBAL table (no organization_id).
+  All authenticated users read it; only platform admins write. Columns:
+  state, county, display_name, ArcGIS service_url + layer_id, field
+  mappings (parcel_field, owner_field, acres_field, situs_field), status
+  (active | broken | untested), last_verified_at, notes. Seeded with
+  Lawrence and Colbert County, Alabama (KCS-hosted MapServers behind the
+  counties' ISV viewers), both live-verified during the build.
+- parcels gains deeded_acres (county-supplied, shown beside computed GIS
+  acres) and source (attribution text); parcels_geo view recreated with
+  both.
+- set_property_boundary_from_parcels(property_id): sets a property's
+  boundary to the ST_Union of its parcels' boundaries (SECURITY INVOKER).
+
 Functions and views:
 
 - private.user_org_id(), private.user_role(): SECURITY DEFINER lookups used
@@ -260,6 +277,27 @@ Functions and views:
   - Dashboard property-tax card once any current-year statement exists:
     X of Y parcels covered and total unpaid, amber within 60 days of the
     nearest delinquent date, red once past it.
+  - /import/county (Import from County Records; linked from the import
+    page, and from map/properties empty states): pick a county from
+    active registry entries, search by owner name or parcel number,
+    results as a synced list + selectable satellite map (row click zooms
+    the polygon, polygon click toggles the row), select-all with running
+    parcel and acre totals, assign to an existing or new property
+    (merge-outline option via set_property_boundary_from_parcels, default
+    on), duplicate parcel numbers flagged with skip-or-update-geometry
+    per parcel (normalized comparison), owner-as-recorded stored in
+    parcel notes, deeded acres and source attribution stored, then lands
+    on the map zoomed to the import. All ArcGIS queries go through
+    server-side proxy routes (/api/gis/search plus admin layer-info and
+    test): CORS-free, where-clause built from registry mappings,
+    outSR=4326, resultOffset pagination, f=geojson with Esri JSON +
+    @terraformer/arcgis fallback, 200-feature cap with a narrow-your-
+    search notice, 15s timeout with a friendly error.
+  - /admin/gis (platform admins only; Admin nav item appears only for
+    them): registry list with status chips and re-verify, add-service
+    flow (paste layer URL, auto-read fields with guessed mappings,
+    dropdown mapping, one-record test query, save as active/untested),
+    edit, deactivate, delete.
 
 ## Conventions
 
@@ -284,6 +322,8 @@ Functions and views:
 - Phase 4 (DONE): property taxes (statement uploads with AI extraction
   and parcel matching, all-parcels completeness check, payments including
   batch, expense rollups into net income views), described above.
-- Phase 5: county GIS parcel import from ArcGIS REST services.
+- Phase 5 (DONE): county GIS parcel import (platform-admin service
+  registry, server-side ArcGIS proxy, search/preview/select/import flow
+  with merged property outlines and deeded acres), described above.
 - Phase 6: read-only partner API integration with Turnrow farm software
   (plantings, yields, harvest status on landowner fields).
