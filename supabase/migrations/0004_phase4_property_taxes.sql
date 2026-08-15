@@ -62,7 +62,9 @@ create table public.tax_statements (
     references public.parcels (id, organization_id) on delete set null,
   -- One statement per parcel per tax year. NULL parcel_id (unmatched) is
   -- exempt, so any number of unmatched statements can await resolution.
-  unique (parcel_id, tax_year)
+  unique (parcel_id, tax_year),
+  -- Composite-FK target for tax_payments (must exist before that table).
+  unique (id, organization_id)
 );
 
 -- ============================================================================
@@ -82,9 +84,6 @@ create table public.tax_payments (
   foreign key (tax_statement_id, organization_id)
     references public.tax_statements (id, organization_id) on delete cascade
 );
-
--- tax_statements needs a composite unique for that FK.
-alter table public.tax_statements add unique (id, organization_id);
 
 -- Statement PDFs / photos attach through the existing documents table.
 alter table public.documents drop constraint documents_entity_type_check;
