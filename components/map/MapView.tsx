@@ -22,6 +22,16 @@ import {
   toMultiPolygon,
 } from "@/lib/geo/normalize";
 import { ASSET_TYPES } from "@/lib/assetTypes";
+import {
+  cropColor,
+  cropLegend,
+  harvestStatus,
+  yieldPerAcre,
+  yieldUnitLabel,
+  type FarmFieldDataRow,
+  type FieldMappingRow,
+} from "@/lib/farmDisplay";
+import type { FarmActivityInfo } from "./FeaturePanel";
 import type {
   AssetGeo,
   EntityType,
@@ -113,6 +123,12 @@ export default function MapView({
   const [roads, setRoads] = useState<RoadGeo[]>([]);
   const [assets, setAssets] = useState<AssetGeo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cropsOn, setCropsOn] = useState(false);
+  const [farmActivity, setFarmActivity] = useState<{
+    byField: Record<string, FarmActivityInfo[]>;
+    byProperty: Record<string, FarmActivityInfo[]>;
+    legend: Array<{ label: string; color: string }>;
+  }>({ byField: {}, byProperty: {}, legend: [] });
 
   const [mode, setMode] = useState<MapMode>("view");
   const modeRef = useRef<MapMode>("view");
@@ -145,13 +161,17 @@ export default function MapView({
   // ---------------------------------------------------------------- data
 
   const loadData = useCallback(async () => {
-    const [p, pa, f, t, r, a] = await Promise.all([
+    const currentYear = new Date().getFullYear();
+    const [p, pa, f, t, r, a, mappings, farmData, connections] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
       supabase.from("timber_stands_geo").select("*").order("name"),
       supabase.from("roads_geo").select("*").order("name"),
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
+      supabase.from("field_mappings").select("*").eq("status", "confirmed"),
+      supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
+      supabase.from("farm_connections").select("id, label"),
     ]);
     setProperties((p.data as PropertyGeo[]) ?? []);
     setParcels((pa.data as ParcelGeo[]) ?? []);
@@ -159,6 +179,48 @@ export default function MapView({
     setTimber((t.data as TimberStandGeo[]) ?? []);
     setRoads((r.data as RoadGeo[]) ?? []);
     setAssets((a.data as AssetGeo[]) ?? []);
+
+    // Current-year farm activity keyed to local fields / properties
+    const connectionLabel = new Map(
+      ((connections.data as Array<{ id: string; label: string }>) ?? []).map((c) => [c.id, c.label])
+    );
+    const mappingByKey = new Map(
+      ((mappings.data as FieldMappingRow[]) ?? []).map((m) => [
+        `${m.farm_connection_id}|${m.remote_field_id}`,
+        m,
+      ])
+    );
+    const byField: Record<string, FarmActivityInfo[]> = {};
+    const byProperty: Record<string, FarmActivityInfo[]> = {};
+    const crops: string[] = [];
+    for (const row of ((farmData.data as FarmFieldDataRow[]) ?? [])) {
+      const mapping = mappingByKey.get(`${row.farm_connection_id}|${row.remote_field_id}`);
+      if (!mapping) continue;
+      const perAcre = yieldPerAcre(row);
+      const info: FarmActivityInfo = {
+        crop: row.crop || "Unknown crop",
+        color: cropColor(row.crop),
+        varieties: (row.varieties ?? []).map((v) => v.variety),
+        planting_date: row.planting_date,
+        harvested: harvestStatus(row) === "harvested",
+        yieldText:
+          perAcre !== null
+            ? `${Math.round(perAcre * 10) / 10} ${yieldUnitLabel(row.production_unit)}`
+            : null,
+        yieldShared: row.yield_shared,
+        source: connectionLabel.get(row.farm_connection_id) ?? "Farm connection",
+      };
+      if (row.crop) crops.push(row.crop);
+      if (mapping.local_field_id) {
+        byField[mapping.local_field_id] = [...(byField[mapping.local_field_id] ?? []), info];
+      } else if (mapping.local_property_id) {
+        byProperty[mapping.local_property_id] = [
+          ...(byProperty[mapping.local_property_id] ?? []),
+          info,
+        ];
+      }
+    }
+    setFarmActivity({ byField, byProperty, legend: cropLegend(crops) });
     setLoading(false);
   }, [supabase]);
 
@@ -396,7 +458,15 @@ export default function MapView({
 
     setData("properties", rowsToFC(properties, "property"));
     setData("parcels", rowsToFC(parcels, "parcel"));
-    setData("fields", rowsToFC(fields, "field"));
+    // Fields carry their current-year crop color for the Crops toggle
+    const fieldsFC = rowsToFC(fields, "field");
+    for (const feature of fieldsFC.features) {
+      const activity = farmActivity.byField[String(feature.properties?.id)];
+      if (activity?.length) {
+        feature.properties = { ...feature.properties, cropColor: activity[0].color };
+      }
+    }
+    setData("fields", fieldsFC);
     setData("timber", rowsToFC(timber, "timber_stand"));
     setData("roads", rowsToFC(roads, "road"));
     setData("assets", rowsToFC(assets, "asset"));
@@ -415,7 +485,35 @@ export default function MapView({
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, timber, roads, assets]);
+  }, [mapLoaded, properties, parcels, fields, timber, roads, assets, farmActivity]);
+
+  // Crops toggle: recolor field polygons by current-year crop
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !map.getLayer("fields-fill")) return;
+    if (cropsOn) {
+      map.setPaintProperty("fields-fill", "fill-color", [
+        "coalesce",
+        ["get", "cropColor"],
+        "#6b7280",
+      ]);
+      map.setPaintProperty("fields-fill", "fill-opacity", [
+        "case",
+        ["has", "cropColor"],
+        0.55,
+        0.08,
+      ]);
+      map.setPaintProperty("fields-line", "line-color", [
+        "coalesce",
+        ["get", "cropColor"],
+        KELLY,
+      ]);
+    } else {
+      map.setPaintProperty("fields-fill", "fill-color", KELLY);
+      map.setPaintProperty("fields-fill", "fill-opacity", 0.18);
+      map.setPaintProperty("fields-line", "line-color", KELLY);
+    }
+  }, [cropsOn, mapLoaded, farmActivity]);
 
   // Focus an entity passed in from another page (e.g. asset list "show on map")
   useEffect(() => {
@@ -798,6 +896,36 @@ export default function MapView({
       {/* Left control column */}
       <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
+        {Object.keys(farmActivity.byField).length > 0 ? (
+          <div className="rounded-lg bg-white/95 p-2 shadow-md">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                checked={cropsOn}
+                onChange={(e) => setCropsOn(e.target.checked)}
+                className="h-4 w-4 accent-kelly-500"
+              />
+              Crops
+            </label>
+            {cropsOn ? (
+              <div className="mt-1 space-y-0.5">
+                {farmActivity.legend.map((entry) => (
+                  <p key={entry.label} className="flex items-center gap-1.5 text-xs text-gray-700">
+                    <span
+                      className="h-3 w-3 rounded-[2px] border border-gray-300"
+                      style={{ background: entry.color }}
+                    />
+                    {entry.label}
+                  </p>
+                ))}
+                <p className="flex items-center gap-1.5 text-xs text-gray-700">
+                  <span className="h-3 w-3 rounded-[2px] border border-gray-300 bg-gray-500" />
+                  No data
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {mode === "view" ? (
           <div className="relative">
             <button
@@ -932,6 +1060,13 @@ export default function MapView({
           entityType={selected.entityType}
           row={selectedRow}
           propertyName={selectedPropertyName}
+          farmActivity={
+            selected.entityType === "field"
+              ? (farmActivity.byField[selected.id] ?? null)
+              : selected.entityType === "property"
+                ? (farmActivity.byProperty[selected.id] ?? null)
+                : null
+          }
           onClose={() => setSelected(null)}
           onEditGeometry={startEditGeometry}
           onChanged={loadData}

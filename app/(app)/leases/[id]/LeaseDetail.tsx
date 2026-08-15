@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   LEASE_STATUS_LABELS,
   annualRent,
@@ -20,6 +20,20 @@ import {
 import LeaseForm from "@/components/leases/LeaseForm";
 import PaymentsSection from "@/components/payments/PaymentsSection";
 import EntityDocuments from "@/components/documents/EntityDocuments";
+import {
+  yieldUnitLabel,
+  type FarmFieldDataRow,
+  type FieldMappingRow,
+} from "@/lib/farmDisplay";
+
+// Actual yield from a farm connection, offered as a one-click prefill for
+// crop share projection assumptions (user still reviews and saves).
+export interface FarmActual {
+  crop: string;
+  yieldPerAcre: number;
+  unitLabel: string;
+  source: string;
+}
 
 interface LeaseRow {
   id: string;
@@ -76,14 +90,34 @@ export default function LeaseDetail({
   const [addPropertyId, setAddPropertyId] = useState(properties[0]?.id ?? "");
   const [addFieldId, setAddFieldId] = useState("");
 
+  const [farmMappings, setFarmMappings] = useState<FieldMappingRow[]>([]);
+  const [farmData, setFarmData] = useState<FarmFieldDataRow[]>([]);
+  const [farmConnections, setFarmConnections] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+
   const load = useCallback(async () => {
-    const [l, a] = await Promise.all([
+    const isCropShare =
+      lease.lease_type === "agricultural" && lease.rent_structure === "crop_share";
+    const [l, a, fm, fd, fc] = await Promise.all([
       supabase.from("lease_lands").select("*").eq("lease_id", lease.id),
       supabase.from("lease_year_assumptions").select("*").eq("lease_id", lease.id).order("year"),
+      isCropShare
+        ? supabase.from("field_mappings").select("*").eq("status", "confirmed")
+        : Promise.resolve({ data: [] }),
+      isCropShare
+        ? supabase.from("farm_field_data").select("*")
+        : Promise.resolve({ data: [] }),
+      isCropShare
+        ? supabase.from("farm_connections").select("id, label")
+        : Promise.resolve({ data: [] }),
     ]);
     setLands((l.data as LandLink[]) ?? []);
     setAssumptions((a.data as AssumptionRow[]) ?? []);
-  }, [supabase, lease.id]);
+    setFarmMappings((fm.data as FieldMappingRow[]) ?? []);
+    setFarmData((fd.data as FarmFieldDataRow[]) ?? []);
+    setFarmConnections((fc.data as Array<{ id: string; label: string }>) ?? []);
+  }, [supabase, lease.id, lease.lease_type, lease.rent_structure]);
 
   useEffect(() => {
     load();
@@ -121,6 +155,57 @@ export default function LeaseDetail({
     () => generateLeasePayments(lease, totalAcres, assumptionsByYear),
     [lease, totalAcres, assumptionsByYear]
   );
+
+  // Actual harvested yields from farm connections, per year, restricted to the
+  // land this lease covers. Weighted average over the dominant crop's fields.
+  const farmActualByYear = useMemo(() => {
+    const result = new Map<number, FarmActual>();
+    if (lands.length === 0 || farmMappings.length === 0 || farmData.length === 0) {
+      return result;
+    }
+    const leasedFieldIds = new Set(lands.map((l) => l.field_id).filter(Boolean));
+    const wholePropertyIds = new Set(
+      lands.filter((l) => !l.field_id).map((l) => l.property_id)
+    );
+    const relevant = new Set<string>();
+    for (const m of farmMappings) {
+      const mappedField = m.local_field_id ? fieldById.get(m.local_field_id) : null;
+      const onLease =
+        (m.local_field_id && leasedFieldIds.has(m.local_field_id)) ||
+        (mappedField && wholePropertyIds.has(mappedField.property_id)) ||
+        (m.local_property_id && wholePropertyIds.has(m.local_property_id));
+      if (onLease) relevant.add(`${m.farm_connection_id}|${m.remote_field_id}`);
+    }
+    const connectionLabel = new Map(farmConnections.map((c) => [c.id, c.label]));
+    const byYear = new Map<number, FarmFieldDataRow[]>();
+    for (const d of farmData) {
+      if (!relevant.has(`${d.farm_connection_id}|${d.remote_field_id}`)) continue;
+      if (d.production_units === null || !d.harvested_acres) continue;
+      byYear.set(d.crop_year, [...(byYear.get(d.crop_year) ?? []), d]);
+    }
+    for (const [year, rows] of byYear) {
+      // Pick the crop covering the most harvested acres, then average its yield
+      const acresByCrop = new Map<string, number>();
+      for (const r of rows) {
+        const crop = r.crop || "Unknown";
+        acresByCrop.set(crop, (acresByCrop.get(crop) ?? 0) + (r.harvested_acres ?? 0));
+      }
+      const topCrop = Array.from(acresByCrop.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (!topCrop) continue;
+      const cropRows = rows.filter((r) => (r.crop || "Unknown") === topCrop);
+      const units = cropRows.reduce((s, r) => s + (r.production_units ?? 0), 0);
+      const acres = cropRows.reduce((s, r) => s + (r.harvested_acres ?? 0), 0);
+      if (!acres || !units) continue;
+      result.set(year, {
+        crop: topCrop,
+        yieldPerAcre: Math.round((units / acres) * 10) / 10,
+        unitLabel: yieldUnitLabel(cropRows[0].production_unit),
+        source:
+          connectionLabel.get(cropRows[0].farm_connection_id) ?? "your farm connection",
+      });
+    }
+    return result;
+  }, [lands, farmMappings, farmData, farmConnections, fieldById]);
 
   // ------------------------------------------------------------- land links
 
@@ -371,6 +456,7 @@ export default function LeaseDetail({
                   structure={lease.rent_structure!}
                   value={a}
                   projected={projected}
+                  farmActual={farmActualByYear.get(year) ?? null}
                   onSave={(data) => saveAssumption(year, data)}
                 />
               );
@@ -409,12 +495,14 @@ function AssumptionRowEditor({
   structure,
   value,
   projected,
+  farmActual = null,
   onSave,
 }: {
   year: number;
   structure: "flex" | "crop_share" | "cash";
   value: YearAssumptions;
   projected: number | null;
+  farmActual?: FarmActual | null;
   onSave: (data: YearAssumptions) => void;
 }) {
   const [data, setData] = useState<YearAssumptions>(value);
@@ -486,6 +574,23 @@ function AssumptionRowEditor({
             placeholder="Shared exp $"
             className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm"
           />
+          {farmActual && data.expected_yield !== farmActual.yieldPerAcre ? (
+            <button
+              onClick={() => {
+                setData((d) => ({
+                  ...d,
+                  crop: d.crop || farmActual.crop,
+                  expected_yield: farmActual.yieldPerAcre,
+                }));
+                setDirty(true);
+              }}
+              title={`Actual yield from ${farmActual.source}`}
+              className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-50"
+            >
+              Use actual: {formatNumber(farmActual.yieldPerAcre)} {farmActual.unitLabel} (
+              {farmActual.crop}, from farm data)
+            </button>
+          ) : null}
         </>
       )}
       <span className="ml-auto text-sm text-gray-500">

@@ -129,12 +129,25 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
   return rows;
 }
 
+// Current-year farm activity for the panel (from the tenant's farm software)
+export interface FarmActivityInfo {
+  crop: string;
+  color: string;
+  varieties: string[];
+  planting_date: string | null;
+  harvested: boolean;
+  yieldText: string | null;
+  yieldShared: boolean;
+  source: string;
+}
+
 // Detail panel for a clicked map feature. Desktop: card on the right side of
 // the map. Mobile: bottom sheet.
 export default function FeaturePanel({
   entityType,
   row,
   propertyName,
+  farmActivity = null,
   onClose,
   onEditGeometry,
   onChanged,
@@ -142,6 +155,7 @@ export default function FeaturePanel({
   entityType: EntityType;
   row: AnyGeoRow;
   propertyName: string | null;
+  farmActivity?: FarmActivityInfo[] | null;
   onClose: () => void;
   onEditGeometry: () => void;
   onChanged: () => void;
@@ -266,6 +280,42 @@ export default function FeaturePanel({
               </div>
             ) : null}
           </dl>
+
+          {farmActivity && farmActivity.length > 0 ? (
+            <div className="rounded-lg border border-kelly-100 bg-kelly-50 p-2.5">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-pine-900">
+                Farm activity ({new Date().getFullYear()})
+              </p>
+              {farmActivity.map((a, i) => (
+                <div key={i} className="text-sm text-gray-800">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    <span
+                      className="h-3 w-3 rounded-[2px] border border-gray-300"
+                      style={{ background: a.color }}
+                    />
+                    {a.crop}
+                    {a.varieties.length > 0 ? (
+                      <span className="font-normal text-gray-600">
+                        ({a.varieties.join(", ")})
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    {a.planting_date ? `Planted ${a.planting_date} · ` : ""}
+                    {a.harvested ? "Harvested" : "Growing"}
+                    {a.yieldText
+                      ? ` · ${a.yieldText}`
+                      : a.harvested && !a.yieldShared
+                        ? " · yield not shared"
+                        : ""}
+                  </p>
+                </div>
+              ))}
+              <p className="mt-1 text-[10px] text-gray-500">
+                From {farmActivity[0].source}
+              </p>
+            </div>
+          ) : null}
 
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
 

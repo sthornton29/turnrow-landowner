@@ -39,6 +39,7 @@ export default async function DashboardPage() {
     { data: timberSales },
     { data: taxStatements },
     { data: taxPayments },
+    { data: farmData },
   ] = await Promise.all([
     supabase
       .from("organizations")
@@ -62,6 +63,10 @@ export default async function DashboardPage() {
       .select("id, parcel_id, tax_year, amount_due, delinquent_date")
       .eq("tax_year", new Date().getFullYear()),
     supabase.from("tax_payments").select("tax_statement_id, amount"),
+    supabase
+      .from("farm_field_data")
+      .select("planted_acres, harvested_acres")
+      .eq("crop_year", new Date().getFullYear()),
   ]);
 
   // Payments needing attention: past due, or due within 60 days, not yet paid.
@@ -143,6 +148,14 @@ export default async function DashboardPage() {
         ? "border-amber-100 bg-amber-50 text-amber-900"
         : "border-gray-100 bg-white text-gray-900";
 
+  // Harvest progress card (shown during harvest: acres are being cut)
+  const farmPlanted = (farmData ?? []).reduce((s, d) => s + (d.planted_acres ?? 0), 0);
+  const farmHarvested = (farmData ?? []).reduce((s, d) => s + (d.harvested_acres ?? 0), 0);
+  const showHarvestCard = farmHarvested > 0 && farmPlanted > 0;
+  const harvestPct = showHarvestCard
+    ? Math.min(Math.round((farmHarvested / farmPlanted) * 100), 100)
+    : 0;
+
   const countOf = (...types: string[]) =>
     (assets ?? []).filter((a) => types.includes(a.asset_type)).length;
 
@@ -204,6 +217,32 @@ export default async function DashboardPage() {
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {showHarvestCard ? (
+        <Link href="/farm-activity" className="block rounded-xl border border-kelly-100 bg-white">
+          <h2 className="rounded-t-xl border-b border-kelly-100 bg-kelly-50 px-4 py-3 text-base font-semibold text-pine-900">
+            Harvest progress
+          </h2>
+          <div className="space-y-2 px-4 py-3">
+            <p className="text-sm text-gray-700">
+              <span className="font-semibold tabular-nums text-gray-900">
+                {formatAcres(farmHarvested)}
+              </span>{" "}
+              of{" "}
+              <span className="font-semibold tabular-nums text-gray-900">
+                {formatAcres(farmPlanted)}
+              </span>{" "}
+              connected acres harvested ({harvestPct}%)
+            </p>
+            <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full rounded-full bg-kelly-500"
+                style={{ width: `${harvestPct}%` }}
+              />
+            </div>
+          </div>
+        </Link>
       ) : null}
 
       {yearStatements.length > 0 ? (

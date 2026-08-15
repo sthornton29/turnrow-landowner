@@ -1,8 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Public routes that never require a session.
-const PUBLIC_PATHS = ["/login", "/signup", "/auth"];
+// Public routes that never require a session. /api/farm/sync is public at
+// the middleware level because the Vercel cron calls it; the route itself
+// enforces CRON_SECRET (GET) or a user session (POST).
+const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/api/farm/sync"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

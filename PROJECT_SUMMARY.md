@@ -1,6 +1,6 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-15 (end of Phase 5)
+Last updated: 2026-08-15 (end of Phase 6)
 
 ## What this product is
 
@@ -30,6 +30,14 @@ and Postgres row level security guarantees each org sees only its own data.
 - NEXT_PUBLIC_MAPBOX_TOKEN
 - ANTHROPIC_API_KEY (server-side only, no NEXT_PUBLIC_ prefix; used by
   /api/extract for AI document extraction with claude-sonnet-4-6)
+- FARM_API_BASE_URL (Phase 6; base URL of the farm software's partner API,
+  e.g. https://<farm-domain>/api/partner/v1, no trailing slash)
+- FARM_API_ENCRYPTION_KEY (Phase 6; 64 hex chars, AES-256-GCM key that
+  encrypts farm API tokens at rest in farm_connections)
+- CRON_SECRET (Phase 6; shared secret Vercel sends when invoking the
+  /api/farm/sync cron; the route rejects anything else)
+- SUPABASE_SERVICE_ROLE_KEY (Phase 6; used ONLY by the cron sync, which
+  runs with no signed-in user and scopes every query itself)
 
 ## Database schema (migrations 0001_phase1_schema.sql, 0002_phase2_timber_roads_assets.sql)
 
@@ -157,6 +165,52 @@ Phase 5 (migration 0005):
   both.
 - set_property_boundary_from_parcels(property_id): sets a property's
   boundary to the ST_Union of its parcels' boundaries (SECURITY INVOKER).
+
+Phase 6 tables (migration 0006; org RLS + composite FKs; no geometry, the
+farm API shares no boundaries, matching is by name + acres):
+
+- farm_connections: one row per redeemed farmer share. label,
+  api_key_encrypted (AES-256-GCM via lib/farmCrypto.ts, never plaintext),
+  status (active | error | revoked), scopes jsonb (fields/plantings/yields
+  booleans from the handshake), operation_name, landowner_name,
+  field_count, last_synced_at, last_error (plain-language, shown in the
+  UI), unique (id, organization_id).
+- field_mappings: per (connection, remote_field_id). Snapshots of
+  remote_name/remote_acres/remote_farm_name, and EITHER local_field_id OR
+  local_property_id (both composite FKs), status (suggested | confirmed |
+  ignored). Sync refreshes snapshots and inserts new remote fields with a
+  best-guess suggestion (name similarity + acres within 10%) but NEVER
+  changes a status; only the user confirms or ignores.
+- farm_field_data: synced plantings/harvest per (connection,
+  remote_field_id, crop_year, crop): planted_acres, planting_date,
+  varieties jsonb, harvested_acres, production_units (null when the farmer
+  did not share yields), production_unit, yield_shared, raw payload jsonb.
+  Upserted on every sync; the app always renders from this table so farm
+  data keeps working when the farm software is unreachable.
+
+Phase 6 server pieces:
+
+- lib/farmApi.ts: typed client for the partner API (redeem, handshake,
+  fields, plantings, production) with a 15s timeout; 403 share_revoked is
+  recognized and mapped to a friendly "your farmer ended this share"
+  state (connection status revoked, data retained).
+- lib/farmSync.ts: syncConnection decrypts the token, pulls handshake +
+  current-year plantings/production, upserts farm_field_data, refreshes
+  mappings, records last_error on failure. Used by connect, the manual
+  Refresh now button, and the cron.
+- /api/farm/connect: POST a TRW-XXXX-XXXX-XXXX code; redeems it (one-time
+  on the farm side), encrypts the returned token, creates the connection,
+  runs the first sync.
+- /api/farm/sync: POST (signed-in user, one or all connections) and GET
+  (Vercel cron, Bearer CRON_SECRET, service-role client). vercel.json
+  schedules it every 6 hours; proxy.ts exempts the path from auth
+  redirects.
+
+The farm side lives in the separate grain-tracker repo (the Turnrow farm
+software): migration 070_partner_shares.sql, share management UI at
+/settings/shares (farmer picks a landowner + yields on/off, gets a
+one-time code, can revoke), share-scoped partner API endpoints, and
+docs/PARTNER_API.md documenting the whole partner API.
 
 Functions and views:
 
@@ -298,6 +352,32 @@ Functions and views:
     flow (paste layer URL, auto-read fields with guessed mappings,
     dropdown mapping, one-record test query, save as active/untested),
     edit, deactivate, delete.
+  - /farms (Farm Data nav item): enter a farmer's one-time share code to
+    connect; connections list with status chips (active / error with the
+    plain-language last_error / Ended by farmer), last synced time,
+    Refresh now, links to field mapping and farm activity, Disconnect.
+  - /farms/[id]/mapping: every remote field with its farm-side name,
+    farm, and acres; a dropdown maps it to a local field, a whole
+    property, or Ignore. Suggested matches show a one-click Confirm
+    match; "Check for new shared fields" re-syncs.
+  - /farm-activity: filterable (year, connection, property) table grouped
+    by property: field, crop with varieties, planted acres, planting
+    date, Growing/Harvested chip, yield per acre (or "Not shared" when
+    the farmer keeps yields private). Totals line for plantings and
+    acres.
+  - Map: a Crops toggle (appears once farm data exists) recolors mapped
+    fields by current-year crop with a legend (corn yellow, cotton white,
+    soybeans kelly, wheat amber, canola light green, other purple; chosen
+    to read over satellite imagery). The field/property click panel gains
+    a Farm activity section: crop, varieties, planted date, harvest
+    status, yield when shared.
+  - Dashboard: harvest progress card during harvest (acres harvested of
+    acres planted with a progress bar, linking to /farm-activity).
+  - /leases/[id]: crop share assumption rows show a one-click "Use
+    actual" button when connected farm data has a harvested yield for
+    that year on the leased land (weighted average over the dominant
+    crop), clearly labeled as coming from farm data; the user still
+    reviews and saves.
 
 ## Conventions
 
@@ -325,5 +405,10 @@ Functions and views:
 - Phase 5 (DONE): county GIS parcel import (platform-admin service
   registry, server-side ArcGIS proxy, search/preview/select/import flow
   with merged property outlines and deeded acres), described above.
-- Phase 6: read-only partner API integration with Turnrow farm software
-  (plantings, yields, harvest status on landowner fields).
+- Phase 6 (DONE): read-only partner API integration with the Turnrow farm
+  software. Farmer creates a one-time share code in the farm software
+  (grain-tracker repo, /settings/shares) choosing whether to include
+  yields; the landowner redeems it under Farm Data. Explicit field
+  mapping (no geometry crosses the API), 6-hour cron sync + manual
+  refresh, Crops map layer, Farm activity page, dashboard harvest card,
+  crop share yield prefill from actuals. Described above.
