@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/*
+ * Turnrow brand colors.
+ * kelly  = primary kelly green (#39b54a exactly matches the logo files)
+ * pine   = dark green for accents, dark text, and dark surfaces
+ */
+@theme {
+  --color-kelly-50: #edf9ef;
+  --color-kelly-100: #d4f0da;
+  --color-kelly-500: #39b54a;
+  --color-kelly-600: #2fa03f;
+  --color-kelly-700: #268434;
+  --color-pine-700: #1c6b3c;
+  --color-pine-800: #175c33;
+  --color-pine-900: #14532d;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-white text-gray-900 antialiased;
+}
+
+/* Mapbox popups/controls inherit odd fonts otherwise */
+.mapboxgl-map {
+  font: inherit;
+}
