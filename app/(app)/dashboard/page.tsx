@@ -21,29 +21,48 @@ function staticMapUrl(box: [number, number, number, number]): string {
 export default async function DashboardPage() {
   const { supabase, profile } = await requireOrg();
 
-  const [{ data: org }, { data: properties }, { data: parcels }, { data: fields }] =
-    await Promise.all([
-      supabase
-        .from("organizations")
-        .select("name")
-        .eq("id", profile.organization_id)
-        .single(),
-      supabase.from("properties_geo").select("id, acres, boundary_geojson"),
-      supabase.from("parcels").select("id"),
-      supabase.from("fields").select("id, acres"),
-    ]);
+  const [
+    { data: org },
+    { data: properties },
+    { data: parcels },
+    { data: fields },
+    { data: timber },
+    { data: assets },
+  ] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select("name")
+      .eq("id", profile.organization_id)
+      .single(),
+    supabase.from("properties_geo").select("id, acres, boundary_geojson"),
+    supabase.from("parcels").select("id"),
+    supabase.from("fields").select("id, acres"),
+    supabase.from("timber_stands").select("id, acres"),
+    supabase.from("assets").select("id, asset_type").eq("is_active", true),
+  ]);
 
   const propertyAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
+  const timberAcres = (timber ?? []).reduce((s, t) => s + (t.acres ?? 0), 0);
   const box = bboxOf(
     (properties ?? []).map((p) => p.boundary_geojson as MultiPolygon | null)
   );
 
+  const countOf = (...types: string[]) =>
+    (assets ?? []).filter((a) => types.includes(a.asset_type)).length;
+
   const stats = [
     { label: "Total acres", value: formatAcres(propertyAcres) },
     { label: "Properties", value: formatNumber((properties ?? []).length) },
-    { label: "Fields", value: formatNumber((fields ?? []).length) },
     { label: "Field acres", value: formatAcres(fieldAcres) },
+    { label: "Timber acres", value: formatAcres(timberAcres) },
+    { label: "Wells", value: formatNumber(countOf("well")) },
+    { label: "Pivots", value: formatNumber(countOf("irrigation_pivot")) },
+    { label: "Grain bins", value: formatNumber(countOf("grain_bin")) },
+    {
+      label: "Buildings",
+      value: formatNumber(countOf("shop", "shed", "barn", "house")),
+    },
   ];
 
   return (
@@ -57,7 +76,7 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4">
             <p className="text-2xl font-semibold tabular-nums text-gray-900">{s.value}</p>

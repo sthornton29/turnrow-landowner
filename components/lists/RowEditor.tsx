@@ -3,31 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { EDIT_FIELDS, ENTITY_TABLE } from "@/components/map/FeaturePanel";
 import type { EntityType } from "@/types/db";
 
-const TABLE: Record<EntityType, string> = {
-  property: "properties",
-  parcel: "parcels",
-  field: "fields",
-};
-
-interface EditableRow {
-  id: string;
-  name?: string;
-  parcel_number?: string;
-  county?: string | null;
-  state?: string | null;
-  notes?: string | null;
-}
-
-// Small expandable editor for names, county/state, and notes. Used on the
-// list and detail pages as the non-map way to edit records.
+// Small expandable editor used on the list and detail pages as the non-map
+// way to edit records. Shares its field configuration with the map panel.
 export default function RowEditor({
   entityType,
   row,
 }: {
   entityType: EntityType;
-  row: EditableRow;
+  row: Record<string, unknown> & { id: string };
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -35,24 +21,22 @@ export default function RowEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const fields = EDIT_FIELDS[entityType];
+
   async function save(formData: FormData) {
     setBusy(true);
     setError(null);
-    const patch: Record<string, string | null> = {
-      notes: String(formData.get("notes") ?? "").trim() || null,
-    };
-    if (entityType === "parcel") {
-      patch.parcel_number = String(formData.get("parcel_number") ?? "").trim();
-      patch.county = String(formData.get("county") ?? "").trim() || null;
-    } else {
-      patch.name = String(formData.get("name") ?? "").trim();
-      if (entityType === "property") {
-        patch.county = String(formData.get("county") ?? "").trim() || null;
-        patch.state = String(formData.get("state") ?? "").trim() || null;
+    const patch: Record<string, string | number | null> = {};
+    for (const f of fields) {
+      const raw = String(formData.get(f.key) ?? "").trim();
+      if (f.input === "number") {
+        patch[f.key] = raw === "" ? null : Number(raw);
+      } else {
+        patch[f.key] = raw === "" && !f.required ? null : raw;
       }
     }
     const { error: err } = await supabase
-      .from(TABLE[entityType])
+      .from(ENTITY_TABLE[entityType])
       .update(patch)
       .eq("id", row.id);
     setBusy(false);
@@ -77,48 +61,43 @@ export default function RowEditor({
 
   return (
     <form action={save} className="mt-2 w-full space-y-2 rounded-lg bg-gray-50 p-3">
-      {entityType === "parcel" ? (
-        <input
-          name="parcel_number"
-          defaultValue={row.parcel_number ?? ""}
-          required
-          placeholder="Parcel number"
-          className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-        />
-      ) : (
-        <input
-          name="name"
-          defaultValue={row.name ?? ""}
-          required
-          placeholder="Name"
-          className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-        />
-      )}
-      {entityType !== "field" ? (
-        <div className="flex gap-2">
-          <input
-            name="county"
-            defaultValue={row.county ?? ""}
-            placeholder="County"
-            className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-          />
-          {entityType === "property" ? (
-            <input
-              name="state"
-              defaultValue={row.state ?? ""}
-              placeholder="State"
-              className="w-24 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-            />
-          ) : null}
-        </div>
-      ) : null}
-      <textarea
-        name="notes"
-        rows={2}
-        defaultValue={row.notes ?? ""}
-        placeholder="Notes"
-        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-      />
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {fields.map((f) => (
+          <div key={f.key} className={f.input === "textarea" ? "sm:col-span-2" : ""}>
+            {f.input === "textarea" ? (
+              <textarea
+                name={f.key}
+                rows={2}
+                defaultValue={String(row[f.key] ?? "")}
+                placeholder={f.label}
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            ) : f.input === "select" ? (
+              <select
+                name={f.key}
+                defaultValue={String(row[f.key] ?? "")}
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              >
+                <option value="">{f.label}: not set</option>
+                {Object.entries(f.options ?? {}).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                name={f.key}
+                type={f.input === "number" ? "number" : "text"}
+                required={f.required}
+                defaultValue={String(row[f.key] ?? "")}
+                placeholder={f.label}
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            )}
+          </div>
+        ))}
+      </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <div className="flex gap-2">
         <button

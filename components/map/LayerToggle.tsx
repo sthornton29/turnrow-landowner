@@ -6,6 +6,9 @@ const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
   { key: "property", label: "Properties" },
   { key: "parcel", label: "Parcels" },
   { key: "field", label: "Fields" },
+  { key: "timber_stand", label: "Timber" },
+  { key: "road", label: "Roads" },
+  { key: "asset", label: "Assets" },
 ];
 
 export default function LayerToggle({

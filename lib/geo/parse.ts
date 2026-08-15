@@ -1,13 +1,17 @@
-import type { Feature, FeatureCollection, Geometry, MultiPolygon } from "geojson";
+import type { Feature, FeatureCollection, Geometry } from "geojson";
 import { kml as kmlToGeoJSON } from "@tmcw/togeojson";
 import JSZip from "jszip";
 import shp from "shpjs";
-import { toMultiPolygon } from "./normalize";
+import { toMultiLineString, toMultiPolygon } from "./normalize";
 
-// A feature parsed from an uploaded file, normalized to MultiPolygon and
-// carrying its original attributes so we can prefill names.
+export type FeatureKind = "polygon" | "line" | "point";
+
+// A feature parsed from an uploaded file, normalized (polygons to
+// MultiPolygon, lines to MultiLineString, points kept as-is) and carrying
+// its original attributes so we can prefill names.
 export interface ParsedFeature {
-  geometry: MultiPolygon;
+  kind: FeatureKind;
+  geometry: Geometry;
   attributes: Record<string, unknown>;
   suggestedName: string;
   sourceIndex: number;
@@ -64,17 +68,38 @@ function collectFeatures(
 
   for (const f of features) {
     const index = out.length + skipped.length;
+    let kind: FeatureKind | null = null;
+    let geometry: Geometry | null = null;
+
     const mp = toMultiPolygon(f.geometry);
-    if (!mp) {
+    if (mp) {
+      kind = "polygon";
+      geometry = mp;
+    } else {
+      const ml = toMultiLineString(f.geometry);
+      if (ml) {
+        kind = "line";
+        geometry = ml;
+      } else if (
+        f.geometry?.type === "Point" ||
+        f.geometry?.type === "MultiPoint"
+      ) {
+        kind = "point";
+        geometry = f.geometry;
+      }
+    }
+
+    if (!kind || !geometry) {
       const t = f.geometry?.type ?? "empty";
-      skipped.push(`Feature ${index + 1}: ${t} geometry is not a boundary, skipped.`);
+      skipped.push(`Feature ${index + 1}: ${t} geometry is not usable, skipped.`);
       continue;
     }
     const attributes = (f.properties ?? {}) as Record<string, unknown>;
     out.push({
-      geometry: mp,
+      kind,
+      geometry,
       attributes,
-      suggestedName: guessName(attributes, `Boundary ${out.length + 1}`),
+      suggestedName: guessName(attributes, `Feature ${out.length + 1}`),
       sourceIndex: index,
     });
   }

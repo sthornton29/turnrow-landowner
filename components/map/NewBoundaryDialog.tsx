@@ -4,13 +4,22 @@ import { useState } from "react";
 import { formatAcres } from "@/lib/format";
 import type { EntityType, PropertyGeo } from "@/types/db";
 
+type BoundaryType = "field" | "parcel" | "property" | "timber_stand";
+
 export interface NewBoundaryPayload {
   entityType: EntityType;
   name: string; // parcel number when entityType is "parcel"
-  propertyId: string | null; // required for parcel/field
+  propertyId: string | null; // required for parcel/field/timber_stand
   county: string | null;
   state: string | null;
 }
+
+const TYPE_LABEL: Record<BoundaryType, string> = {
+  field: "Field",
+  parcel: "Parcel",
+  property: "Property",
+  timber_stand: "Timber",
+};
 
 // Shown after a polygon is drawn: pick what it is, name it, and save.
 export default function NewBoundaryDialog({
@@ -28,7 +37,7 @@ export default function NewBoundaryDialog({
   onSave: (payload: NewBoundaryPayload) => void;
   onCancel: () => void;
 }) {
-  const [entityType, setEntityType] = useState<EntityType>(
+  const [entityType, setEntityType] = useState<BoundaryType>(
     properties.length > 0 ? "field" : "property"
   );
   const needsProperty = entityType !== "property";
@@ -57,20 +66,20 @@ export default function NewBoundaryDialog({
       <form action={handleSubmit} className="mt-3 space-y-3">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">This is a</label>
-          <div className="grid grid-cols-3 gap-1.5">
-            {(["field", "parcel", "property"] as EntityType[]).map((t) => (
+          <div className="grid grid-cols-4 gap-1.5">
+            {(Object.keys(TYPE_LABEL) as BoundaryType[]).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setEntityType(t)}
                 className={
-                  "rounded-lg border px-2 py-1.5 text-sm font-medium capitalize " +
+                  "rounded-lg border px-1 py-1.5 text-xs font-medium " +
                   (entityType === t
                     ? "border-kelly-500 bg-kelly-50 text-pine-900"
                     : "border-gray-300 text-gray-600 hover:bg-gray-50")
                 }
               >
-                {t}
+                {TYPE_LABEL[t]}
               </button>
             ))}
           </div>
@@ -78,7 +87,11 @@ export default function NewBoundaryDialog({
 
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            {entityType === "parcel" ? "Parcel number" : "Name"}
+            {entityType === "parcel"
+              ? "Parcel number"
+              : entityType === "timber_stand"
+                ? "Stand name or number"
+                : "Name"}
           </label>
           <input
             name="name"
@@ -93,7 +106,7 @@ export default function NewBoundaryDialog({
             <label className="mb-1 block text-sm font-medium text-gray-700">Property</label>
             {properties.length === 0 ? (
               <p className="text-sm text-red-600">
-                Create a property first; parcels and fields must belong to one.
+                Create a property first; this must belong to one.
               </p>
             ) : (
               <select

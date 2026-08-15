@@ -1,6 +1,6 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-15 (end of Phase 1)
+Last updated: 2026-08-15 (end of Phase 2)
 
 ## What this product is
 
@@ -29,7 +29,7 @@ and Postgres row level security guarantees each org sees only its own data.
 - NEXT_PUBLIC_SUPABASE_ANON_KEY
 - NEXT_PUBLIC_MAPBOX_TOKEN
 
-## Database schema (migration supabase/migrations/0001_phase1_schema.sql)
+## Database schema (migrations 0001_phase1_schema.sql, 0002_phase2_timber_roads_assets.sql)
 
 All geometry columns are geometry(MultiPolygon, 4326). Acres are computed by
 Postgres in a stored generated column: st_area(boundary::geography) /
@@ -52,11 +52,36 @@ Tables:
   organization_id) makes cross-tenant references impossible.
 - fields: property_id, name, notes, boundary, acres. Same composite FK.
 - documents: generic attachments via entity_type + entity_id
-  (entity_type check constraint currently 'property' | 'parcel' | 'field';
-  later phases extend it with asset, lease, timber_sale, tax_statement).
-  Files live in the private "documents" storage bucket under
+  (entity_type check now covers property, parcel, field, timber_stand,
+  road, asset; Phase 3+ adds lease, timber_sale, tax_statement). Files live
+  in the private "documents" storage bucket under
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
-  path segment.
+  path segment. Asset PHOTOS are simply documents with image content
+  types; the UI shows images as a gallery and other files as a list.
+
+Phase 2 tables (all with the same org RLS + composite property FK):
+
+- timber_stands: property_id (required), name, stand_type (planted_pine |
+  natural_pine | hardwood | mixed | other), species, year_established,
+  site_index, last_thinning_year, last_burn_year, notes, MultiPolygon
+  boundary, generated acres.
+- roads: property_id (required), name, road_type (gravel | dirt | paved |
+  field_road | other), notes, MultiLineString geom, generated length_feet
+  and miles.
+- assets: ONE table with a type system. property_id (nullable),
+  asset_type (well, irrigation_pivot, underground_pipe, riser, shop, shed,
+  barn, grain_bin, house, fence, pond_dam, other), name (only required
+  field), geometry accepting Point/Line/Polygon, year_installed, condition
+  (excellent/good/fair/poor), estimated_value, notes, details jsonb
+  (type-specific fields validated in the app against lib/assetTypes.ts,
+  which drives the dynamic forms and panels), parent_asset_id
+  (self-reference: pivot/riser/pipe links to its supply well; composite FK
+  keeps it in-tenant), is_active (deactivate instead of delete to keep
+  history).
+- Views timber_stands_geo / roads_geo / assets_geo mirror the Phase 1 *_geo
+  pattern. public.set_geometry(entity_type, id, geojson) generalizes
+  set_boundary to all six entity types (polygon/line/any validation per
+  type); the app writes all geometry through it.
 
 Functions and views:
 
@@ -94,26 +119,40 @@ Functions and views:
 - app/(app)/: authenticated shell. Header: white bg, horizontal green logo
   on desktop, T mark on mobile; bottom tab bar on mobile (Home, Map,
   Properties, Import).
-  - /dashboard: stat tiles (total acres, properties, fields, field acres),
-    static satellite thumbnail (Mapbox Static Images API) linking to the
-    map, quick links.
-  - /map: full-screen Mapbox satellite map. Layers: properties (white
-    outline), parcels (dashed light line, gold in import preview), fields
-    (kelly green fill/line), labels from computed label points. Layer
-    toggles, click-to-select with detail panel (right card on desktop,
-    bottom sheet on mobile), edit details inline, draw new boundaries
-    (mapbox-gl-draw), edit existing vertices, delete. CSS-based fullscreen
-    toggle (not the native Fullscreen API, so iOS modals stay visible).
-    Acres recompute server-side on every boundary save.
-  - /import: upload GeoJSON/JSON, KML, KMZ, zipped shapefiles. Parsed
-    client-side; preview map; per-feature review (include, type, name
-    prefilled from attributes, property assignment, approximate acres)
-    before anything is saved. Features that fail to parse are skipped and
-    reported. Properties in a batch are saved first so parcels/fields in the
-    same batch can reference them.
+  - /dashboard: stat tiles (total acres, properties, field acres, timber
+    acres, wells, pivots, grain bins, buildings), static satellite
+    thumbnail (Mapbox Static Images API) linking to the map, quick links.
+  - /map: full-screen Mapbox satellite map. Six toggleable layers:
+    properties (white outline), parcels (dashed light line), fields (kelly
+    green), timber stands (dark green fill, light mint dashed outline),
+    roads (white line over dark green casing, labels along the line), and
+    assets (dark green circle markers with a per-type letter, dashed light
+    blue lines for pipe/fence, faint outline for footprints). Click
+    priority assets > roads > fields > timber > parcels > properties, with
+    the same detail panel pattern (right card desktop, bottom sheet
+    mobile). The Add menu offers: Boundary (polygon draw; save as field,
+    parcel, property, or timber stand), Road/pipe/fence (line draw), and
+    Asset pin (crosshair placement mode: pan to line up, Place here, or My
+    location via GPS; moving a pin reuses the same mode). Geometry edits
+    use mapbox-gl-draw vertex editing; acres/miles recompute server-side
+    on every save. CSS-based fullscreen toggle (not the native Fullscreen
+    API, so iOS modals stay visible). /map?focus=asset:<id> zooms to and
+    selects an entity (used by list pages).
+  - /import: upload GeoJSON/JSON, KML, KMZ, zipped shapefiles. Polygons
+    can be assigned as property/parcel/field/timber stand, lines as
+    road/pipe/fence, points as assets (with type). Preview map, per-feature
+    review before saving, failures skipped and reported. Properties in a
+    batch save first so other rows can reference them.
   - /properties, /properties/[id], /parcels, /fields: non-map browsing with
-    acres totals and inline editing of names/county/notes. Property detail
-    lists its parcels and fields; delete property cascades.
+    acres totals and inline editing. Property detail lists its parcels,
+    fields, timber stands, roads, and assets; delete property cascades.
+  - /timber: stands grouped by property with total timber acres and inline
+    editing of stand info.
+  - /assets: filterable list (property, type, show-inactive) with counts
+    and total estimated value; rows link to /assets/[id] and zoom the map.
+  - /assets/[id]: full editor: shared fields, dynamic type-specific form
+    from lib/assetTypes.ts, supply well link, photo gallery
+    (camera-friendly upload), documents, deactivate/reactivate/delete.
   - /settings/members: member list, invite by email (owners only), revoke
     pending invites.
 
@@ -132,8 +171,8 @@ Functions and views:
 ## Build phases
 
 - Phase 1 (DONE): foundation + GIS core, described above.
-- Phase 2: timber stands and roads layers; fixed asset layer with detail
-  pages and document attachments (documents table + bucket already exist).
+- Phase 2 (DONE): timber stands, roads, and fixed assets with detail
+  pages, photos, and document attachments, described above.
 - Phase 3: ag and hunting leases with AI term extraction and income
   projection; timber sale contracts.
 - Phase 4: property taxes module (statement uploads, all-parcels

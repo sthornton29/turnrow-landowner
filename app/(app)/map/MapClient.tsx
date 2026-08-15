@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { SelectedFeature } from "@/components/map/types";
 
 // Mapbox GL touches browser-only APIs, so the map loads client-side only.
 const MapView = dynamic(() => import("@/components/map/MapView"), {
@@ -12,7 +13,13 @@ const MapView = dynamic(() => import("@/components/map/MapView"), {
   ),
 });
 
-export default function MapClient({ orgId }: { orgId: string }) {
+export default function MapClient({
+  orgId,
+  focus,
+}: {
+  orgId: string;
+  focus: SelectedFeature | null;
+}) {
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
     return (
       <div className="p-8 text-sm text-red-600">
@@ -20,5 +27,5 @@ export default function MapClient({ orgId }: { orgId: string }) {
       </div>
     );
   }
-  return <MapView orgId={orgId} />;
+  return <MapView orgId={orgId} focus={focus} />;
 }

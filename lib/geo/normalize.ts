@@ -2,6 +2,7 @@ import type {
   Feature,
   FeatureCollection,
   Geometry,
+  MultiLineString,
   MultiPolygon,
   Polygon,
   Position,
@@ -30,9 +31,34 @@ export function toMultiPolygon(geometry: Geometry | null | undefined): MultiPoly
   }
 }
 
+// Same normalization for linear geometry (roads, underground pipe).
+export function toMultiLineString(
+  geometry: Geometry | null | undefined
+): MultiLineString | null {
+  if (!geometry) return null;
+  switch (geometry.type) {
+    case "LineString":
+      return { type: "MultiLineString", coordinates: [geometry.coordinates] };
+    case "MultiLineString":
+      return geometry.coordinates.length > 0 ? geometry : null;
+    case "GeometryCollection": {
+      const lines: Position[][] = [];
+      for (const g of geometry.geometries) {
+        const ml = toMultiLineString(g);
+        if (ml) lines.push(...ml.coordinates);
+      }
+      return lines.length > 0
+        ? { type: "MultiLineString", coordinates: lines }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
 // Bounding box [west, south, east, north] across a set of geometries.
 export function bboxOf(
-  geometries: Array<MultiPolygon | Polygon | null | undefined>
+  geometries: Array<Geometry | MultiPolygon | Polygon | null | undefined>
 ): [number, number, number, number] | null {
   let west = Infinity,
     south = Infinity,
@@ -56,7 +82,7 @@ export function bboxOf(
   };
 
   for (const g of geometries) {
-    if (g) visit(g.coordinates);
+    if (g && "coordinates" in g) visit(g.coordinates);
   }
   return found ? [west, south, east, north] : null;
 }

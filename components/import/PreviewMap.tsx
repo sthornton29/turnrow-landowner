@@ -2,14 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import mapboxgl, { GeoJSONSource } from "mapbox-gl";
-import type { Feature, FeatureCollection, MultiPolygon } from "geojson";
+import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { bboxOf } from "@/lib/geo/normalize";
 import type { EntityType } from "@/types/db";
 
 export interface PreviewFeature {
   localId: string;
-  geometry: MultiPolygon;
+  geometry: Geometry;
   entityType: EntityType;
   included: boolean;
 }
@@ -18,6 +18,9 @@ const COLOR: Record<EntityType, string> = {
   property: "#ffffff",
   parcel: "#fbd38d",
   field: "#39b54a",
+  timber_stand: "#a7f3d0",
+  road: "#e5e7eb",
+  asset: "#bae6fd",
 };
 
 // Read-only satellite map showing parsed features colored by assigned type.
@@ -45,6 +48,7 @@ export default function PreviewMap({ features }: { features: PreviewFeature[] })
         id: "preview-fill",
         type: "fill",
         source: "preview",
+        filter: ["==", ["geometry-type"], "Polygon"],
         paint: {
           "fill-color": ["get", "color"],
           "fill-opacity": ["case", ["get", "included"], 0.2, 0.05],
@@ -54,10 +58,24 @@ export default function PreviewMap({ features }: { features: PreviewFeature[] })
         id: "preview-line",
         type: "line",
         source: "preview",
+        filter: ["!=", ["geometry-type"], "Point"],
         paint: {
           "line-color": ["get", "color"],
           "line-width": 2,
           "line-opacity": ["case", ["get", "included"], 1, 0.3],
+        },
+      });
+      map.addLayer({
+        id: "preview-point",
+        type: "circle",
+        source: "preview",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": 6,
+          "circle-color": ["get", "color"],
+          "circle-stroke-color": "#14532d",
+          "circle-stroke-width": 1.5,
+          "circle-opacity": ["case", ["get", "included"], 1, 0.3],
         },
       });
       loadedRef.current = true;

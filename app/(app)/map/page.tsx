@@ -1,9 +1,35 @@
 import { requireOrg } from "@/lib/auth";
+import type { EntityType } from "@/types/db";
+import type { SelectedFeature } from "@/components/map/types";
 import MapClient from "./MapClient";
 
 export const metadata = { title: "Map" };
 
-export default async function MapPage() {
+const ENTITY_TYPES: EntityType[] = [
+  "property",
+  "parcel",
+  "field",
+  "timber_stand",
+  "road",
+  "asset",
+];
+
+// /map?focus=asset:<id> selects and zooms to that entity after load.
+export default async function MapPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string }>;
+}) {
   const { profile } = await requireOrg();
-  return <MapClient orgId={profile.organization_id!} />;
+  const { focus: focusParam } = await searchParams;
+
+  let focus: SelectedFeature | null = null;
+  if (focusParam) {
+    const [entityType, id] = focusParam.split(":");
+    if (ENTITY_TYPES.includes(entityType as EntityType) && id) {
+      focus = { entityType: entityType as EntityType, id };
+    }
+  }
+
+  return <MapClient orgId={profile.organization_id!} focus={focus} />;
 }

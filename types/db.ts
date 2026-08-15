@@ -1,4 +1,4 @@
-import type { MultiPolygon } from "geojson";
+import type { Geometry, MultiLineString, MultiPolygon } from "geojson";
 
 // Row shapes as the app reads them (geometry comes from the *_geo views
 // as parsed GeoJSON).
@@ -70,10 +70,85 @@ export interface FieldGeo {
   updated_at: string;
 }
 
+export type AssetType =
+  | "well"
+  | "irrigation_pivot"
+  | "underground_pipe"
+  | "riser"
+  | "shop"
+  | "shed"
+  | "barn"
+  | "grain_bin"
+  | "house"
+  | "fence"
+  | "pond_dam"
+  | "other";
+
+export type StandType =
+  | "planted_pine"
+  | "natural_pine"
+  | "hardwood"
+  | "mixed"
+  | "other";
+
+export type RoadType = "gravel" | "dirt" | "paved" | "field_road" | "other";
+
+export type Condition = "excellent" | "good" | "fair" | "poor";
+
+export interface TimberStandGeo {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  name: string;
+  stand_type: StandType | null;
+  species: string | null;
+  year_established: number | null;
+  site_index: number | null;
+  last_thinning_year: number | null;
+  last_burn_year: number | null;
+  notes: string | null;
+  acres: number | null;
+  boundary_geojson: MultiPolygon | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoadGeo {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  name: string;
+  road_type: RoadType | null;
+  notes: string | null;
+  length_feet: number | null;
+  miles: number | null;
+  geom_geojson: MultiLineString | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetGeo {
+  id: string;
+  organization_id: string;
+  property_id: string | null;
+  asset_type: AssetType;
+  name: string;
+  year_installed: number | null;
+  condition: Condition | null;
+  estimated_value: number | null;
+  notes: string | null;
+  details: Record<string, string | number | boolean | null>;
+  parent_asset_id: string | null;
+  is_active: boolean;
+  geom_geojson: Geometry | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DocumentRow {
   id: string;
   organization_id: string;
-  entity_type: "property" | "parcel" | "field";
+  entity_type: EntityType;
   entity_id: string;
   file_name: string;
   storage_path: string;
@@ -83,5 +158,11 @@ export interface DocumentRow {
   created_at: string;
 }
 
-// The three boundary-bearing entity types, used by the map and import pages.
-export type EntityType = "property" | "parcel" | "field";
+// Every entity that can appear on the map or carry documents.
+export type EntityType =
+  | "property"
+  | "parcel"
+  | "field"
+  | "timber_stand"
+  | "road"
+  | "asset";
