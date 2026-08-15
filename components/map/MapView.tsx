@@ -567,7 +567,9 @@ export default function MapView({ orgId }: { orgId: string }) {
           : "relative h-[calc(100dvh-3.5rem-4rem)] md:h-[calc(100dvh-3.5rem)]"
       }
     >
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Explicit h-full rather than absolute inset-0: mapbox-gl.css forces
+          position:relative on this element, which would collapse it to 0 height */}
+      <div ref={containerRef} className="h-full w-full" />
 
       {/* Left control column */}
       <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
