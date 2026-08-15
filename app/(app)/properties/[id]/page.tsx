@@ -73,9 +73,17 @@ export default async function PropertyDetailPage({
       totals: allocateToProperties(incomeInputs, year).get(id) ?? {
         expected: 0,
         received: 0,
+        taxesDue: 0,
+        taxesPaid: 0,
       },
     }))
-    .filter((r) => r.totals.expected > 0 || r.totals.received > 0);
+    .filter(
+      (r) =>
+        r.totals.expected > 0 ||
+        r.totals.received > 0 ||
+        r.totals.taxesDue > 0 ||
+        r.totals.taxesPaid > 0
+    );
 
   const parcelAcres = (parcels ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
@@ -297,6 +305,8 @@ export default async function PropertyDetailPage({
                   <th className="px-4 py-2">Year</th>
                   <th className="px-4 py-2 text-right">Expected</th>
                   <th className="px-4 py-2 text-right">Received</th>
+                  <th className="px-4 py-2 text-right">Taxes paid</th>
+                  <th className="px-4 py-2 text-right">Net received</th>
                 </tr>
               </thead>
               <tbody>
@@ -315,6 +325,12 @@ export default async function PropertyDetailPage({
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">
                       {formatDollars(r.totals.received)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {r.totals.taxesPaid ? `(${formatDollars(r.totals.taxesPaid)})` : ""}
+                    </td>
+                    <td className="px-4 py-2 text-right font-medium tabular-nums text-pine-900">
+                      {formatDollars(r.totals.received - r.totals.taxesPaid)}
                     </td>
                   </tr>
                 ))}

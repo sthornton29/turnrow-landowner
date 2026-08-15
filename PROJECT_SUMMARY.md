@@ -1,6 +1,6 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-15 (end of Phase 3)
+Last updated: 2026-08-15 (end of Phase 4)
 
 ## What this product is
 
@@ -122,6 +122,25 @@ Phase 3 tables (migration 0003; all with org RLS + composite FKs):
   linked to an expected_payment, or unscheduled against the lease/sale.
 - documents entity_type check extended with tenant, lease, timber_sale.
 
+Phase 4 tables (migration 0004; org RLS + composite FKs; also adds the
+missing unique (id, organization_id) on parcels):
+
+- county_tax_defaults: per-county editable due/delinquent month+day.
+  App fallback is the Alabama calendar (due Oct 1 of the tax year,
+  delinquent Jan 1 following; a delinquent month at or before the due
+  month means next calendar year). lib/tax.ts applies these.
+- tax_statements: parcel_id nullable until matched (unmatched statements
+  await resolution), tax_year, county/state/authority, parcel number and
+  owner name kept verbatim as printed, assessed_value, amount_due,
+  due_date, delinquent_date, notes. unique (parcel_id, tax_year) with a
+  friendly duplicate error in the UI; status (unpaid / partially paid /
+  paid / delinquent) is COMPUTED from tax_payments vs amount_due, never
+  stored. Statement PDFs/photos attach via documents (entity_type
+  tax_statement).
+- tax_payments: paid_date, amount (partials supported), method/check,
+  memo. Batch payment from the completeness view writes one row per
+  selected statement sharing date and check number.
+
 Functions and views:
 
 - private.user_org_id(), private.user_role(): SECURITY DEFINER lookups used
@@ -214,12 +233,33 @@ Functions and views:
     payments engine, or pay-as-cut settlements entry (tons by product at
     contract rates, computed amounts, running totals by product),
     documents.
-  - /income: year selector, expected-vs-received bar chart by year, tables
-    by income type (agricultural/hunting/timber) and by property (lump
-    sums allocated across linked properties by leased acres; timber by
-    linked stand acres; unallocable income shown as Unassigned). Property
-    detail pages show their allocated income; the dashboard shows a
-    "Payments needing attention" card (past due + due within 60 days).
+  - /income: year selector, bar chart by year (expected gray, received
+    kelly, taxes paid dark pine), by-type table with Gross income /
+    Property taxes / Net rows, by-property table with taxes and net
+    received columns (taxes route statement -> parcel -> property;
+    unmatched to Unassigned; expense basis: taxes due = expected expense,
+    tax payments = actual). Property detail pages show allocated income
+    with taxes paid and net; the dashboard shows a "Payments needing
+    attention" card (past due + due within 60 days).
+  - /taxes (Tax Statement Status): year selector; summary tiles (parcels,
+    statements on file X of Y, total due/paid/outstanding); parcels with
+    NO statement on file surfaced at the top; unmatched statements with a
+    resolve control; statement cards with computed status chips, inline
+    payment recording, expandable details (payments, attached document,
+    edit/delete); batch payment (select unpaid statements, one date and
+    check number, individual tax_payments rows).
+  - /taxes/upload: PDFs and phone photos (JPEG/PNG/WebP), multiple per
+    session, each extracted via /api/extract kind=tax. Parcel numbers are
+    normalized (case, punctuation, leading zeros) and matched against
+    parcels; the review card preselects the match or offers exactly two
+    no-match options: create the missing parcel (number, county, property;
+    boundary later) or save as unmatched. Due/delinquent dates prefill
+    from county defaults with a "remember for this county" checkbox.
+    Nothing saves without review; the source file attaches to the
+    statement.
+  - Dashboard property-tax card once any current-year statement exists:
+    X of Y parcels covered and total unpaid, amber within 60 days of the
+    nearest delinquent date, red once past it.
 
 ## Conventions
 
@@ -241,8 +281,9 @@ Functions and views:
 - Phase 3 (DONE): tenants, agricultural and hunting leases with AI term
   extraction, expected/actual payment tracking, timber sale contracts
   with settlements, and income views, described above.
-- Phase 4: property taxes module (statement uploads, all-parcels
-  completeness check, payment tracking).
+- Phase 4 (DONE): property taxes (statement uploads with AI extraction
+  and parcel matching, all-parcels completeness check, payments including
+  batch, expense rollups into net income views), described above.
 - Phase 5: county GIS parcel import from ArcGIS REST services.
 - Phase 6: read-only partner API integration with Turnrow farm software
   (plantings, yields, harvest status on landowner fields).

@@ -141,6 +141,35 @@ const TIMBER_TOOL: Anthropic.Tool = {
   },
 };
 
+const TAX_TOOL: Anthropic.Tool = {
+  name: "record_tax_extraction",
+  description:
+    "Record the details extracted from a property tax statement (PDF or photo). Use null for anything not shown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      county: { type: ["string", "null"], description: "County name (without the word 'County')" },
+      state: { type: ["string", "null"], description: "Two-letter state, e.g. AL" },
+      authority_name: { type: ["string", "null"], description: "Taxing authority exactly as printed, e.g. 'Sumter County Revenue Commissioner'" },
+      parcel_number: { type: ["string", "null"], description: "Parcel/PPIN number exactly as printed, keeping its punctuation" },
+      tax_year: { type: ["integer", "null"], description: "Tax year the statement covers" },
+      assessed_value: { type: ["number", "null"], description: "Assessed value in dollars" },
+      amount_due: { type: ["number", "null"], description: "Total amount due in dollars" },
+      due_date: { type: ["string", "null"], description: "Due date if printed, YYYY-MM-DD" },
+      owner_name: { type: ["string", "null"], description: "Owner name exactly as printed" },
+      unsure_fields: {
+        type: "array",
+        items: { type: "string" },
+        description: "Field names you are not confident about (blurry, ambiguous, or partially visible)",
+      },
+    },
+    required: ["unsure_fields"],
+    additionalProperties: false,
+  },
+};
+
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+
 export async function POST(request: Request) {
   // Only signed-in users may hit this (it spends API credits).
   const supabase = await createClient();
@@ -164,19 +193,42 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
   }
-  if (file.type !== "application/pdf") {
+  const isPdf = file.type === "application/pdf";
+  const isImage = (IMAGE_TYPES as readonly string[]).includes(file.type);
+  // Tax statements are often phone photos; leases and timber contracts are PDFs.
+  if (kind === "tax" ? !isPdf && !isImage : !isPdf) {
     return NextResponse.json(
-      { error: "Only PDF documents can be extracted. Use manual entry for other formats." },
+      {
+        error:
+          kind === "tax"
+            ? "Upload a PDF or a photo (JPEG, PNG, or WebP). iPhone HEIC photos need to be shared as JPEG."
+            : "Only PDF documents can be extracted. Use manual entry for other formats.",
+      },
       { status: 400 }
     );
   }
   if (file.size > 30 * 1024 * 1024) {
-    return NextResponse.json({ error: "PDF is too large (30 MB max)." }, { status: 400 });
+    return NextResponse.json({ error: "File is too large (30 MB max)." }, { status: 400 });
   }
 
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-  const tool = kind === "timber" ? TIMBER_TOOL : LEASE_TOOL;
+  const tool =
+    kind === "timber" ? TIMBER_TOOL : kind === "tax" ? TAX_TOOL : LEASE_TOOL;
   const client = new Anthropic();
+
+  const fileBlock: Anthropic.ContentBlockParam = isPdf
+    ? {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: base64 },
+      }
+    : {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: file.type as (typeof IMAGE_TYPES)[number],
+          data: base64,
+        },
+      };
 
   try {
     const response = await client.messages.create({
@@ -188,16 +240,15 @@ export async function POST(request: Request) {
         {
           role: "user",
           content: [
-            {
-              type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: base64 },
-            },
+            fileBlock,
             {
               type: "text",
               text:
                 kind === "timber"
                   ? "Extract the terms of this timber sale contract. Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. List every field you are unsure about in unsure_fields."
-                  : "Extract the terms of this lease document (agricultural or hunting). Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. If rent is per acre, prefer the per-acre rate over a computed total. List every field you are unsure about in unsure_fields.",
+                  : kind === "tax"
+                    ? "Extract the details from this property tax statement (it may be a photo; read carefully). Only record what is actually shown; use null for anything absent. Keep the parcel number and owner name exactly as printed. Dates as YYYY-MM-DD, dollar amounts as plain numbers. List every field you are unsure about in unsure_fields."
+                    : "Extract the terms of this lease document (agricultural or hunting). Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. If rent is per acre, prefer the per-acre rate over a computed total. List every field you are unsure about in unsure_fields.",
             },
           ],
         },

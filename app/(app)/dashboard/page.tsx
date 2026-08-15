@@ -37,6 +37,8 @@ export default async function DashboardPage() {
     { data: paymentRows },
     { data: leases },
     { data: timberSales },
+    { data: taxStatements },
+    { data: taxPayments },
   ] = await Promise.all([
     supabase
       .from("organizations")
@@ -55,6 +57,11 @@ export default async function DashboardPage() {
     supabase.from("payments").select("expected_payment_id, amount"),
     supabase.from("leases").select("id, name"),
     supabase.from("timber_sales").select("id, sale_name"),
+    supabase
+      .from("tax_statements")
+      .select("id, parcel_id, tax_year, amount_due, delinquent_date")
+      .eq("tax_year", new Date().getFullYear()),
+    supabase.from("tax_payments").select("tax_statement_id, amount"),
   ]);
 
   // Payments needing attention: past due, or due within 60 days, not yet paid.
@@ -92,6 +99,49 @@ export default async function DashboardPage() {
   const box = bboxOf(
     (properties ?? []).map((p) => p.boundary_geojson as MultiPolygon | null)
   );
+
+  // Property tax card for the current year (only once statements exist).
+  const taxYear = new Date().getFullYear();
+  const taxPaidByStatement = new Map<string, number>();
+  for (const p of taxPayments ?? []) {
+    taxPaidByStatement.set(
+      p.tax_statement_id,
+      (taxPaidByStatement.get(p.tax_statement_id) ?? 0) + p.amount
+    );
+  }
+  const yearStatements = taxStatements ?? [];
+  const coveredParcels = new Set(
+    yearStatements.filter((s) => s.parcel_id).map((s) => s.parcel_id)
+  );
+  const unpaidStatements = yearStatements.filter(
+    (s) => (taxPaidByStatement.get(s.id) ?? 0) < s.amount_due - 0.005
+  );
+  const taxUnpaidTotal = unpaidStatements.reduce(
+    (sum, s) => sum + s.amount_due - (taxPaidByStatement.get(s.id) ?? 0),
+    0
+  );
+  const nearestDelinquent = unpaidStatements
+    .map((s) => s.delinquent_date)
+    .filter((d): d is string => !!d)
+    .sort()[0];
+  let taxTier: "ok" | "warn" | "danger" = "ok";
+  if (taxUnpaidTotal > 0 && nearestDelinquent) {
+    const delinquent = new Date(nearestDelinquent + "T00:00:00");
+    const daysLeft = Math.ceil((delinquent.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+    taxTier = daysLeft < 0 ? "danger" : daysLeft <= 60 ? "warn" : "ok";
+  }
+  const taxCardBorder =
+    taxTier === "danger"
+      ? "border-red-200"
+      : taxTier === "warn"
+        ? "border-amber-200"
+        : "border-gray-200";
+  const taxHeaderClasses =
+    taxTier === "danger"
+      ? "border-red-100 bg-red-50 text-red-800"
+      : taxTier === "warn"
+        ? "border-amber-100 bg-amber-50 text-amber-900"
+        : "border-gray-100 bg-white text-gray-900";
 
   const countOf = (...types: string[]) =>
     (assets ?? []).filter((a) => types.includes(a.asset_type)).length;
@@ -154,6 +204,49 @@ export default async function DashboardPage() {
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {yearStatements.length > 0 ? (
+        <Link
+          href="/taxes"
+          className={`block rounded-xl border bg-white ${taxCardBorder}`}
+        >
+          <h2
+            className={`rounded-t-xl border-b px-4 py-3 text-base font-semibold ${taxHeaderClasses}`}
+          >
+            {taxYear} property taxes
+          </h2>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-sm">
+            <span className="text-gray-700">
+              <span className="font-semibold tabular-nums text-gray-900">
+                {formatNumber(coveredParcels.size)} of {formatNumber((parcels ?? []).length)}
+              </span>{" "}
+              parcels covered
+            </span>
+            <span className="text-gray-700">
+              <span className="font-semibold tabular-nums text-gray-900">
+                {formatDollars(taxUnpaidTotal)}
+              </span>{" "}
+              unpaid
+            </span>
+            {taxUnpaidTotal > 0 && nearestDelinquent ? (
+              <span
+                className={
+                  taxTier === "danger"
+                    ? "font-medium text-red-700"
+                    : taxTier === "warn"
+                      ? "font-medium text-amber-800"
+                      : "text-gray-500"
+                }
+              >
+                {taxTier === "danger"
+                  ? `Delinquent since ${nearestDelinquent}`
+                  : `Delinquent ${nearestDelinquent}`}
+              </span>
+            ) : null}
+            <span className="ml-auto text-kelly-600">&rarr;</span>
+          </div>
+        </Link>
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

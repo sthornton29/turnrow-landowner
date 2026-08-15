@@ -27,17 +27,29 @@ export interface IncomeInputs {
   }>;
   saleStands: Array<{ timber_sale_id: string; timber_stand_id: string }>;
   stands: Array<{ id: string; property_id: string; acres: number | null }>;
+  taxStatements: Array<{
+    id: string;
+    parcel_id: string | null;
+    tax_year: number;
+    amount_due: number;
+  }>;
+  taxPayments: Array<{ tax_statement_id: string; paid_date: string; amount: number }>;
+  parcels: Array<{ id: string; property_id: string }>;
 }
 
 export interface YearTotals {
   expected: Record<IncomeType, number>;
   received: Record<IncomeType, number>;
+  taxesDue: number; // expected expense: statements for this tax year
+  taxesPaid: number; // actual expense: tax payments dated in this year
 }
 
 function emptyTotals(): YearTotals {
   return {
     expected: { agricultural: 0, hunting: 0, timber: 0 },
     received: { agricultural: 0, hunting: 0, timber: 0 },
+    taxesDue: 0,
+    taxesPaid: 0,
   };
 }
 
@@ -70,6 +82,13 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
   for (const s of inputs.settlements) {
     const year = Number(s.settlement_date.slice(0, 4));
     get(year).received.timber += s.total_amount;
+  }
+  for (const t of inputs.taxStatements) {
+    get(t.tax_year).taxesDue += t.amount_due;
+  }
+  for (const p of inputs.taxPayments) {
+    const year = Number(p.paid_date.slice(0, 4));
+    get(year).taxesPaid += p.amount;
   }
   return map;
 }
@@ -118,14 +137,25 @@ function sharesFor(
 
 export const UNASSIGNED = "__unassigned__";
 
-// Per-property expected/received for one year.
+export interface PropertyTotals {
+  expected: number;
+  received: number;
+  taxesDue: number;
+  taxesPaid: number;
+}
+
+// Per-property income and tax expense for one year. Taxes route through
+// the statement's parcel to its property; unmatched statements land in
+// Unassigned.
 export function allocateToProperties(
   inputs: IncomeInputs,
   year: number
-): Map<string, { expected: number; received: number }> {
-  const result = new Map<string, { expected: number; received: number }>();
-  const add = (propertyId: string, field: "expected" | "received", amount: number) => {
-    const cur = result.get(propertyId) ?? { expected: 0, received: 0 };
+): Map<string, PropertyTotals> {
+  const result = new Map<string, PropertyTotals>();
+  const add = (propertyId: string, field: keyof PropertyTotals, amount: number) => {
+    const cur =
+      result.get(propertyId) ??
+      { expected: 0, received: 0, taxesDue: 0, taxesPaid: 0 };
     cur[field] += amount;
     result.set(propertyId, cur);
   };
@@ -157,6 +187,21 @@ export function allocateToProperties(
     if (Number(s.settlement_date.slice(0, 4)) !== year) continue;
     spread(null, s.timber_sale_id, "received", s.total_amount);
   }
+
+  const parcelProperty = new Map(inputs.parcels.map((p) => [p.id, p.property_id]));
+  const statementById = new Map(inputs.taxStatements.map((t) => [t.id, t]));
+  const propertyOfStatement = (parcelId: string | null) =>
+    (parcelId && parcelProperty.get(parcelId)) || UNASSIGNED;
+
+  for (const t of inputs.taxStatements) {
+    if (t.tax_year !== year) continue;
+    add(propertyOfStatement(t.parcel_id), "taxesDue", t.amount_due);
+  }
+  for (const p of inputs.taxPayments) {
+    if (Number(p.paid_date.slice(0, 4)) !== year) continue;
+    const statement = statementById.get(p.tax_statement_id);
+    add(propertyOfStatement(statement?.parcel_id ?? null), "taxesPaid", p.amount);
+  }
   return result;
 }
 
@@ -164,22 +209,35 @@ export function allocateToProperties(
 // page loads the same shape.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
-  const [leases, leaseLands, expected, payments, settlements, saleStands, stands] =
-    await Promise.all([
-      supabase.from("leases").select("id, lease_type"),
-      supabase.from("lease_lands").select("lease_id, property_id, leased_acres"),
-      supabase
-        .from("expected_payments")
-        .select("id, lease_id, timber_sale_id, year, expected_amount"),
-      supabase
-        .from("payments")
-        .select("lease_id, timber_sale_id, amount, received_date"),
-      supabase
-        .from("timber_settlements")
-        .select("timber_sale_id, settlement_date, total_amount"),
-      supabase.from("timber_sale_stands").select("timber_sale_id, timber_stand_id"),
-      supabase.from("timber_stands").select("id, property_id, acres"),
-    ]);
+  const [
+    leases,
+    leaseLands,
+    expected,
+    payments,
+    settlements,
+    saleStands,
+    stands,
+    taxStatements,
+    taxPayments,
+    parcels,
+  ] = await Promise.all([
+    supabase.from("leases").select("id, lease_type"),
+    supabase.from("lease_lands").select("lease_id, property_id, leased_acres"),
+    supabase
+      .from("expected_payments")
+      .select("id, lease_id, timber_sale_id, year, expected_amount"),
+    supabase
+      .from("payments")
+      .select("lease_id, timber_sale_id, amount, received_date"),
+    supabase
+      .from("timber_settlements")
+      .select("timber_sale_id, settlement_date, total_amount"),
+    supabase.from("timber_sale_stands").select("timber_sale_id, timber_stand_id"),
+    supabase.from("timber_stands").select("id, property_id, acres"),
+    supabase.from("tax_statements").select("id, parcel_id, tax_year, amount_due"),
+    supabase.from("tax_payments").select("tax_statement_id, paid_date, amount"),
+    supabase.from("parcels").select("id, property_id"),
+  ]);
   return {
     leases: leases.data ?? [],
     leaseLands: leaseLands.data ?? [],
@@ -188,5 +246,8 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     settlements: settlements.data ?? [],
     saleStands: saleStands.data ?? [],
     stands: stands.data ?? [],
+    taxStatements: taxStatements.data ?? [],
+    taxPayments: taxPayments.data ?? [],
+    parcels: parcels.data ?? [],
   };
 }

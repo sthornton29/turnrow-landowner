@@ -150,7 +150,8 @@ export type DocumentEntityType =
   | EntityType
   | "tenant"
   | "lease"
-  | "timber_sale";
+  | "timber_sale"
+  | "tax_statement";
 
 export interface DocumentRow {
   id: string;
