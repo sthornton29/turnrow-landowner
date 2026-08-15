@@ -5,6 +5,11 @@
 -- "extensions" schema; the SQL editor's search_path already includes it).
 -- ============================================================================
 
+-- Supabase installs PostGIS in the "extensions" schema. Make its types
+-- (geometry, geography) and functions (st_area, st_asgeojson, ...) visible
+-- to this script; without this the SQL editor cannot find them.
+set search_path = public, extensions;
+
 -- Helper functions live in a "private" schema so they are not exposed
 -- through Supabase's auto-generated REST API.
 create schema if not exists private;
