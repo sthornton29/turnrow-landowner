@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { DocumentRow, EntityType } from "@/types/db";
+import type { DocumentEntityType, DocumentRow } from "@/types/db";
 
 function isImage(doc: DocumentRow): boolean {
   return (doc.content_type ?? "").startsWith("image/");
@@ -17,7 +17,7 @@ export default function EntityDocuments({
   entityId,
 }: {
   orgId: string;
-  entityType: EntityType;
+  entityType: DocumentEntityType;
   entityId: string;
 }) {
   const supabase = createClient();

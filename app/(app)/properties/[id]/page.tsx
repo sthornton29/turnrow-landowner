@@ -7,6 +7,8 @@ import {
   ROAD_TYPE_LABELS,
   STAND_TYPE_LABELS,
 } from "@/lib/assetTypes";
+import { formatDollars } from "@/lib/format";
+import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import type { AssetType } from "@/types/db";
 import RowEditor from "@/components/lists/RowEditor";
 import { deleteProperty } from "../actions";
@@ -61,6 +63,19 @@ export default async function PropertyDetailPage({
       .eq("property_id", id)
       .order("name"),
   ]);
+
+  // Annual income allocated to this property from all leases and timber sales
+  const incomeInputs = await loadIncomeInputs(supabase);
+  const currentYear = new Date().getFullYear();
+  const incomeYears = [currentYear - 1, currentYear, currentYear + 1]
+    .map((year) => ({
+      year,
+      totals: allocateToProperties(incomeInputs, year).get(id) ?? {
+        expected: 0,
+        received: 0,
+      },
+    }))
+    .filter((r) => r.totals.expected > 0 || r.totals.received > 0);
 
   const parcelAcres = (parcels ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
@@ -269,6 +284,45 @@ export default async function PropertyDetailPage({
           </ul>
         )}
       </section>
+
+      {incomeYears.length > 0 ? (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-gray-900">
+            Income allocated to this property
+          </h2>
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-2">Year</th>
+                  <th className="px-4 py-2 text-right">Expected</th>
+                  <th className="px-4 py-2 text-right">Received</th>
+                </tr>
+              </thead>
+              <tbody>
+                {incomeYears.map((r) => (
+                  <tr key={r.year} className="border-b border-gray-100 last:border-0">
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/income?year=${r.year}`}
+                        className="font-medium text-kelly-700 hover:underline"
+                      >
+                        {r.year}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {formatDollars(r.totals.expected)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {formatDollars(r.totals.received)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="border-t border-gray-200 pt-4">
         <form action={deleteProperty}>

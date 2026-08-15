@@ -145,10 +145,17 @@ export interface AssetGeo {
   updated_at: string;
 }
 
+// Everything documents can attach to (map entities plus Phase 3 records).
+export type DocumentEntityType =
+  | EntityType
+  | "tenant"
+  | "lease"
+  | "timber_sale";
+
 export interface DocumentRow {
   id: string;
   organization_id: string;
-  entity_type: EntityType;
+  entity_type: DocumentEntityType;
   entity_id: string;
   file_name: string;
   storage_path: string;

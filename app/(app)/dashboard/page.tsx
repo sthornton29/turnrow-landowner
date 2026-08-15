@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatNumber } from "@/lib/format";
+import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import { bboxOf } from "@/lib/geo/normalize";
+import {
+  PAYMENT_STATUS_LABELS,
+  STATUS_BADGE_CLASSES,
+  paymentStatus,
+} from "@/lib/leaseLogic";
 import type { MultiPolygon } from "geojson";
 
 export const metadata = { title: "Dashboard" };
@@ -28,6 +33,10 @@ export default async function DashboardPage() {
     { data: fields },
     { data: timber },
     { data: assets },
+    { data: expectedPayments },
+    { data: paymentRows },
+    { data: leases },
+    { data: timberSales },
   ] = await Promise.all([
     supabase
       .from("organizations")
@@ -39,7 +48,43 @@ export default async function DashboardPage() {
     supabase.from("fields").select("id, acres"),
     supabase.from("timber_stands").select("id, acres"),
     supabase.from("assets").select("id, asset_type").eq("is_active", true),
+    supabase
+      .from("expected_payments")
+      .select("id, lease_id, timber_sale_id, label, due_date, expected_amount")
+      .order("due_date"),
+    supabase.from("payments").select("expected_payment_id, amount"),
+    supabase.from("leases").select("id, name"),
+    supabase.from("timber_sales").select("id, sale_name"),
   ]);
+
+  // Payments needing attention: past due, or due within 60 days, not yet paid.
+  const receivedByExpected = new Map<string, number>();
+  for (const p of paymentRows ?? []) {
+    if (p.expected_payment_id) {
+      receivedByExpected.set(
+        p.expected_payment_id,
+        (receivedByExpected.get(p.expected_payment_id) ?? 0) + p.amount
+      );
+    }
+  }
+  const leaseName = new Map((leases ?? []).map((l) => [l.id, l.name]));
+  const saleName = new Map((timberSales ?? []).map((s) => [s.id, s.sale_name]));
+  const now = new Date();
+  const horizon = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
+  const attention = (expectedPayments ?? [])
+    .map((e) => {
+      const received = receivedByExpected.get(e.id) ?? 0;
+      const status = paymentStatus(e.expected_amount, received, e.due_date, now);
+      return { ...e, received, status };
+    })
+    .filter(
+      (e) =>
+        e.status !== "paid" &&
+        (e.status === "past_due" ||
+          e.status === "partial" ||
+          new Date(e.due_date + "T00:00:00") <= horizon)
+    )
+    .slice(0, 8);
 
   const propertyAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
@@ -75,6 +120,41 @@ export default async function DashboardPage() {
           Welcome back{profile.full_name ? `, ${profile.full_name}` : ""}.
         </p>
       </div>
+
+      {attention.length > 0 ? (
+        <section className="rounded-xl border border-amber-200 bg-white">
+          <h2 className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-base font-semibold text-amber-900">
+            Payments needing attention
+          </h2>
+          <ul className="divide-y divide-gray-100">
+            {attention.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+                <Link
+                  href={e.lease_id ? `/leases/${e.lease_id}` : `/timber-sales/${e.timber_sale_id}`}
+                  className="font-medium text-gray-900 hover:underline"
+                >
+                  {e.lease_id
+                    ? leaseName.get(e.lease_id) ?? "Lease"
+                    : saleName.get(e.timber_sale_id!) ?? "Timber sale"}
+                </Link>
+                <span className="text-gray-500">
+                  {e.label} · due {e.due_date}
+                </span>
+                <span className="ml-auto flex items-center gap-2">
+                  <span className="font-medium tabular-nums text-gray-900">
+                    {formatDollars(e.expected_amount - e.received)}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[e.status]}`}
+                  >
+                    {PAYMENT_STATUS_LABELS[e.status]}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map((s) => (
