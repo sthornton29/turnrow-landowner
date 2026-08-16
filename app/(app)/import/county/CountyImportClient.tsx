@@ -8,7 +8,9 @@ import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatNumber } from "@/lib/format";
 import { approxAcres, toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
-import type { CountyGisService, CountyParcelFeature } from "@/lib/gis";
+import { clusterOwners, pickDisplayName } from "@/lib/ownerNames";
+import MiniParcelSketch from "@/components/county/MiniParcelSketch";
+import type { CountyGisService, EntityParcelFeature } from "@/lib/gis";
 import type { MultiPolygon } from "geojson";
 
 const CountySearchMap = dynamic(
@@ -16,11 +18,30 @@ const CountySearchMap = dynamic(
   { ssr: false }
 );
 
-interface ResultRow extends CountyParcelFeature {
+interface ResultRow extends EntityParcelFeature {
   localId: string;
   multiPolygon: MultiPolygon;
   gisAcres: number;
 }
+
+interface KnownAlias {
+  normalized_alias: string;
+  owner_entity_id: string;
+  entity_name: string;
+}
+
+// A proposed entity: one owner however the county wrote the name.
+// Membership is a list of result-row ids; inclusion in the import is
+// derived from the shared `selected` set so map taps, group checkboxes,
+// and per-parcel checkboxes all stay in sync.
+interface OwnerGroup {
+  id: string;
+  displayName: string;
+  rowIds: string[];
+  knownEntity: { id: string; name: string } | null;
+}
+
+type SearchMode = "entity" | "owner" | "parcel";
 
 const inputClass = "rounded-lg border border-gray-300 px-3 py-2 text-sm";
 
@@ -29,6 +50,7 @@ export default function CountyImportClient({
   services,
   properties,
   existingParcels,
+  knownAliases,
 }: {
   orgId: string;
   services: CountyGisService[];
@@ -39,14 +61,18 @@ export default function CountyImportClient({
     county: string | null;
     property_id: string;
   }>;
+  knownAliases: KnownAlias[];
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [serviceId, setServiceId] = useState(services[0]?.id ?? "");
-  const [searchType, setSearchType] = useState<"owner" | "parcel">("owner");
+  const [searchType, setSearchType] = useState<SearchMode>("entity");
   const [text, setText] = useState("");
   const [results, setResults] = useState<ResultRow[]>([]);
+  const [groups, setGroups] = useState<OwnerGroup[]>([]);
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [mergePick, setMergePick] = useState<Set<string>>(new Set());
   const [truncated, setTruncated] = useState(false);
   const [searched, setSearched] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -65,6 +91,21 @@ export default function CountyImportClient({
   const [importing, setImporting] = useState(false);
 
   const service = services.find((s) => s.id === serviceId) ?? null;
+  const rowById = useMemo(
+    () => new Map(results.map((r) => [r.localId, r])),
+    [results]
+  );
+
+  function clearResults() {
+    setResults([]);
+    setGroups([]);
+    setExpandedGroupId(null);
+    setMergePick(new Set());
+    setSearched(false);
+    setSelected(new Set());
+    setHighlighted(null);
+    setTruncated(false);
+  }
 
   async function search() {
     if (!service) return;
@@ -72,6 +113,9 @@ export default function CountyImportClient({
     setError(null);
     setSelected(new Set());
     setHighlighted(null);
+    setExpandedGroupId(null);
+    setMergePick(new Set());
+    setGroups([]);
     try {
       const res = await fetch("/api/gis/search", {
         method: "POST",
@@ -85,11 +129,13 @@ export default function CountyImportClient({
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Search failed.");
       const rows: ResultRow[] = [];
-      for (const f of body.features as CountyParcelFeature[]) {
+      for (const f of body.features as EntityParcelFeature[]) {
         const mp = toMultiPolygon(f.geometry);
         if (!mp) continue;
         rows.push({
           ...f,
+          owner_normalized: f.owner_normalized ?? "",
+          owner_stripped: f.owner_stripped ?? [],
           localId: crypto.randomUUID(),
           multiPolygon: mp,
           gisAcres: approxAcres(mp),
@@ -98,6 +144,39 @@ export default function CountyImportClient({
       setResults(rows);
       setTruncated(Boolean(body.truncated));
       setSearched(true);
+      if (searchType === "entity") {
+        const aliasMap = new Map(
+          knownAliases.map((a) => [a.normalized_alias, a.owner_entity_id])
+        );
+        const entityNames = new Map(
+          knownAliases.map((a) => [a.owner_entity_id, a.entity_name])
+        );
+        const clusters = clusterOwners(
+          rows.map((r) => ({
+            id: r.localId,
+            ownerName: r.owner_name,
+            normalized: r.owner_normalized,
+            acres: r.deeded_acres ?? r.gisAcres,
+          })),
+          aliasMap
+        );
+        setGroups(
+          clusters.map((c) => ({
+            id: crypto.randomUUID(),
+            displayName:
+              (c.knownEntityId ? entityNames.get(c.knownEntityId) : null) ||
+              c.displayName ||
+              "Owner not recorded",
+            rowIds: c.recordIds,
+            knownEntity: c.knownEntityId
+              ? {
+                  id: c.knownEntityId,
+                  name: entityNames.get(c.knownEntityId) ?? "",
+                }
+              : null,
+          }))
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed.");
     } finally {
@@ -121,6 +200,121 @@ export default function CountyImportClient({
     0
   );
 
+  // ---------------------------------------------------------------------
+  // Owner group helpers (entity mode)
+  // ---------------------------------------------------------------------
+
+  function groupRows(group: OwnerGroup): ResultRow[] {
+    return group.rowIds
+      .map((id) => rowById.get(id))
+      .filter((r): r is ResultRow => Boolean(r));
+  }
+
+  function groupAcres(group: OwnerGroup): number {
+    return groupRows(group).reduce((sum, r) => sum + (r.deeded_acres ?? r.gisAcres), 0);
+  }
+
+  function groupSelectedCount(group: OwnerGroup): number {
+    return group.rowIds.filter((id) => selected.has(id)).length;
+  }
+
+  function groupVariants(group: OwnerGroup): Array<{ name: string; count: number }> {
+    const counts = new Map<string, number>();
+    for (const row of groupRows(group)) {
+      counts.set(row.owner_name, (counts.get(row.owner_name) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  function toggleGroup(group: OwnerGroup) {
+    const include = groupSelectedCount(group) === 0;
+    const next = new Set(selected);
+    for (const id of group.rowIds) {
+      if (include) next.add(id);
+      else next.delete(id);
+    }
+    setSelected(next);
+  }
+
+  // A variant that is not the same owner splits out into its own group.
+  function removeVariant(group: OwnerGroup, variant: string) {
+    const moving = group.rowIds.filter((id) => rowById.get(id)?.owner_name === variant);
+    if (moving.length === 0 || moving.length === group.rowIds.length) return;
+    const remaining = group.rowIds.filter((id) => !moving.includes(id));
+    const remainingVariants = Array.from(
+      new Set(remaining.map((id) => rowById.get(id)?.owner_name ?? ""))
+    );
+    const split: OwnerGroup = {
+      id: crypto.randomUUID(),
+      displayName: variant || "Owner not recorded",
+      rowIds: moving,
+      knownEntity: null,
+    };
+    setGroups((gs) =>
+      gs.flatMap((g) =>
+        g.id === group.id
+          ? [
+              {
+                ...g,
+                rowIds: remaining,
+                displayName: g.knownEntity
+                  ? g.displayName
+                  : pickDisplayName(remainingVariants) || g.displayName,
+              },
+              split,
+            ]
+          : [g]
+      )
+    );
+  }
+
+  function toggleMergePick(groupId: string) {
+    setMergePick((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  function mergeGroups() {
+    const picked = groups.filter((g) => mergePick.has(g.id));
+    if (picked.length < 2) return;
+    const rowIds = picked.flatMap((g) => g.rowIds);
+    const variants = Array.from(
+      new Set(rowIds.map((id) => rowById.get(id)?.owner_name ?? ""))
+    );
+    const known = picked.find((g) => g.knownEntity)?.knownEntity ?? null;
+    const merged: OwnerGroup = {
+      id: crypto.randomUUID(),
+      displayName: known?.name || pickDisplayName(variants) || picked[0].displayName,
+      rowIds,
+      knownEntity: known,
+    };
+    // If any merged group was included, include the whole merged owner.
+    if (picked.some((g) => groupSelectedCount(g) > 0)) {
+      const next = new Set(selected);
+      for (const id of rowIds) next.add(id);
+      setSelected(next);
+    }
+    setGroups((gs) => [merged, ...gs.filter((g) => !mergePick.has(g.id))]);
+    setMergePick(new Set());
+    setExpandedGroupId(null);
+  }
+
+  const sortedGroups = useMemo(
+    () => [...groups].sort((a, b) => groupAcres(b) - groupAcres(a)),
+    // groupAcres depends only on rowById, which derives from results.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, rowById]
+  );
+
+  // ---------------------------------------------------------------------
+  // Duplicates and import
+  // ---------------------------------------------------------------------
+
   // Duplicate detection: same normalized parcel number in the same county
   const duplicates = useMemo(() => {
     if (!service) return new Map<string, { id: string; parcel_number: string }>();
@@ -136,6 +330,60 @@ export default function CountyImportClient({
     }
     return map;
   }, [selectedRows, existingParcels, service]);
+
+  // After an entity-mode import, remember the confirmed grouping: the
+  // group becomes (or extends) an owner entity and each name variant is
+  // saved as an alias, so the next search pre-groups automatically.
+  async function saveOwnerEntities(failures: string[]) {
+    if (!service) return;
+    const importedGroups = groups.filter((g) =>
+      g.rowIds.some((id) => selected.has(id))
+    );
+    for (const group of importedGroups) {
+      const rows = groupRows(group).filter(
+        (r) => selected.has(r.localId) && r.owner_name.length > 0
+      );
+      if (rows.length === 0) continue;
+      // One alias per normalized form; keep the most complete verbatim.
+      const byNormalized = new Map<string, string>();
+      for (const row of rows) {
+        const current = byNormalized.get(row.owner_normalized);
+        if (!current || row.owner_name.length > current.length) {
+          byNormalized.set(row.owner_normalized, row.owner_name);
+        }
+      }
+      let entityId = group.knownEntity?.id ?? null;
+      if (!entityId) {
+        const { data, error: err } = await supabase
+          .from("owner_entities")
+          .insert({ organization_id: orgId, display_name: group.displayName })
+          .select("id")
+          .single();
+        if (err || !data) {
+          failures.push("Owner entity: " + (err?.message ?? "save failed"));
+          continue;
+        }
+        entityId = data.id;
+      }
+      const aliasRows = Array.from(byNormalized.entries()).map(
+        ([normalized, verbatim]) => ({
+          organization_id: orgId,
+          owner_entity_id: entityId!,
+          alias: verbatim,
+          normalized_alias: normalized,
+          source_county: service.county,
+          source_state: service.state,
+        })
+      );
+      const { error: aliasErr } = await supabase
+        .from("owner_aliases")
+        .upsert(aliasRows, {
+          onConflict: "organization_id,normalized_alias",
+          ignoreDuplicates: true,
+        });
+      if (aliasErr) failures.push("Owner aliases: " + aliasErr.message);
+    }
+  }
 
   async function runImport() {
     if (!service || selectedRows.length === 0) return;
@@ -239,6 +487,10 @@ export default function CountyImportClient({
       if (mErr) failures.push("Property outline: " + mErr.message);
     }
 
+    if (searchType === "entity" && importedCount > 0) {
+      await saveOwnerEntities(failures);
+    }
+
     setImporting(false);
     if (failures.length > 0) {
       setError(
@@ -281,6 +533,124 @@ export default function CountyImportClient({
     );
   }
 
+  // Shared assign-and-import panel (identical in both modes).
+  const assignPanel =
+    selected.size > 0 ? (
+      <div className="space-y-3 rounded-xl border border-kelly-100 bg-kelly-50 p-4">
+        <h2 className="text-base font-semibold text-pine-900">
+          Import {formatNumber(selected.size)} parcel
+          {selected.size === 1 ? "" : "s"} ({formatAcres(selectedAcres)} acres)
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
+            {properties.length > 0 ? (
+              <button
+                onClick={() => setAssignMode("existing")}
+                className={
+                  "px-3 py-2 text-sm font-medium " +
+                  (assignMode === "existing"
+                    ? "bg-kelly-500 text-white"
+                    : "text-gray-600")
+                }
+              >
+                Existing property
+              </button>
+            ) : null}
+            <button
+              onClick={() => setAssignMode("new")}
+              className={
+                "px-3 py-2 text-sm font-medium " +
+                (assignMode === "new" ? "bg-kelly-500 text-white" : "text-gray-600")
+              }
+            >
+              New property
+            </button>
+          </div>
+          {assignMode === "existing" ? (
+            <select
+              value={propertyId}
+              onChange={(e) => setPropertyId(e.target.value)}
+              className={`${inputClass} bg-white`}
+            >
+              {properties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={newPropertyName}
+              onChange={(e) => setNewPropertyName(e.target.value)}
+              placeholder={`Property name (county: ${service?.county})`}
+              className={`${inputClass} min-w-56 bg-white`}
+            />
+          )}
+          <label className="flex items-center gap-1.5 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={mergeOutline}
+              onChange={(e) => setMergeOutline(e.target.checked)}
+              className="h-4 w-4 accent-kelly-500"
+            />
+            Set property boundary to merged outline
+          </label>
+        </div>
+
+        {duplicates.size > 0 ? (
+          <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm font-medium text-amber-900">
+              {duplicates.size} selected parcel
+              {duplicates.size === 1 ? " already exists" : "s already exist"} in
+              your records:
+            </p>
+            {Array.from(duplicates.entries()).map(([localId, existing]) => {
+              const row = results.find((r) => r.localId === localId)!;
+              return (
+                <div key={localId} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-medium text-gray-900">{row.parcel_number}</span>
+                  <span className="text-gray-500">
+                    (yours: {existing.parcel_number})
+                  </span>
+                  <span className="ml-auto flex gap-1.5">
+                    {(
+                      [
+                        ["skip", "Skip"],
+                        ["update", "Update geometry"],
+                      ] as Array<["skip" | "update", string]>
+                    ).map(([choice, label]) => (
+                      <button
+                        key={choice}
+                        onClick={() =>
+                          setDupChoices((c) => ({ ...c, [localId]: choice }))
+                        }
+                        className={
+                          "rounded-lg border px-2 py-1 text-xs font-medium " +
+                          ((dupChoices[localId] ?? "skip") === choice
+                            ? "border-kelly-500 bg-white text-pine-900"
+                            : "border-gray-300 bg-white text-gray-600")
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <button
+          onClick={runImport}
+          disabled={importing}
+          className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+        >
+          {importing ? "Importing..." : "Confirm and import"}
+        </button>
+      </div>
+    ) : null;
+
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <div>
@@ -297,64 +667,78 @@ export default function CountyImportClient({
       </div>
 
       {/* Search bar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-3">
-        <select
-          value={serviceId}
-          onChange={(e) => {
-            setServiceId(e.target.value);
-            setResults([]);
-            setSearched(false);
-            setSelected(new Set());
-          }}
-          className={inputClass}
-        >
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.display_name}
-            </option>
-          ))}
-        </select>
-        <div className="flex overflow-hidden rounded-lg border border-gray-300">
-          {(
-            [
-              ["owner", "Owner name"],
-              ["parcel", "Parcel number"],
-            ] as Array<["owner" | "parcel", string]>
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              onClick={() => setSearchType(value)}
-              className={
-                "px-3 py-2 text-sm font-medium " +
-                (searchType === value
-                  ? "bg-kelly-500 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-50")
-              }
-            >
-              {label}
-            </button>
-          ))}
+      <div className="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={serviceId}
+            onChange={(e) => {
+              setServiceId(e.target.value);
+              clearResults();
+            }}
+            className={inputClass}
+          >
+            {services.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.display_name}
+              </option>
+            ))}
+          </select>
+          <div className="flex w-full overflow-hidden rounded-lg border border-gray-300 sm:w-auto">
+            {(
+              [
+                ["entity", "All parcels for an owner"],
+                ["owner", "Owner name"],
+                ["parcel", "Parcel number"],
+              ] as Array<[SearchMode, string]>
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => {
+                  setSearchType(value);
+                  clearResults();
+                }}
+                className={
+                  "flex-1 px-3 py-2 text-sm font-medium sm:flex-none " +
+                  (searchType === value
+                    ? "bg-kelly-500 text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") search();
+            }}
+            placeholder={
+              searchType === "entity"
+                ? "Owner or company name, e.g. THORNTON STUART or ALBEMARLE CORP"
+                : searchType === "owner"
+                  ? "e.g. SMITH or SMITH JOHN (county records are usually LASTNAME FIRSTNAME)"
+                  : "Parcel number or part of one"
+            }
+            className={`${inputClass} min-w-52 flex-1`}
+          />
+          <button
+            onClick={search}
+            disabled={searching || text.trim().length < 2}
+            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+          >
+            {searching ? "Searching..." : "Search"}
+          </button>
         </div>
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") search();
-          }}
-          placeholder={
-            searchType === "owner"
-              ? "e.g. SMITH or SMITH JOHN (county records are usually LASTNAME FIRSTNAME)"
-              : "Parcel number or part of one"
-          }
-          className={`${inputClass} min-w-52 flex-1`}
-        />
-        <button
-          onClick={search}
-          disabled={searching || text.trim().length < 2}
-          className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
-        >
-          {searching ? "Searching..." : "Search"}
-        </button>
+        {searchType === "entity" ? (
+          <p className="text-xs text-gray-500">
+            The best way to start: finds every way the county wrote a name
+            (THORNTON STUART, THORNTON S R ETUX, THORNTON STUART & WIFE...) and
+            groups the parcels by owner. You review the grouping before
+            importing.
+          </p>
+        ) : null}
       </div>
 
       {error ? (
@@ -369,7 +753,193 @@ export default function CountyImportClient({
         </p>
       ) : null}
 
-      {results.length > 0 ? (
+      {searchType === "entity" && results.length > 0 ? (
+        <>
+          {/* Owner group cards */}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm text-gray-600">
+              {formatNumber(sortedGroups.length)} owner
+              {sortedGroups.length === 1 ? "" : "s"} found across{" "}
+              {formatNumber(results.length)} parcel
+              {results.length === 1 ? "" : "s"}
+            </span>
+            {mergePick.size > 0 ? (
+              <span className="ml-auto flex items-center gap-2">
+                {mergePick.size >= 2 ? (
+                  <button
+                    onClick={mergeGroups}
+                    className="rounded-lg bg-pine-800 px-3 py-1.5 text-sm font-semibold text-white hover:bg-pine-900"
+                  >
+                    Merge {mergePick.size} groups
+                  </button>
+                ) : (
+                  <span className="text-sm text-gray-500">
+                    Pick another group to merge
+                  </span>
+                )}
+                <button
+                  onClick={() => setMergePick(new Set())}
+                  className="text-sm font-medium text-gray-600 hover:underline"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {sortedGroups.map((group) => {
+              const rows = groupRows(group);
+              const variants = groupVariants(group);
+              const selectedCount = groupSelectedCount(group);
+              const expanded = expandedGroupId === group.id;
+              const picked = mergePick.has(group.id);
+              return (
+                <div
+                  key={group.id}
+                  className={
+                    "space-y-2 rounded-xl border bg-white p-3 " +
+                    (picked
+                      ? "border-pine-800 ring-1 ring-pine-800"
+                      : selectedCount > 0
+                        ? "border-kelly-500 ring-1 ring-kelly-100"
+                        : "border-gray-200")
+                  }
+                >
+                  <div className="flex gap-3">
+                    <div className="w-28 shrink-0">
+                      <MiniParcelSketch shapes={rows.map((r) => r.multiPolygon)} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-gray-900">
+                          {group.displayName}
+                        </span>
+                        {group.knownEntity ? (
+                          <span className="rounded-full bg-kelly-100 px-2 py-0.5 text-xs font-medium text-kelly-700">
+                            Known entity
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        {formatNumber(rows.length)} parcel
+                        {rows.length === 1 ? "" : "s"} ·{" "}
+                        {formatAcres(groupAcres(group))} acres
+                        {selectedCount > 0 && selectedCount < rows.length
+                          ? ` · ${formatNumber(selectedCount)} of ${formatNumber(rows.length)} included`
+                          : ""}
+                      </p>
+                      <button
+                        onClick={() => setExpandedGroupId(expanded ? null : group.id)}
+                        className="mt-1 rounded-full border border-gray-300 px-2.5 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                      >
+                        {formatNumber(variants.length)} name variant
+                        {variants.length === 1 ? "" : "s"} {expanded ? "▴" : "▾"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={selectedCount > 0}
+                        onChange={() => toggleGroup(group)}
+                        className="h-4 w-4 accent-kelly-500"
+                      />
+                      Include in import
+                    </label>
+                    <button
+                      onClick={() => toggleMergePick(group.id)}
+                      className={
+                        "ml-auto rounded-lg border px-2.5 py-1 text-xs font-medium " +
+                        (picked
+                          ? "border-pine-800 bg-pine-800 text-white"
+                          : "border-gray-300 text-gray-600 hover:bg-gray-50")
+                      }
+                    >
+                      {picked ? "Picked to merge" : "Merge"}
+                    </button>
+                  </div>
+
+                  {expanded ? (
+                    <div className="space-y-2 border-t border-gray-100 pt-2">
+                      <ul className="space-y-1">
+                        {variants.map((variant) => (
+                          <li
+                            key={variant.name || "(blank)"}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-gray-800">
+                              {variant.name || "(no owner recorded)"}
+                            </span>
+                            <span className="text-gray-500">
+                              {formatNumber(variant.count)} parcel
+                              {variant.count === 1 ? "" : "s"}
+                            </span>
+                            {variants.length > 1 ? (
+                              <button
+                                onClick={() => removeVariant(group, variant.name)}
+                                className="rounded-lg border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                              >
+                                Not this owner
+                              </button>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                      <ul className="max-h-48 space-y-1 overflow-y-auto">
+                        {rows.map((r) => (
+                          <li
+                            key={r.localId}
+                            onClick={() => setHighlighted(r.localId)}
+                            className={
+                              "flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-sm " +
+                              (highlighted === r.localId
+                                ? "border-kelly-500 ring-1 ring-kelly-100"
+                                : "border-gray-200")
+                            }
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected.has(r.localId)}
+                              onChange={() => toggle(r.localId)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="h-4 w-4 accent-kelly-500"
+                            />
+                            <span className="font-medium text-gray-900">
+                              {r.parcel_number}
+                            </span>
+                            {r.owner_stripped.length > 0 ? (
+                              <span className="text-xs text-gray-400">
+                                {r.owner_stripped.join(", ")}
+                              </span>
+                            ) : null}
+                            <span className="ml-auto text-gray-500">
+                              {formatAcres(r.deeded_acres ?? r.gisAcres)} ac
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          <CountySearchMap
+            features={mapFeatures}
+            highlightedId={highlighted}
+            onFeatureClick={toggle}
+          />
+          <p className="text-xs text-gray-500">
+            Tap a parcel on the map to include or exclude it from the import.
+          </p>
+
+          {assignPanel}
+        </>
+      ) : results.length > 0 ? (
         <>
           <CountySearchMap
             features={mapFeatures}
@@ -429,127 +999,13 @@ export default function CountyImportClient({
             ))}
           </ul>
 
-          {/* Assign + import */}
-          {selected.size > 0 ? (
-            <div className="space-y-3 rounded-xl border border-kelly-100 bg-kelly-50 p-4">
-              <h2 className="text-base font-semibold text-pine-900">
-                Import {formatNumber(selected.size)} parcel
-                {selected.size === 1 ? "" : "s"} ({formatAcres(selectedAcres)} acres)
-              </h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
-                  {properties.length > 0 ? (
-                    <button
-                      onClick={() => setAssignMode("existing")}
-                      className={
-                        "px-3 py-2 text-sm font-medium " +
-                        (assignMode === "existing"
-                          ? "bg-kelly-500 text-white"
-                          : "text-gray-600")
-                      }
-                    >
-                      Existing property
-                    </button>
-                  ) : null}
-                  <button
-                    onClick={() => setAssignMode("new")}
-                    className={
-                      "px-3 py-2 text-sm font-medium " +
-                      (assignMode === "new" ? "bg-kelly-500 text-white" : "text-gray-600")
-                    }
-                  >
-                    New property
-                  </button>
-                </div>
-                {assignMode === "existing" ? (
-                  <select
-                    value={propertyId}
-                    onChange={(e) => setPropertyId(e.target.value)}
-                    className={`${inputClass} bg-white`}
-                  >
-                    {properties.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    value={newPropertyName}
-                    onChange={(e) => setNewPropertyName(e.target.value)}
-                    placeholder={`Property name (county: ${service?.county})`}
-                    className={`${inputClass} min-w-56 bg-white`}
-                  />
-                )}
-                <label className="flex items-center gap-1.5 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={mergeOutline}
-                    onChange={(e) => setMergeOutline(e.target.checked)}
-                    className="h-4 w-4 accent-kelly-500"
-                  />
-                  Set property boundary to merged outline
-                </label>
-              </div>
-
-              {duplicates.size > 0 ? (
-                <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                  <p className="text-sm font-medium text-amber-900">
-                    {duplicates.size} selected parcel
-                    {duplicates.size === 1 ? " already exists" : "s already exist"} in
-                    your records:
-                  </p>
-                  {Array.from(duplicates.entries()).map(([localId, existing]) => {
-                    const row = results.find((r) => r.localId === localId)!;
-                    return (
-                      <div key={localId} className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-medium text-gray-900">{row.parcel_number}</span>
-                        <span className="text-gray-500">
-                          (yours: {existing.parcel_number})
-                        </span>
-                        <span className="ml-auto flex gap-1.5">
-                          {(
-                            [
-                              ["skip", "Skip"],
-                              ["update", "Update geometry"],
-                            ] as Array<["skip" | "update", string]>
-                          ).map(([choice, label]) => (
-                            <button
-                              key={choice}
-                              onClick={() =>
-                                setDupChoices((c) => ({ ...c, [localId]: choice }))
-                              }
-                              className={
-                                "rounded-lg border px-2 py-1 text-xs font-medium " +
-                                ((dupChoices[localId] ?? "skip") === choice
-                                  ? "border-kelly-500 bg-white text-pine-900"
-                                  : "border-gray-300 bg-white text-gray-600")
-                              }
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              <button
-                onClick={runImport}
-                disabled={importing}
-                className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
-              >
-                {importing ? "Importing..." : "Confirm and import"}
-              </button>
-            </div>
-          ) : null}
+          {assignPanel}
         </>
       ) : searched && !searching ? (
         <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-          No parcels matched. County records usually list owners as LASTNAME
-          FIRSTNAME in capital letters; try just the last name.
+          {searchType === "entity"
+            ? "No parcels matched that owner in this county. Check the spelling of the last name or company word, or try the plain owner name search."
+            : "No parcels matched. County records usually list owners as LASTNAME FIRSTNAME in capital letters; try just the last name."}
         </p>
       ) : null}
     </div>

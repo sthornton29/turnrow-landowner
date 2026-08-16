@@ -1,6 +1,6 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-15 (end of Phase 6)
+Last updated: 2026-08-16 (owner entity matching added to the county import)
 
 ## What this product is
 
@@ -22,6 +22,8 @@ and Postgres row level security guarantees each org sees only its own data.
 - Anthropic API (claude-sonnet-4-6) planned for AI document extraction in
   Phase 3+
 - Mobile-first responsive PWA (manifest + icons wired; no service worker yet)
+- Vitest (dev only) for unit tests: npm test runs lib/ownerNames.test.ts
+  covering owner-name normalization and clustering
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -206,6 +208,20 @@ Phase 6 server pieces:
   schedules it every 6 hours; proxy.ts exempts the path from auth
   redirects.
 
+Owner entity tables (migration 0007; org RLS, same policy pattern):
+
+- owner_entities: display_name (the most complete name variant).
+  unique (id, organization_id) as a composite-FK target.
+- owner_aliases: owner_entity_id (composite FK in-tenant), alias
+  (verbatim as the county printed it), normalized_alias (canonical form
+  from lib/ownerNames.ts), source_county, source_state. Unique
+  (organization_id, normalized_alias) makes re-imports idempotent.
+  Written when the user imports from an entity group in the county
+  import; later entity searches pre-group records whose normalized
+  owner matches a known alias and show a "Known entity" badge. The
+  table is intentionally available for later reuse by the tax statement
+  upload's owner matching, but the tax flow is unchanged.
+
 The farm side lives in the separate grain-tracker repo (the Turnrow farm
 software): migration 070_partner_shares.sql, share management UI at
 /settings/shares (farmer picks a landowner + yields on/off, gets a
@@ -333,20 +349,45 @@ Functions and views:
     nearest delinquent date, red once past it.
   - /import/county (Import from County Records; linked from the import
     page, and from map/properties empty states): pick a county from
-    active registry entries, search by owner name or parcel number,
-    results as a synced list + selectable satellite map (row click zooms
-    the polygon, polygon click toggles the row), select-all with running
-    parcel and acre totals, assign to an existing or new property
-    (merge-outline option via set_property_boundary_from_parcels, default
-    on), duplicate parcel numbers flagged with skip-or-update-geometry
-    per parcel (normalized comparison), owner-as-recorded stored in
-    parcel notes, deeded acres and source attribution stored, then lands
-    on the map zoomed to the import. All ArcGIS queries go through
-    server-side proxy routes (/api/gis/search plus admin layer-info and
-    test): CORS-free, where-clause built from registry mappings,
-    outSR=4326, resultOffset pagination, f=geojson with Esri JSON +
-    @terraformer/arcgis fallback, 200-feature cap with a narrow-your-
-    search notice, 15s timeout with a friendly error.
+    active registry entries, then search one of three ways. The
+    featured mode is "All parcels for an owner" (entity mode): county
+    records write the same person or company many different ways
+    (THORNTON STUART, THORNTON S R ETUX, THE ALBEMARLE CORPORATION...),
+    so this mode searches broad and groups locally. The server picks
+    the seed name's most distinctive token (longest surviving token
+    after normalization), queries the county for every owner containing
+    it (1,000-feature cap with pagination; on overflow it falls back to
+    narrower two-token patterns, and if still too common returns a
+    clear "add another word" error instead of truncating), and returns
+    each owner verbatim plus its normalized form. The client clusters
+    the results with token-set similarity (word order ignored,
+    single-letter tokens match initials, one-letter typos tolerated in
+    long tokens; lib/ownerNames.ts, deterministic, no AI) into owner
+    group cards: proposed entity name (most complete variant), parcel
+    and acre totals, an inline SVG mini sketch of the group's parcels,
+    and a collapsed variant list with per-variant counts and stripped
+    noise markers (ETUX, ESTATE, JR) shown as metadata. Corrections are
+    one tap each: split a variant out ("Not this owner"), merge groups,
+    or exclude individual parcels via checkboxes or map taps. Checked
+    groups flow into the same assign-and-import panel below. Importing
+    from a group saves the grouping as an owner entity + aliases
+    (migration 0007) so later searches pre-group under a "Known entity"
+    badge. The classic owner-name and parcel-number searches are
+    unchanged: results as a synced list + selectable satellite map (row
+    click zooms the polygon, polygon click toggles the row), select-all
+    with running parcel and acre totals. All modes share: assign to an
+    existing or new property (merge-outline option via
+    set_property_boundary_from_parcels, default on), duplicate parcel
+    numbers flagged with skip-or-update-geometry per parcel (normalized
+    comparison), owner-as-recorded stored in parcel notes verbatim,
+    deeded acres and source attribution stored, then lands on the map
+    zoomed to the import. All ArcGIS queries go through server-side
+    proxy routes (/api/gis/search plus admin layer-info and test):
+    CORS-free, where-clause built from registry mappings, outSR=4326,
+    resultOffset pagination, f=geojson with Esri JSON +
+    @terraformer/arcgis fallback, 200-feature cap in the classic modes
+    with a narrow-your-search notice, 15s timeout with a friendly
+    error.
   - /admin/gis (platform admins only; Admin nav item appears only for
     them): registry list with status chips and re-verify, add-service
     flow (paste layer URL, auto-read fields with guessed mappings,
@@ -412,3 +453,7 @@ Functions and views:
   mapping (no geometry crosses the API), 6-hour cron sync + manual
   refresh, Crops map layer, Farm activity page, dashboard harvest card,
   crop share yield prefill from actuals. Described above.
+- Post-Phase 6 (DONE): owner entity matching in the county import
+  (migration 0007). Entity search mode groups all of an owner's parcels
+  across name variants, user-correctable grouping, confirmed groupings
+  remembered as owner entities + aliases. Described above.

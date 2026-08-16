@@ -32,6 +32,14 @@ export interface CountyParcelFeature {
   situs: string | null;
 }
 
+// Entity-mode search results also carry the canonical owner name (from
+// lib/ownerNames.ts, computed server-side so client and server agree)
+// and the noise tokens stripped from it (ETUX, ESTATE, JR...).
+export interface EntityParcelFeature extends CountyParcelFeature {
+  owner_normalized: string;
+  owner_stripped: string[];
+}
+
 // Strip a trailing "/<layerId>" (and query/trailing slashes) off a pasted
 // ArcGIS REST URL, returning the service URL and the layer id if present.
 export function parseLayerUrl(raw: string): { serviceUrl: string; layerId: number | null } {

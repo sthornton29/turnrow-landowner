@@ -88,6 +88,28 @@ export function buildWhere(
   return `UPPER(${parcelField}) LIKE '%${cleaned}%'`;
 }
 
+// Entity mode searches broad and groups locally: one query on the most
+// distinctive token catches every way the county wrote the name. The
+// narrowed patterns are the fallback when that token alone overflows
+// the cap: distinctive-then-initial covers THORNTON STUART, THORNTON
+// STUART R, and THORNTON S R in one pattern (LIKE % is greedy), and the
+// reversed order covers counties that print FIRSTNAME LASTNAME.
+export function buildEntityWheres(
+  distinctive: string,
+  others: string[],
+  ownerField: string
+): { broad: string; narrowed: string[] } {
+  const a = escapeSqlLiteral(distinctive);
+  const broad = `UPPER(${ownerField}) LIKE '%${a}%'`;
+  const narrowed: string[] = [];
+  if (others.length > 0) {
+    const b = escapeSqlLiteral(others[0]);
+    narrowed.push(`UPPER(${ownerField}) LIKE '%${a}%${b[0]}%'`);
+    narrowed.push(`UPPER(${ownerField}) LIKE '%${b}%${a}%'`);
+  }
+  return { broad, narrowed };
+}
+
 interface QueryOptions {
   serviceUrl: string;
   layerId: number;
