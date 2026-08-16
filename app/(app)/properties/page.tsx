@@ -3,6 +3,7 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatNumber } from "@/lib/format";
 import { ENTITY_TYPE_LABELS, NO_ENTITY } from "@/lib/entities";
 import EntityPicker from "@/components/entities/EntityPicker";
+import DeletePropertyButton from "@/components/properties/DeletePropertyButton";
 import PropertySectionTabs from "@/components/entities/PropertySectionTabs";
 import type { LandEntity } from "@/types/db";
 import { createProperty } from "./actions";
@@ -17,16 +18,28 @@ export default async function PropertiesPage({
   const { supabase, profile } = await requireOrg();
   const { view } = await searchParams;
 
-  const [{ data: properties }, { data: parcels }, { data: fields }, { data: entities }] =
-    await Promise.all([
-      supabase
-        .from("properties")
-        .select("id, name, county, state, notes, acres, entity_id")
-        .order("name"),
-      supabase.from("parcels").select("id, property_id"),
-      supabase.from("fields").select("id, property_id, acres"),
-      supabase.from("entities").select("*").order("name"),
-    ]);
+  const [
+    { data: properties },
+    { data: parcels },
+    { data: fields },
+    { data: entities },
+    { data: stands },
+    { data: roads },
+    { data: assets },
+    { data: leaseLands },
+  ] = await Promise.all([
+    supabase
+      .from("properties")
+      .select("id, name, county, state, notes, acres, entity_id, fsa_numbers")
+      .order("name"),
+    supabase.from("parcels").select("id, property_id"),
+    supabase.from("fields").select("id, property_id, acres"),
+    supabase.from("entities").select("*").order("name"),
+    supabase.from("timber_stands").select("id, property_id"),
+    supabase.from("roads").select("id, property_id"),
+    supabase.from("assets").select("id, property_id"),
+    supabase.from("lease_lands").select("id, property_id"),
+  ]);
 
   const parcelCount = new Map<string, number>();
   for (const p of parcels ?? []) {
@@ -41,6 +54,33 @@ export default async function PropertiesPage({
       (fieldAcres.get(f.property_id) ?? 0) + (f.acres ?? 0)
     );
   }
+
+  // What deleting each property takes with it (for the confirmation).
+  const countBy = (rows: Array<{ property_id: string | null }> | null) => {
+    const map = new Map<string, number>();
+    for (const row of rows ?? []) {
+      if (!row.property_id) continue;
+      map.set(row.property_id, (map.get(row.property_id) ?? 0) + 1);
+    }
+    return map;
+  };
+  const standCount = countBy(stands);
+  const roadCount = countBy(roads);
+  const assetCount = countBy(assets);
+  const leaseLinkCount = countBy(leaseLands);
+  const cascadeSummaryOf = (propertyId: string) => {
+    const parts = [
+      [parcelCount.get(propertyId) ?? 0, "parcel"],
+      [fieldCount.get(propertyId) ?? 0, "field"],
+      [standCount.get(propertyId) ?? 0, "timber stand"],
+      [roadCount.get(propertyId) ?? 0, "road"],
+      [assetCount.get(propertyId) ?? 0, "asset"],
+    ] as Array<[number, string]>;
+    return parts
+      .filter(([count]) => count > 0)
+      .map(([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`)
+      .join(", ");
+  };
 
   const totalAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const entityList = (entities ?? []) as LandEntity[];
@@ -71,9 +111,12 @@ export default async function PropertiesPage({
           {" · "}
           {formatNumber(fieldCount.get(p.id) ?? 0)} fields (
           {formatAcres(fieldAcres.get(p.id) ?? 0)} ac)
+          {(p.fsa_numbers ?? []).length > 0
+            ? ` · FSA ${(p.fsa_numbers as string[]).join(", ")}`
+            : ""}
         </p>
       </Link>
-      <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-500">
         <span className="text-xs">Held by</span>
         <EntityPicker
           orgId={profile.organization_id!}
@@ -81,6 +124,14 @@ export default async function PropertiesPage({
           entities={entityList}
           value={p.entity_id}
         />
+        <span className="ml-auto">
+          <DeletePropertyButton
+            propertyId={p.id}
+            propertyName={p.name}
+            cascadeSummary={cascadeSummaryOf(p.id)}
+            leaseLinkCount={leaseLinkCount.get(p.id) ?? 0}
+          />
+        </span>
       </div>
     </li>
   );
@@ -141,6 +192,11 @@ export default async function PropertiesPage({
             name="state"
             placeholder="State"
             className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+          <input
+            name="fsa_numbers"
+            placeholder="FSA numbers (comma separated, optional)"
+            className="min-w-56 rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
           {hasEntities ? (
             <select

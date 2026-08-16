@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { EDIT_FIELDS, ENTITY_TABLE } from "@/components/map/FeaturePanel";
+import {
+  EDIT_FIELDS,
+  ENTITY_TABLE,
+  fieldDisplayValue,
+  fieldPatchValue,
+} from "@/components/map/FeaturePanel";
 import type { EntityType } from "@/types/db";
 
 // Small expandable editor used on the list and detail pages as the non-map
@@ -26,14 +31,10 @@ export default function RowEditor({
   async function save(formData: FormData) {
     setBusy(true);
     setError(null);
-    const patch: Record<string, string | number | null> = {};
+    const patch: Record<string, string | number | string[] | null> = {};
     for (const f of fields) {
       const raw = String(formData.get(f.key) ?? "").trim();
-      if (f.input === "number") {
-        patch[f.key] = raw === "" ? null : Number(raw);
-      } else {
-        patch[f.key] = raw === "" && !f.required ? null : raw;
-      }
+      patch[f.key] = fieldPatchValue(f, raw);
     }
     const { error: err } = await supabase
       .from(ENTITY_TABLE[entityType])
@@ -90,7 +91,7 @@ export default function RowEditor({
                 name={f.key}
                 type={f.input === "number" ? "number" : "text"}
                 required={f.required}
-                defaultValue={String(row[f.key] ?? "")}
+                defaultValue={fieldDisplayValue(f, row[f.key])}
                 placeholder={f.label}
                 className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
               />

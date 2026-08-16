@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 
 export async function createProperty(formData: FormData) {
@@ -9,22 +8,18 @@ export async function createProperty(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
 
+  const fsaNumbers = String(formData.get("fsa_numbers") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   await supabase.from("properties").insert({
     organization_id: profile.organization_id,
     name,
     county: String(formData.get("county") ?? "").trim() || null,
     state: String(formData.get("state") ?? "").trim() || null,
     entity_id: String(formData.get("entity_id") ?? "").trim() || null,
+    fsa_numbers: fsaNumbers.length > 0 ? fsaNumbers : null,
   });
   revalidatePath("/properties");
-}
-
-export async function deleteProperty(formData: FormData) {
-  const { supabase } = await requireOrg();
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
-  // Parcels and fields under it are removed by the cascading foreign keys.
-  await supabase.from("properties").delete().eq("id", id);
-  revalidatePath("/properties");
-  redirect("/properties");
 }

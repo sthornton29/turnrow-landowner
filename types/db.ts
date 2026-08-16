@@ -45,6 +45,7 @@ export interface PropertyGeo {
   created_at: string;
   updated_at: string;
   entity_id: string | null;
+  fsa_numbers: string[] | null;
 }
 
 // The ownership level above properties: LLCs, corporations, trusts, and

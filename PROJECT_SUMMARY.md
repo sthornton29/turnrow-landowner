@@ -1,6 +1,7 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-16 (entity level + five new Alabama counties)
+Last updated: 2026-08-16 (entity level, five new Alabama counties, FSA
+numbers on properties)
 
 ## What this product is
 
@@ -58,7 +59,12 @@ Tables:
   directly (column-level grant); org/role changes go through functions.
 - invites: organization_id, email, role, accepted_at. Unique per (org, email).
 - properties: name, county, state, notes, boundary, acres (generated),
-  unique (id, organization_id) as a composite-FK target
+  unique (id, organization_id) as a composite-FK target. Migration 0010
+  adds fsa_numbers text[] (optional FSA farm numbers, several per
+  property; entered comma-separated, shown as chips on the property
+  page, in the list line, and in the map click panel; the shared
+  EditField "list" flag in FeaturePanel/RowEditor handles the
+  comma-string <-> array conversion)
 - parcels: property_id, parcel_number, county, notes, boundary, acres.
   Composite FK (property_id, organization_id) -> properties (id,
   organization_id) makes cross-tenant references impossible.
@@ -331,7 +337,13 @@ Functions and views:
     just a property_id update (composite FKs keep it in-tenant,
     boundaries and generated acres untouched, property outlines are NOT
     redrawn). Built so entity-shaped properties can be dissolved into
-    real entities plus real properties. Delete property cascades.
+    real entities plus real properties. Property delete lives on both
+    the list rows and the detail page (DeletePropertyButton): a
+    confirmation spells out exactly what cascades (parcel/field/timber
+    stand/road/asset counts) and warns when lease land links will be
+    removed; leases, payments, and tax records are never deleted (tax
+    statements on deleted parcels become unmatched via their set-null
+    FK), and errors surface inline instead of silently redirecting.
   - /entities and /entities/[id] (Entities tab): list with per-entity
     type, property count, and total acres plus a "No entity" bucket of
     unassigned properties; create with name + type. Detail page: edit

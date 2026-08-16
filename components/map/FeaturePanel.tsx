@@ -37,6 +37,8 @@ export interface EditField {
   input: "text" | "number" | "select" | "textarea";
   options?: Record<string, string>;
   required?: boolean;
+  // Comma-separated text input saved as a Postgres text[] (FSA numbers).
+  list?: boolean;
 }
 
 export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
@@ -44,6 +46,7 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "name", label: "Name", input: "text", required: true },
     { key: "county", label: "County", input: "text" },
     { key: "state", label: "State", input: "text" },
+    { key: "fsa_numbers", label: "FSA numbers (comma separated)", input: "text", list: true },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   parcel: [
@@ -75,6 +78,28 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "notes", label: "Notes", input: "textarea" },
   ],
 };
+
+// Shared by FeaturePanel and RowEditor: form string -> column value.
+export function fieldPatchValue(
+  f: EditField,
+  raw: string
+): string | number | string[] | null {
+  if (f.list) {
+    const items = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+  if (f.input === "number") return raw === "" ? null : Number(raw);
+  return raw === "" && !f.required ? null : raw;
+}
+
+// Column value -> editable form string (arrays join comma-separated).
+export function fieldDisplayValue(f: EditField, value: unknown): string {
+  if (f.list && Array.isArray(value)) return value.join(", ");
+  return String(value ?? "");
+}
 
 function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, string]> {
   const r = row as unknown as Record<string, unknown>;
@@ -118,6 +143,10 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     if (!a.is_active) rows.push(["Status", "Inactive / removed"]);
   } else {
     push("County", "county" in r ? r.county : null);
+    if (entityType === "property") {
+      const fsa = r.fsa_numbers as string[] | null | undefined;
+      if (fsa && fsa.length > 0) rows.push(["FSA numbers", fsa.join(", ")]);
+    }
     if (entityType === "parcel") {
       const deeded = r.deeded_acres as number | null | undefined;
       if (deeded !== null && deeded !== undefined) {
@@ -184,14 +213,10 @@ export default function FeaturePanel({
   async function saveDetails(formData: FormData) {
     setBusy(true);
     setError(null);
-    const patch: Record<string, string | number | null> = {};
+    const patch: Record<string, string | number | string[] | null> = {};
     for (const f of EDIT_FIELDS[entityType]) {
       const raw = String(formData.get(f.key) ?? "").trim();
-      if (f.input === "number") {
-        patch[f.key] = raw === "" ? null : Number(raw);
-      } else {
-        patch[f.key] = raw === "" && !f.required ? null : raw;
-      }
+      patch[f.key] = fieldPatchValue(f, raw);
     }
     const { error: err } = await supabase
       .from(ENTITY_TABLE[entityType])
@@ -396,7 +421,10 @@ export default function FeaturePanel({
                   name={f.key}
                   type={f.input === "number" ? "number" : "text"}
                   required={f.required}
-                  defaultValue={String((row as unknown as Record<string, unknown>)[f.key] ?? "")}
+                  defaultValue={fieldDisplayValue(
+                    f,
+                    (row as unknown as Record<string, unknown>)[f.key]
+                  )}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
                 />
               )}

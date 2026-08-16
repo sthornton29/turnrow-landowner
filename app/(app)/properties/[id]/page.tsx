@@ -13,7 +13,7 @@ import type { AssetType } from "@/types/db";
 import RowEditor from "@/components/lists/RowEditor";
 import EntityPicker from "@/components/entities/EntityPicker";
 import MoveChildren from "@/components/properties/MoveChildren";
-import { deleteProperty } from "../actions";
+import DeletePropertyButton from "@/components/properties/DeletePropertyButton";
 
 export const metadata = { title: "Property" };
 
@@ -27,7 +27,7 @@ export default async function PropertyDetailPage({
 
   const { data: property } = await supabase
     .from("properties")
-    .select("id, name, county, state, notes, acres, entity_id")
+    .select("id, name, county, state, notes, acres, entity_id, fsa_numbers")
     .eq("id", id)
     .single();
   if (!property) notFound();
@@ -66,10 +66,15 @@ export default async function PropertyDetailPage({
       .order("name"),
   ]);
 
-  const [{ data: entities }, { data: allProperties }] = await Promise.all([
-    supabase.from("entities").select("id, name").order("name"),
-    supabase.from("properties").select("id, name").order("name"),
-  ]);
+  const [{ data: entities }, { data: allProperties }, { count: leaseLinkCount }] =
+    await Promise.all([
+      supabase.from("entities").select("id, name").order("name"),
+      supabase.from("properties").select("id, name").order("name"),
+      supabase
+        .from("lease_lands")
+        .select("id", { count: "exact", head: true })
+        .eq("property_id", id),
+    ]);
   const moveTargets = allProperties ?? [];
 
   // Annual income allocated to this property from all leases and timber sales
@@ -113,6 +118,18 @@ export default async function PropertyDetailPage({
               {" · "}
               {formatAcres(property.acres)} acres
             </p>
+            {(property.fsa_numbers ?? []).length > 0 ? (
+              <p className="mt-1.5 flex flex-wrap gap-1.5">
+                {(property.fsa_numbers as string[]).map((n) => (
+                  <span
+                    key={n}
+                    className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700"
+                  >
+                    FSA {n}
+                  </span>
+                ))}
+              </p>
+            ) : null}
             {property.notes ? (
               <p className="mt-2 max-w-prose whitespace-pre-wrap text-sm text-gray-700">
                 {property.notes}
@@ -425,18 +442,31 @@ export default async function PropertyDetailPage({
       ) : null}
 
       <section className="border-t border-gray-200 pt-4">
-        <form action={deleteProperty}>
-          <input type="hidden" name="id" value={property.id} />
-          <button
-            type="submit"
-            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-          >
-            Delete property
-          </button>
-          <p className="mt-1 text-xs text-gray-500">
-            Deletes this property and all of its parcels and fields.
-          </p>
-        </form>
+        <DeletePropertyButton
+          propertyId={property.id}
+          propertyName={property.name}
+          cascadeSummary={[
+            [(parcels ?? []).length, "parcel"],
+            [(fields ?? []).length, "field"],
+            [(stands ?? []).length, "timber stand"],
+            [(roads ?? []).length, "road"],
+            [(assets ?? []).length, "asset"],
+          ]
+            .filter(([count]) => (count as number) > 0)
+            .map(
+              ([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`
+            )
+            .join(", ")}
+          leaseLinkCount={leaseLinkCount ?? 0}
+          redirectTo="/properties"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Deletes this property and everything on it (parcels, fields, timber
+          stands, roads, assets) and removes any lease land links. Leases,
+          payments, and tax records are kept; tax statements on deleted
+          parcels become unmatched. Move anything you want to keep to another
+          property first.
+        </p>
       </section>
     </div>
   );
