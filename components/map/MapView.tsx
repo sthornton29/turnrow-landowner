@@ -382,10 +382,15 @@ export default function MapView({
         filter: ["all", ["!=", ["geometry-type"], "Point"], ["==", ["get", "id"], ""]] });
 
       // Labels
+      // Property names always render (no collision hiding: the basemap's
+      // street labels and our parcel/road labels otherwise crowd them
+      // out) and scale up with zoom so they stay prominent.
       map.addLayer({ id: "property-labels", type: "symbol", source: "property-labels",
-        layout: { "text-field": ["get", "name"], "text-size": 14,
-          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"] },
-        paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.4 } });
+        layout: { "text-field": ["get", "name"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 8, 12, 12, 16, 16, 20],
+          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 2 } });
       map.addLayer({ id: "field-labels", type: "symbol", source: "field-labels",
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },

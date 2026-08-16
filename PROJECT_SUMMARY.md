@@ -303,7 +303,10 @@ Functions and views:
     When the org holds land in more than one entity, an entity chip row
     (?entity= query param) scopes the stat tiles to one entity or "No
     entity"; alert cards and the map thumbnail stay org-wide.
-  - /map: full-screen Mapbox satellite map. Six toggleable layers:
+  - /map: full-screen Mapbox satellite map. Property name labels always
+    render (text-allow-overlap, zoom-scaled size, heavy halo) so they
+    are never crowded out by basemap or parcel/road labels. Six
+    toggleable layers:
     properties (white outline), parcels (dashed light line), fields (kelly
     green), timber stands (dark green fill, light mint dashed outline),
     roads (white line over dark green casing, labels along the line), and
@@ -464,7 +467,11 @@ Functions and views:
     the user's records (imported this session or matching an existing
     parcel by normalized number) fill dark pine with a mint outline and
     a small legend, so what remains to import reads at a glance;
-    selection still paints kelly on top while resolving duplicates. Newly created properties and entities
+    selection still paints kelly on top while resolving duplicates. The
+    search map also labels each parcel with its number and has two
+    corner toggles (Boundaries, Parcel numbers) to strip the overlay
+    down to bare satellite imagery; polygon clicks keep working with
+    boundaries hidden. Newly created properties and entities
     join the pickers client-side. The "Held by entity" picker SUGGESTS,
     NEVER AUTO-CREATES: default No entity (an existing property keeps
     its current entity; it is never cleared from here), a known owner

@@ -714,6 +714,7 @@ export default function CountyImportClient({
       geometry: r.geometry!,
       selected: selected.has(r.localId),
       imported: alreadyImported.has(r.localId),
+      label: r.parcel_number,
     }));
 
   if (services.length === 0) {
