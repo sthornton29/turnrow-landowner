@@ -352,7 +352,15 @@ Functions and views:
     name/type/notes, properties with acre subtotals, the known
     county-record spellings saved from imports (entity_aliases), and
     documents (entity_type "entity": operating agreements, formation
-    docs). Deleting an entity detaches its properties.
+    docs). Cleanup tools (org OWNERS only, UI hidden for members and
+    server actions verify): "Merge into another entity" moves the
+    source's properties, aliases, and documents to a chosen target
+    (confirmation lists exact counts; storage paths do not encode the
+    entity id so files stay valid) then removes the source; delete
+    reverts properties to No entity (never deletes them), removes
+    aliases (FK cascade), and deletes attached documents with their
+    storage files (documents have no FKs, so this avoids orphans), all
+    stated in the confirmation.
   - /timber: stands grouped by property with total timber acres and inline
     editing of stand info.
   - /assets: filterable list (property, type, show-inactive) with counts
@@ -441,14 +449,30 @@ Functions and views:
     noise markers (ETUX, ESTATE, JR) shown as metadata. Corrections are
     one tap each: split a variant out ("Not this owner"), merge groups,
     or exclude individual parcels via checkboxes or map taps. Checked
-    groups flow into the same assign-and-import panel below. Importing
-    from a group saves the grouping as an entity + aliases so later
-    searches pre-group under a "Known entity" badge. The assign step
-    also has a "Held by entity" picker: default is AUTO (in owner
-    search mode the property links to the owner entity the import
-    creates or extends, when unambiguous; in classic modes it keeps the
-    target property's current entity), or pick an existing entity,
-    create one inline with name + type, or choose No entity. The classic owner-name and parcel-number searches are
+    groups flow into the same assign-and-import panel below. IMPORTING
+    IS A LOOP: a successful import stays on the cached results (no
+    county re-query), marks that batch's parcels with an Imported badge
+    (unselectable, out of select-all and group toggles; a fully
+    imported group's card shows the badge), resets selection, duplicate
+    choices, and the assign panel for the next batch, and shows a
+    success toast ("Property X created with 6 parcels, 412.7 acres")
+    with a View on map link. A "Done, view on map" button appears after
+    the first import (zooms to the property when the session touched
+    one, otherwise opens the map). Parcels imported this session join
+    the duplicate pool for later searches; pre-session parcels keep the
+    normal duplicate flagging. Newly created properties and entities
+    join the pickers client-side. The "Held by entity" picker SUGGESTS,
+    NEVER AUTO-CREATES: default No entity (an existing property keeps
+    its current entity; it is never cleared from here), a known owner
+    (confirmed aliases) preselects that existing entity (user choice
+    always wins), and "Create new entity..." opens an explicit inline
+    form (name, type, notes) prefilled with a cleaned title-case owner
+    name via displayOwnerName() in lib/ownerNames.ts (noise stripped,
+    trailing THE moved to front, acronyms kept: ALBEMARLE CORPORATION
+    THE ETAL prefills as The Albemarle Corporation; unit-tested).
+    Importing with an entity selected records the imported groups'
+    variants as entity_aliases of that entity; importing with No entity
+    records nothing. The classic owner-name and parcel-number searches are
     unchanged: results as a synced list + selectable satellite map (row
     click zooms the polygon, polygon click toggles the row), select-all
     with running parcel and acre totals. All modes share: assign to an

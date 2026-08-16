@@ -5,7 +5,7 @@ import { formatAcres, formatNumber } from "@/lib/format";
 import { ENTITY_TYPE_LABELS } from "@/lib/entities";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import type { LandEntity } from "@/types/db";
-import { deleteEntity } from "../actions";
+import EntityDangerZone from "./EntityDangerZone";
 import EntityEditor from "./EntityEditor";
 
 export const metadata = { title: "Entity" };
@@ -26,7 +26,12 @@ export default async function EntityDetailPage({
   if (!entity) notFound();
   const landEntity = entity as LandEntity;
 
-  const [{ data: properties }, { data: aliases }] = await Promise.all([
+  const [
+    { data: properties },
+    { data: aliases },
+    { data: otherEntities },
+    { count: documentCount },
+  ] = await Promise.all([
     supabase
       .from("properties")
       .select("id, name, county, state, acres")
@@ -37,9 +42,16 @@ export default async function EntityDetailPage({
       .select("alias, source_county, source_state")
       .eq("entity_id", id)
       .order("alias"),
+    supabase.from("entities").select("id, name").neq("id", id).order("name"),
+    supabase
+      .from("documents")
+      .select("id", { count: "exact", head: true })
+      .eq("entity_type", "entity")
+      .eq("entity_id", id),
   ]);
 
   const totalAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
+  const isOwner = profile.role === "owner";
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
@@ -142,21 +154,16 @@ export default async function EntityDetailPage({
         />
       </section>
 
-      <section className="border-t border-gray-200 pt-4">
-        <form action={deleteEntity}>
-          <input type="hidden" name="id" value={landEntity.id} />
-          <button
-            type="submit"
-            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-          >
-            Delete entity
-          </button>
-          <p className="mt-1 text-xs text-gray-500">
-            Its properties are kept and become unassigned. Saved county
-            spellings are removed with it.
-          </p>
-        </form>
-      </section>
+      {isOwner ? (
+        <EntityDangerZone
+          entityId={landEntity.id}
+          entityName={landEntity.name}
+          targets={otherEntities ?? []}
+          propertyCount={(properties ?? []).length}
+          aliasCount={(aliases ?? []).length}
+          documentCount={documentCount ?? 0}
+        />
+      ) : null}
     </div>
   );
 }

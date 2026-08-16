@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clusterOwners,
+  displayOwnerName,
   normalizeOwnerName,
   ownerSimilarity,
   pickDisplayName,
@@ -233,6 +234,34 @@ describe("pickDisplayName", () => {
     expect(
       pickDisplayName(["ALBEMARLE CORP", "THE ALBEMARLE CORPORATION"])
     ).toBe("THE ALBEMARLE CORPORATION");
+  });
+});
+
+describe("displayOwnerName", () => {
+  it("cleans and title-cases the Albemarle filing quirk", () => {
+    expect(displayOwnerName("ALBEMARLE CORPORATION THE ETAL")).toBe(
+      "The Albemarle Corporation"
+    );
+  });
+
+  it("strips marital noise", () => {
+    expect(displayOwnerName("THORNTON STUART & WIFE")).toBe("Thornton Stuart");
+  });
+
+  it("keeps acronyms uppercase and collapses L.L.C.", () => {
+    expect(displayOwnerName("SMITH FAMILY FARMS L.L.C.")).toBe(
+      "Smith Family Farms LLC"
+    );
+  });
+
+  it("keeps FAMILY in display names but strips trust boilerplate", () => {
+    expect(displayOwnerName("SMITH FAMILY REVOCABLE LIVING TRUST")).toBe(
+      "Smith Family Trust"
+    );
+  });
+
+  it("keeps initials uppercase", () => {
+    expect(displayOwnerName("THORNTON S R ETUX")).toBe("Thornton S R");
   });
 });
 

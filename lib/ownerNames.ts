@@ -147,6 +147,63 @@ function canonicalizeSequences(tokens: string[]): string[] {
   return out;
 }
 
+// Acronym tokens that stay uppercase in display names.
+const DISPLAY_ACRONYMS = new Set(["LLC", "LLP", "PLLC", "LP", "FLP", "PC"]);
+
+// Human-readable version of a county owner name, used to prefill the
+// create-entity form. Noise stripped, trailing THE moved to the front,
+// title case with acronyms and initials preserved. Unlike
+// normalizeOwnerName this is a display name, not a matching key:
+// suffix words stay as printed (CORPORATION is not abbreviated) and
+// FAMILY is kept (SMITH FAMILY TRUST reads better than SMITH TRUST).
+// ALBEMARLE CORPORATION THE ETAL -> The Albemarle Corporation.
+export function displayOwnerName(raw: string): string {
+  let text = raw.toUpperCase().trim();
+  const careOf = text.search(/(^|\s)C\/O(\s|$)/);
+  if (careOf >= 0) text = text.slice(0, careOf);
+  text = text.replace(/[^A-Z0-9]+/g, " ").trim();
+  let tokens = text.length > 0 ? text.split(" ") : [];
+
+  // Collapse spelled-out L L C; leave other suffix words as printed.
+  const collapsed: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] === "L" && tokens[i + 1] === "L" && tokens[i + 2] === "C") {
+      collapsed.push("LLC");
+      i += 2;
+      continue;
+    }
+    collapsed.push(tokens[i]);
+  }
+  tokens = collapsed;
+
+  const kept: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const pair = NOISE_PAIRS.find(
+      ([a, b]) => tokens[i] === a && tokens[i + 1] === b
+    );
+    if (pair) {
+      i++;
+      continue;
+    }
+    if (tokens[i] !== "FAMILY" && NOISE_TOKENS.has(tokens[i])) continue;
+    kept.push(tokens[i]);
+  }
+
+  // A trailing THE is a filing quirk; it belongs in front.
+  if (kept.length > 1 && kept[kept.length - 1] === "THE" && kept[0] !== "THE") {
+    kept.pop();
+    kept.unshift("THE");
+  }
+
+  return kept
+    .map((t) =>
+      DISPLAY_ACRONYMS.has(t) || t.length === 1
+        ? t
+        : t.charAt(0) + t.slice(1).toLowerCase()
+    )
+    .join(" ");
+}
+
 // ---------------------------------------------------------------------------
 // Similarity
 // ---------------------------------------------------------------------------
