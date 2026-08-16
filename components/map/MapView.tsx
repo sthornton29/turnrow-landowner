@@ -23,6 +23,7 @@ import {
 } from "@/lib/geo/normalize";
 import { ASSET_TYPES } from "@/lib/assetTypes";
 import { entityColor } from "@/lib/entities";
+import { suggestPropertyId } from "@/lib/geo/propertyMatch";
 import {
   cropColor,
   cropLegend,
@@ -924,6 +925,26 @@ export default function MapView({
 
   const hasAnything = Object.values(rowLists).some((rows) => rows.some(geomOf));
 
+  // Which property contains the drawn geometry: preselected in the save
+  // dialogs (the user confirms or changes it), same logic as the file
+  // import's suggestions.
+  const matchableProperties = useMemo(
+    () => properties.map((p) => ({ id: p.id, boundary: p.boundary_geojson })),
+    [properties]
+  );
+  const suggestedForPoly = pendingPoly
+    ? suggestPropertyId(pendingPoly, matchableProperties)
+    : null;
+  const suggestedForLine = pendingLine
+    ? suggestPropertyId(pendingLine, matchableProperties)
+    : null;
+  const suggestedForPoint = pendingPoint
+    ? suggestPropertyId(
+        { type: "Point", coordinates: pendingPoint },
+        matchableProperties
+      )
+    : null;
+
   // ---------------------------------------------------------------- render
 
   const showCrosshair = mode === "place" && !pendingPoint;
@@ -1118,6 +1139,7 @@ export default function MapView({
         <NewBoundaryDialog
           approxAcres={approxAcres(pendingPoly)}
           properties={properties}
+          suggestedPropertyId={suggestedForPoly}
           saving={saving}
           error={saveError}
           onSave={saveNewBoundary}
@@ -1127,6 +1149,7 @@ export default function MapView({
       {pendingLine && mode === "draw" ? (
         <NewLineDialog
           properties={properties}
+          suggestedPropertyId={suggestedForLine}
           saving={saving}
           error={saveError}
           onSave={saveNewLine}
@@ -1136,6 +1159,7 @@ export default function MapView({
       {pendingPoint && mode === "place" ? (
         <NewAssetDialog
           properties={properties}
+          suggestedPropertyId={suggestedForPoint}
           saving={saving}
           error={saveError}
           onSave={saveNewAsset}

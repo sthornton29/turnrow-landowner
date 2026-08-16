@@ -14,12 +14,14 @@ export interface NewAssetPayload {
 // filled in afterward on the asset page.
 export default function NewAssetDialog({
   properties,
+  suggestedPropertyId = null,
   saving,
   error,
   onSave,
   onCancel,
 }: {
   properties: PropertyGeo[];
+  suggestedPropertyId?: string | null;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewAssetPayload) => void;
@@ -30,6 +32,7 @@ export default function NewAssetDialog({
     (t) => ASSET_TYPES[t].defaultGeometry === "point"
   );
   const [assetType, setAssetType] = useState<AssetType>("well");
+  const [propertyId, setPropertyId] = useState(suggestedPropertyId ?? "");
 
   function handleSubmit(formData: FormData) {
     onSave({
@@ -77,9 +80,19 @@ export default function NewAssetDialog({
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
             Property (optional)
+            {suggestedPropertyId && propertyId === suggestedPropertyId ? (
+              <span
+                className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
+                title="The pin sits inside this property; confirm or change it"
+              >
+                Suggested from location
+              </span>
+            ) : null}
           </label>
           <select
             name="property_id"
+            value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
           >
             <option value="">None</option>

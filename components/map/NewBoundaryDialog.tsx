@@ -22,9 +22,11 @@ const TYPE_LABEL: Record<BoundaryType, string> = {
 };
 
 // Shown after a polygon is drawn: pick what it is, name it, and save.
+// The property whose boundary contains the drawing is preselected.
 export default function NewBoundaryDialog({
   approxAcres,
   properties,
+  suggestedPropertyId = null,
   saving,
   error,
   onSave,
@@ -32,6 +34,7 @@ export default function NewBoundaryDialog({
 }: {
   approxAcres: number | null;
   properties: PropertyGeo[];
+  suggestedPropertyId?: string | null;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewBoundaryPayload) => void;
@@ -39,6 +42,9 @@ export default function NewBoundaryDialog({
 }) {
   const [entityType, setEntityType] = useState<BoundaryType>(
     properties.length > 0 ? "field" : "property"
+  );
+  const [propertyId, setPropertyId] = useState(
+    suggestedPropertyId ?? properties[0]?.id ?? ""
   );
   const needsProperty = entityType !== "property";
 
@@ -103,7 +109,17 @@ export default function NewBoundaryDialog({
 
         {needsProperty ? (
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Property</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Property
+              {suggestedPropertyId && propertyId === suggestedPropertyId ? (
+                <span
+                  className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
+                  title="The drawing sits inside this property; confirm or change it"
+                >
+                  Suggested from location
+                </span>
+              ) : null}
+            </label>
             {properties.length === 0 ? (
               <p className="text-sm text-red-600">
                 Create a property first; this must belong to one.
@@ -112,6 +128,8 @@ export default function NewBoundaryDialog({
               <select
                 name="property_id"
                 required
+                value={propertyId}
+                onChange={(e) => setPropertyId(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
               >
                 {properties.map((p) => (

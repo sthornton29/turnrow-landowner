@@ -14,20 +14,26 @@ export interface NewLinePayload {
 }
 
 // Shown after a line is drawn: is it a road, buried pipe, or a fence?
+// The property containing the line is preselected.
 export default function NewLineDialog({
   properties,
+  suggestedPropertyId = null,
   saving,
   error,
   onSave,
   onCancel,
 }: {
   properties: PropertyGeo[];
+  suggestedPropertyId?: string | null;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewLinePayload) => void;
   onCancel: () => void;
 }) {
   const [kind, setKind] = useState<LineKind>("road");
+  const [propertyId, setPropertyId] = useState(
+    suggestedPropertyId ?? properties[0]?.id ?? ""
+  );
 
   function handleSubmit(formData: FormData) {
     onSave({
@@ -105,6 +111,14 @@ export default function NewLineDialog({
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
             Property{kind !== "road" ? " (optional)" : ""}
+            {suggestedPropertyId && propertyId === suggestedPropertyId ? (
+              <span
+                className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
+                title="The line sits inside this property; confirm or change it"
+              >
+                Suggested from location
+              </span>
+            ) : null}
           </label>
           {roadNeedsProperty ? (
             <p className="text-sm text-red-600">
@@ -114,6 +128,8 @@ export default function NewLineDialog({
             <select
               name="property_id"
               required={kind === "road"}
+              value={propertyId}
+              onChange={(e) => setPropertyId(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
             >
               {kind !== "road" ? <option value="">None</option> : null}

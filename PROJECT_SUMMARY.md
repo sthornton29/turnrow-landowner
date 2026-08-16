@@ -317,7 +317,11 @@ Functions and views:
     mobile). The Add menu offers: Boundary (polygon draw; save as field,
     parcel, property, or timber stand), Road/pipe/fence (line draw), and
     Asset pin (crosshair placement mode: pan to line up, Place here, or My
-    location via GPS; moving a pin reuses the same mode). Geometry edits
+    location via GPS; moving a pin reuses the same mode). All three save
+    dialogs preselect the property whose boundary contains the drawn
+    geometry (same lib/geo/propertyMatch.ts logic as the file import)
+    with a "Suggested from location" chip that clears if the user picks
+    a different property. Geometry edits
     use mapbox-gl-draw vertex editing; acres/miles recompute server-side
     on every save. CSS-based fullscreen toggle (not the native Fullscreen
     API, so iOS modals stay visible). /map?focus=asset:<id> zooms to and
