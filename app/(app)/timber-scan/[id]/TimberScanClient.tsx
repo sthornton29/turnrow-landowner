@@ -557,13 +557,6 @@ export default function TimberScanClient({
         </p>
       </div>
 
-      {loading ? (
-        <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600">
-          Scanning {property.name} against the USDA land cover layer. This
-          can take 10 to 30 seconds; the government server clips the raster
-          on demand.
-        </p>
-      ) : null}
       {error ? (
         <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
@@ -581,101 +574,113 @@ export default function TimberScanClient({
         </p>
       ) : null}
 
+      {/* Scan summary banner leads, once results exist */}
+      {scan && !loading ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="text-lg font-semibold text-gray-900">
+              {formatAcres(scan.summary.woodedAcres)} wooded acres found
+            </span>
+            {TIMBER_CLASSES.filter((c) => scan.summary.byClass[c] > 0).map((c) => (
+              <span key={c} className="flex items-center gap-1.5 text-sm text-gray-700">
+                <span
+                  className="h-3 w-3 rounded-[2px] border border-gray-300"
+                  style={{ background: CLASS_COLORS[c] }}
+                />
+                {formatAcres(scan.summary.byClass[c])} {CLASS_LABELS[c].toLowerCase()}
+              </span>
+            ))}
+            <span className="ml-auto flex items-center gap-2 text-xs text-gray-500">
+              CDL {scan.year}
+              {cachedNote ? " (cached)" : ""}
+              <button
+                onClick={() => runScan(true)}
+                className="rounded-lg border border-gray-300 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Rescan
+              </button>
+            </span>
+          </div>
+          <details className="mt-2 text-xs text-gray-500">
+            <summary className="cursor-pointer font-medium">
+              What the scan can and cannot see
+            </summary>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              <li>
+                Boundaries and the pine/hardwood breakout come from 30m
+                government land cover: close but not survey-grade; nudge
+                vertices where it matters.
+              </li>
+              <li>
+                Hardwood drains narrower than about 100 feet can drop below
+                pixel resolution; some will need drawing by hand.
+              </li>
+              <li>
+                Adjacent stands of the same type merge into one proposal;
+                use Split to separate age classes or management units.
+              </li>
+              <li>
+                Recent clearcuts and plantings under about 5 years often
+                classify as shrub or grass and may not appear until the
+                canopy develops.
+              </li>
+              <li>
+                The scan finds where the timber is and the breakout;
+                species, age, and site data are your knowledge to add.
+              </li>
+            </ul>
+          </details>
+        </div>
+      ) : null}
+
+      {/* The map container must ALWAYS be mounted: the map initializes
+          once on mount, so hiding this behind the loading state would
+          leave the map permanently unattached. It also means the
+          property outline shows while the scan runs. */}
+      <div className="relative">
+        <div ref={containerRef} className="h-80 w-full rounded-xl md:h-[28rem]" />
+        {loading ? (
+          <div className="absolute inset-x-0 top-2 mx-auto w-fit max-w-[92%] rounded-lg bg-white/95 px-4 py-2 text-sm text-gray-700 shadow-lg">
+            Scanning {property.name} against the USDA land cover layer. This
+            can take 10 to 30 seconds; the government server clips the
+            raster on demand.
+          </div>
+        ) : null}
+        {splittingId ? (
+          <div className="absolute inset-x-0 top-2 mx-auto w-fit rounded-lg bg-pine-900/95 px-3 py-2 text-xs text-white shadow-lg">
+            Draw a line all the way across the shape, double tap to finish.
+            <button
+              onClick={() => {
+                drawRef.current?.deleteAll();
+                setSplittingId(null);
+              }}
+              className="ml-2 rounded bg-white/15 px-2 py-0.5 font-semibold hover:bg-white/25"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : null}
+        {editingId ? (
+          <div className="absolute inset-x-0 top-2 mx-auto w-fit rounded-lg bg-pine-900/95 px-3 py-2 text-xs text-white shadow-lg">
+            Drag the points to adjust.
+            <button
+              onClick={() => finishEdit(true)}
+              className="ml-2 rounded bg-kelly-500 px-2 py-0.5 font-semibold hover:bg-kelly-600"
+            >
+              Save shape
+            </button>
+            <button
+              onClick={() => finishEdit(false)}
+              className="ml-1.5 rounded bg-white/15 px-2 py-0.5 font-semibold hover:bg-white/25"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : null}
+      </div>
+
       {scan && !loading ? (
         <>
-          {/* Scan summary banner */}
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className="text-lg font-semibold text-gray-900">
-                {formatAcres(scan.summary.woodedAcres)} wooded acres found
-              </span>
-              {TIMBER_CLASSES.filter((c) => scan.summary.byClass[c] > 0).map((c) => (
-                <span key={c} className="flex items-center gap-1.5 text-sm text-gray-700">
-                  <span
-                    className="h-3 w-3 rounded-[2px] border border-gray-300"
-                    style={{ background: CLASS_COLORS[c] }}
-                  />
-                  {formatAcres(scan.summary.byClass[c])} {CLASS_LABELS[c].toLowerCase()}
-                </span>
-              ))}
-              <span className="ml-auto flex items-center gap-2 text-xs text-gray-500">
-                CDL {scan.year}
-                {cachedNote ? " (cached)" : ""}
-                <button
-                  onClick={() => runScan(true)}
-                  className="rounded-lg border border-gray-300 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Rescan
-                </button>
-              </span>
-            </div>
-            <details className="mt-2 text-xs text-gray-500">
-              <summary className="cursor-pointer font-medium">
-                What the scan can and cannot see
-              </summary>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>
-                  Boundaries and the pine/hardwood breakout come from 30m
-                  government land cover: close but not survey-grade; nudge
-                  vertices where it matters.
-                </li>
-                <li>
-                  Hardwood drains narrower than about 100 feet can drop below
-                  pixel resolution; some will need drawing by hand.
-                </li>
-                <li>
-                  Adjacent stands of the same type merge into one proposal;
-                  use Split to separate age classes or management units.
-                </li>
-                <li>
-                  Recent clearcuts and plantings under about 5 years often
-                  classify as shrub or grass and may not appear until the
-                  canopy develops.
-                </li>
-                <li>
-                  The scan finds where the timber is and the breakout;
-                  species, age, and site data are your knowledge to add.
-                </li>
-              </ul>
-            </details>
-          </div>
-
-          {/* Map with draft proposals */}
-          <div className="relative">
-            <div ref={containerRef} className="h-80 w-full rounded-xl md:h-[28rem]" />
-            {splittingId ? (
-              <div className="absolute inset-x-0 top-2 mx-auto w-fit rounded-lg bg-pine-900/95 px-3 py-2 text-xs text-white shadow-lg">
-                Draw a line all the way across the shape, double tap to finish.
-                <button
-                  onClick={() => {
-                    drawRef.current?.deleteAll();
-                    setSplittingId(null);
-                  }}
-                  className="ml-2 rounded bg-white/15 px-2 py-0.5 font-semibold hover:bg-white/25"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-            {editingId ? (
-              <div className="absolute inset-x-0 top-2 mx-auto w-fit rounded-lg bg-pine-900/95 px-3 py-2 text-xs text-white shadow-lg">
-                Drag the points to adjust.
-                <button
-                  onClick={() => finishEdit(true)}
-                  className="ml-2 rounded bg-kelly-500 px-2 py-0.5 font-semibold hover:bg-kelly-600"
-                >
-                  Save shape
-                </button>
-                <button
-                  onClick={() => finishEdit(false)}
-                  className="ml-1.5 rounded bg-white/15 px-2 py-0.5 font-semibold hover:bg-white/25"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-          </div>
-
           {/* Proposal chips */}
           {proposals.length === 0 ? (
             <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
