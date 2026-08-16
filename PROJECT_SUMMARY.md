@@ -326,7 +326,16 @@ Functions and views:
     can be assigned as property/parcel/field/timber stand, lines as
     road/pipe/fence, points as assets (with type). Preview map, per-feature
     review before saving, failures skipped and reported. Properties in a
-    batch save first so other rows can reference them.
+    batch save first so other rows can reference them. Each feature's
+    property assignment is SUGGESTED FROM LOCATION
+    (lib/geo/propertyMatch.ts, unit-tested: sample points from the
+    geometry scored against property boundaries by hole-aware
+    point-in-polygon; majority containment wins, straddlers go to the
+    larger side): the review row preselects the containing property
+    with a "Suggested from location" chip the user confirms or
+    overrides; with no convincing match nothing is preselected and the
+    existing validation forces an explicit choice (previously every
+    row silently defaulted to the alphabetically first property).
   - /properties, /properties/[id], /parcels, /fields: non-map browsing with
     acres totals and inline editing. The Properties section has two tabs
     (Properties, Entities; same pattern as the Leases tabs, and the nav
@@ -483,7 +492,12 @@ Functions and views:
     THE ETAL prefills as The Albemarle Corporation; unit-tested).
     Importing with an entity selected records the imported groups'
     variants as entity_aliases of that entity; importing with No entity
-    records nothing. The classic owner-name and parcel-number searches are
+    records nothing. The entity and property choices stay in sync:
+    picking an entity narrows the existing-property dropdown to that
+    entity's properties (switching to New property when it has none),
+    and picking a property defaults the entity picker to that
+    property's owner (a known-entity group suggestion narrows the same
+    way). The classic owner-name and parcel-number searches are
     unchanged: results as a synced list + selectable satellite map (row
     click zooms the polygon, polygon click toggles the row), select-all
     with running parcel and acre totals. Parcel-number search is

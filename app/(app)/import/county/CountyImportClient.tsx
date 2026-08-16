@@ -313,6 +313,7 @@ export default function CountyImportClient({
     // the user already made.
     if (include && group.knownEntity && !entityTouchedRef.current) {
       setImportEntityId(group.knownEntity.id);
+      syncPropertyToEntity(group.knownEntity.id);
     } else if (!include && !entityTouchedRef.current && next.size === 0) {
       setImportEntityId("");
     }
@@ -735,6 +736,44 @@ export default function CountyImportClient({
     );
   }
 
+  // Entity and property choices stay in sync: a chosen entity narrows
+  // the existing-property dropdown to its properties, and picking a
+  // property defaults the entity picker to that property's owner.
+  const entityFilteredProperties =
+    importEntityId && importEntityId !== ENTITY_NEW
+      ? localProperties.filter((p) => p.entity_id === importEntityId)
+      : localProperties;
+
+  function pickProperty(id: string) {
+    setPropertyId(id);
+    const prop = localProperties.find((p) => p.id === id);
+    if (prop?.entity_id && importEntityId !== ENTITY_NEW) {
+      setImportEntityId(prop.entity_id);
+    }
+  }
+
+  function syncPropertyToEntity(value: string) {
+    if (value && value !== ENTITY_NEW) {
+      const filtered = localProperties.filter((p) => p.entity_id === value);
+      if (!filtered.some((p) => p.id === propertyId)) {
+        if (filtered.length > 0) {
+          setPropertyId(filtered[0].id);
+        } else {
+          setPropertyId("");
+          if (assignMode === "existing") setAssignMode("new");
+        }
+      }
+    } else if (!propertyId && localProperties.length > 0) {
+      setPropertyId(localProperties[0].id);
+    }
+  }
+
+  function pickEntity(value: string) {
+    entityTouchedRef.current = true;
+    setImportEntityId(value);
+    syncPropertyToEntity(value);
+  }
+
   // Shared assign-and-import panel (identical in both modes).
   const assignPanel =
     selected.size > 0 ? (
@@ -779,10 +818,15 @@ export default function CountyImportClient({
           {assignMode === "existing" ? (
             <select
               value={propertyId}
-              onChange={(e) => setPropertyId(e.target.value)}
+              onChange={(e) => pickProperty(e.target.value)}
               className={`${inputClass} bg-white`}
             >
-              {localProperties.map((p) => (
+              {entityFilteredProperties.length === 0 ? (
+                <option value="" disabled>
+                  No properties under this entity yet
+                </option>
+              ) : null}
+              {entityFilteredProperties.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -815,9 +859,8 @@ export default function CountyImportClient({
             <select
               value={importEntityId}
               onChange={(e) => {
-                entityTouchedRef.current = true;
                 const value = e.target.value;
-                setImportEntityId(value);
+                pickEntity(value);
                 if (value === ENTITY_NEW && !newEntityName.trim()) {
                   // Prefill from the grouped owner name, cleaned up for
                   // humans; purely a starting point to edit.

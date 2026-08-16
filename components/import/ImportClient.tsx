@@ -7,6 +7,7 @@ import type { Geometry, MultiPolygon } from "geojson";
 import { createClient } from "@/lib/supabase/client";
 import { parseBoundaryFile, type FeatureKind } from "@/lib/geo/parse";
 import { approxAcres } from "@/lib/geo/normalize";
+import { suggestPropertyId } from "@/lib/geo/propertyMatch";
 import { formatAcres } from "@/lib/format";
 import { ASSET_TYPES, ASSET_TYPE_ORDER } from "@/lib/assetTypes";
 import type { AssetType, EntityType } from "@/types/db";
@@ -23,6 +24,9 @@ interface ImportRow {
   name: string;
   // "existing:<uuid>" | "new:<localId>" | ""
   propertyRef: string;
+  // The location-based suggestion, kept so the UI can show when the
+  // current assignment came from it (and when the user overrode it).
+  suggestedRef: string | null;
   geometry: Geometry;
   acres: number | null;
   sourceFile: string;
@@ -49,10 +53,20 @@ export default function ImportClient({
   existingProperties,
 }: {
   orgId: string;
-  existingProperties: Array<{ id: string; name: string }>;
+  existingProperties: Array<{
+    id: string;
+    name: string;
+    boundary_geojson: MultiPolygon | null;
+  }>;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const matchableProperties = useMemo(
+    () =>
+      existingProperties.map((p) => ({ id: p.id, boundary: p.boundary_geojson })),
+    [existingProperties]
+  );
 
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -63,8 +77,6 @@ export default function ImportClient({
 
   const defaultPolygonType: EntityType =
     existingProperties.length > 0 ? "field" : "property";
-  const defaultPropertyRef =
-    existingProperties.length > 0 ? `existing:${existingProperties[0].id}` : "";
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
@@ -85,6 +97,10 @@ export default function ImportClient({
               : f.kind === "line"
                 ? "road"
                 : "asset";
+          // Which property contains this feature? Preselected as a
+          // suggestion; the user confirms or changes it in the review.
+          const suggestedId = suggestPropertyId(f.geometry, matchableProperties);
+          const suggestedRef = suggestedId ? `existing:${suggestedId}` : null;
           newRows.push({
             localId: `${file.name}-${f.sourceIndex}-${Math.random().toString(36).slice(2, 8)}`,
             include: true,
@@ -92,7 +108,8 @@ export default function ImportClient({
             entityType,
             assetType: f.kind === "line" ? "underground_pipe" : "other",
             name: f.suggestedName,
-            propertyRef: defaultPropertyRef,
+            propertyRef: entityType === "property" ? "" : (suggestedRef ?? ""),
+            suggestedRef,
             geometry: f.geometry,
             acres:
               f.kind === "polygon"
@@ -353,7 +370,9 @@ export default function ImportClient({
                         updateRow(r.localId, {
                           entityType: t,
                           propertyRef:
-                            t === "property" ? "" : r.propertyRef || defaultPropertyRef,
+                            t === "property"
+                              ? ""
+                              : r.propertyRef || r.suggestedRef || "",
                         });
                       }}
                       className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
@@ -413,27 +432,37 @@ export default function ImportClient({
                   />
 
                   {r.entityType !== "property" ? (
-                    <select
-                      value={r.propertyRef}
-                      onChange={(e) => updateRow(r.localId, { propertyRef: e.target.value })}
-                      className="max-w-48 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                    >
-                      <option value="">
-                        {r.entityType === "asset"
-                          ? "No property"
-                          : "Assign to property..."}
-                      </option>
-                      {existingProperties.map((p) => (
-                        <option key={p.id} value={`existing:${p.id}`}>
-                          {p.name}
+                    <>
+                      <select
+                        value={r.propertyRef}
+                        onChange={(e) => updateRow(r.localId, { propertyRef: e.target.value })}
+                        className="max-w-48 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">
+                          {r.entityType === "asset"
+                            ? "No property"
+                            : "Assign to property..."}
                         </option>
-                      ))}
-                      {newPropertyRows.map((p) => (
-                        <option key={p.localId} value={`new:${p.localId}`}>
-                          {p.name || "(unnamed)"} (in this import)
-                        </option>
-                      ))}
-                    </select>
+                        {existingProperties.map((p) => (
+                          <option key={p.id} value={`existing:${p.id}`}>
+                            {p.name}
+                          </option>
+                        ))}
+                        {newPropertyRows.map((p) => (
+                          <option key={p.localId} value={`new:${p.localId}`}>
+                            {p.name || "(unnamed)"} (in this import)
+                          </option>
+                        ))}
+                      </select>
+                      {r.suggestedRef && r.propertyRef === r.suggestedRef ? (
+                        <span
+                          className="rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
+                          title="This boundary sits inside this property; confirm or change it"
+                        >
+                          Suggested from location
+                        </span>
+                      ) : null}
+                    </>
                   ) : null}
 
                   <span className="ml-auto whitespace-nowrap text-xs text-gray-500">
