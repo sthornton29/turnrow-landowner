@@ -479,7 +479,13 @@ Functions and views:
     records nothing. The classic owner-name and parcel-number searches are
     unchanged: results as a synced list + selectable satellite map (row
     click zooms the polygon, polygon click toggles the row), select-all
-    with running parcel and acre totals. All modes share: assign to an
+    with running parcel and acre totals. Parcel-number search is
+    FORMAT-TOLERANT (counties format the same number differently:
+    Morgan stores 02 04 18 0 000 007.000 where tax statements print
+    0204180000007000): the where clause ORs the number as typed, with
+    punctuation stripped, and with a wildcard between every character
+    so any separator convention matches (buildWhere, unit-tested in
+    lib/gisServer.test.ts). All modes share: assign to an
     existing or new property (merge-outline option via
     set_property_boundary_from_parcels, default on), duplicate parcel
     numbers flagged with skip-or-update-geometry per parcel (normalized

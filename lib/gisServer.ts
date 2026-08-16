@@ -86,8 +86,23 @@ export function buildWhere(
   if (searchType === "owner") {
     return `UPPER(${ownerField}) LIKE '%${cleaned}%'`;
   }
-  // Parcel numbers: exact match or contains, tolerant of case.
-  return `UPPER(${parcelField}) LIKE '%${cleaned}%'`;
+  // Parcel numbers: counties format the same number differently (Morgan
+  // stores "02 04 18 0 000 007.000" where the tax statement prints
+  // 0204180000007000; Madison uses dashes; Lauderdale plain digits), so
+  // match format-tolerantly: as typed, with punctuation stripped, and
+  // with a wildcard between every character so any separator convention
+  // matches. A full parcel number's digits in order cannot meaningfully
+  // false-positive inside a parcel field.
+  const clauses = [`UPPER(${parcelField}) LIKE '%${cleaned}%'`];
+  const compact = cleaned.replace(/[^A-Z0-9]/g, "");
+  if (compact.length >= 6) {
+    if (compact !== cleaned) {
+      clauses.push(`UPPER(${parcelField}) LIKE '%${compact}%'`);
+    }
+    const interleaved = "%" + compact.split("").join("%") + "%";
+    clauses.push(`UPPER(${parcelField}) LIKE '${interleaved}'`);
+  }
+  return clauses.join(" OR ");
 }
 
 // Entity mode searches broad and groups locally: one query on the most
