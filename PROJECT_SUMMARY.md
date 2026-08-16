@@ -460,7 +460,11 @@ Functions and views:
     the first import (zooms to the property when the session touched
     one, otherwise opens the map). Parcels imported this session join
     the duplicate pool for later searches; pre-session parcels keep the
-    normal duplicate flagging. Newly created properties and entities
+    normal duplicate flagging. On the search map, parcels already in
+    the user's records (imported this session or matching an existing
+    parcel by normalized number) fill dark pine with a mint outline and
+    a small legend, so what remains to import reads at a glance;
+    selection still paints kelly on top while resolving duplicates. Newly created properties and entities
     join the pickers client-side. The "Held by entity" picker SUGGESTS,
     NEVER AUTO-CREATES: default No entity (an existing property keeps
     its current entity; it is never cleared from here), a known owner

@@ -414,6 +414,29 @@ export default function CountyImportClient({
     return map;
   }, [selectedRows, existingParcels, sessionParcels, service]);
 
+  // Result rows already in the user's records, for the map's "already
+  // imported" tint: imported this session, or matching a parcel that
+  // existed before the session (normalized parcel number, same county).
+  const alreadyImported = useMemo(() => {
+    const set = new Set<string>();
+    if (!service) return set;
+    const county = service.county.toLowerCase();
+    const normPool = new Set(
+      [...existingParcels, ...sessionParcels]
+        .filter((p) => (p.county ?? "").toLowerCase() === county || !p.county)
+        .map((p) => normalizeParcelNumber(p.parcel_number))
+    );
+    for (const r of results) {
+      if (
+        importedIds.has(r.localId) ||
+        (r.parcel_number && normPool.has(normalizeParcelNumber(r.parcel_number)))
+      ) {
+        set.add(r.localId);
+      }
+    }
+    return set;
+  }, [results, existingParcels, sessionParcels, importedIds, service]);
+
   // When the user imports with an entity SELECTED, remember the imported
   // groups' confirmed name variants as aliases of that entity so future
   // searches pre-group under it. Entities are never created here: the
@@ -690,6 +713,7 @@ export default function CountyImportClient({
       localId: r.localId,
       geometry: r.geometry!,
       selected: selected.has(r.localId),
+      imported: alreadyImported.has(r.localId),
     }));
 
   if (services.length === 0) {

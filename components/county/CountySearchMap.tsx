@@ -10,11 +10,16 @@ export interface SearchMapFeature {
   localId: string;
   geometry: GeoJSON.Geometry;
   selected: boolean;
+  // Already in the user's records: imported earlier this session, or
+  // matching a parcel that existed before the session.
+  imported: boolean;
 }
 
 // Satellite preview of county search results. Clicking a polygon reports
-// its id; selected parcels fill kelly green; the highlighted parcel gets a
-// bright outline and the map zooms to it.
+// its id; selected parcels fill kelly green; parcels already imported
+// fill dark pine with a mint outline (with a small legend when any
+// exist); the highlighted parcel gets a bright outline and the map
+// zooms to it.
 export default function CountySearchMap({
   features,
   highlightedId,
@@ -47,13 +52,25 @@ export default function CountySearchMap({
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
       });
+      // Selection beats the imported tint so update-geometry picks still
+      // read as selected while working through duplicates.
       map.addLayer({
         id: "results-fill",
         type: "fill",
         source: "results",
         paint: {
-          "fill-color": "#39b54a",
-          "fill-opacity": ["case", ["get", "selected"], 0.35, 0.08],
+          "fill-color": [
+            "case",
+            ["get", "selected"], "#39b54a",
+            ["get", "imported"], "#14532d",
+            "#39b54a",
+          ],
+          "fill-opacity": [
+            "case",
+            ["get", "selected"], 0.35,
+            ["get", "imported"], 0.45,
+            0.08,
+          ],
         },
       });
       map.addLayer({
@@ -61,8 +78,18 @@ export default function CountySearchMap({
         type: "line",
         source: "results",
         paint: {
-          "line-color": ["case", ["get", "selected"], "#39b54a", "#ffffff"],
-          "line-width": ["case", ["get", "selected"], 2.5, 1.5],
+          "line-color": [
+            "case",
+            ["get", "selected"], "#39b54a",
+            ["get", "imported"], "#a7f3d0",
+            "#ffffff",
+          ],
+          "line-width": [
+            "case",
+            ["get", "selected"], 2.5,
+            ["get", "imported"], 2,
+            1.5,
+          ],
         },
       });
       map.addLayer({
@@ -107,7 +134,11 @@ export default function CountySearchMap({
         (f): Feature => ({
           type: "Feature",
           geometry: f.geometry as GeoJSON.Geometry,
-          properties: { localId: f.localId, selected: f.selected },
+          properties: {
+            localId: f.localId,
+            selected: f.selected,
+            imported: f.imported,
+          },
         })
       ),
     };
@@ -143,5 +174,23 @@ export default function CountySearchMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightedId]);
 
-  return <div ref={containerRef} className="h-72 w-full rounded-xl md:h-96" />;
+  const anyImported = features.some((f) => f.imported);
+
+  return (
+    <div className="relative">
+      <div ref={containerRef} className="h-72 w-full rounded-xl md:h-96" />
+      {anyImported ? (
+        <div className="absolute bottom-2 left-2 space-y-0.5 rounded-lg bg-white/95 px-2.5 py-1.5 shadow-md">
+          <p className="flex items-center gap-1.5 text-xs text-gray-700">
+            <span className="h-3 w-3 rounded-[2px] border border-[#a7f3d0] bg-[#14532d]/70" />
+            Already imported
+          </p>
+          <p className="flex items-center gap-1.5 text-xs text-gray-700">
+            <span className="h-3 w-3 rounded-[2px] border border-kelly-500 bg-kelly-500/40" />
+            Selected
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
 }
