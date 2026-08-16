@@ -44,7 +44,11 @@ export async function POST(request: Request) {
       where: "1=1",
       maxFeatures: 1,
     });
-    const normalized = normalizeFeatures(features, mapping);
+    const normalized = normalizeFeatures(
+      features,
+      mapping,
+      String(body.service_url ?? "county service")
+    );
     if (normalized.length === 0) {
       return NextResponse.json(
         { error: "The query worked but returned no usable record; check the layer." },
@@ -57,6 +61,7 @@ export async function POST(request: Request) {
         parcel_number: sample.parcel_number,
         owner_name: sample.owner_name,
         deeded_acres: sample.deeded_acres,
+        computed_acres: sample.computed_acres,
         situs: sample.situs,
         has_geometry: !!sample.geometry,
       },

@@ -3,6 +3,8 @@
 // centralize pagination, format fallback, and error handling.
 
 import { arcgisToGeoJSON } from "@terraformer/arcgis";
+import turfArea from "@turf/area";
+import { ensureWgs84 } from "@/lib/geo/spatialRef";
 import type { CountyParcelFeature, LayerField } from "@/lib/gis";
 
 const TIMEOUT_MS = 15000;
@@ -206,6 +208,15 @@ export async function queryLayerFeatures(
   return { features: collected, truncated };
 }
 
+// Normalize raw features to standard keys. Counties publish acres
+// attributes inconsistently (Colbert returns 0.0 or null on many
+// parcels), so deeded_acres is null unless the attribute is a real
+// positive number, and computed_acres carries a geodesic area from the
+// boundary as the fallback. Features without geometry are kept (flagged
+// in the UI, not importable) rather than silently dropped. A spatial
+// reference guard repairs servers that ignore outSR=4326 and return
+// Web Mercator, warning with the service label so the registry entry
+// can be reviewed.
 export function normalizeFeatures(
   features: RawFeature[],
   mapping: {
@@ -213,24 +224,47 @@ export function normalizeFeatures(
     owner_field: string;
     acres_field: string | null;
     situs_field: string | null;
-  }
+  },
+  serviceLabel = "county service"
 ): CountyParcelFeature[] {
-  return features
-    .filter((f) => f.geometry)
-    .map((f) => {
-      const attrs = f.properties;
-      const acresRaw = mapping.acres_field ? attrs[mapping.acres_field] : null;
-      return {
-        geometry: f.geometry!,
-        parcel_number: String(attrs[mapping.parcel_field] ?? "").trim(),
-        owner_name: String(attrs[mapping.owner_field] ?? "").trim(),
-        deeded_acres:
-          acresRaw !== null && acresRaw !== undefined && acresRaw !== ""
-            ? Number(acresRaw)
-            : null,
-        situs: mapping.situs_field
-          ? String(attrs[mapping.situs_field] ?? "").trim() || null
+  let warnedReprojection = false;
+  return features.map((f) => {
+    let geometry = f.geometry;
+    if (geometry) {
+      const fixed = ensureWgs84(geometry);
+      geometry = fixed.geometry;
+      if (fixed.reprojected && !warnedReprojection) {
+        warnedReprojection = true;
+        console.warn(
+          `[gis] ${serviceLabel} returned Web Mercator coordinates despite outSR=4326; reprojected to WGS84. Review this registry entry.`
+        );
+      }
+    }
+    let computedAcres: number | null = null;
+    if (geometry) {
+      try {
+        computedAcres =
+          Math.round((turfArea(geometry) / 4046.8564224) * 10) / 10;
+      } catch {
+        computedAcres = null;
+      }
+    }
+    const attrs = f.properties;
+    const acresRaw = mapping.acres_field ? attrs[mapping.acres_field] : null;
+    const deeded = Number(acresRaw);
+    return {
+      geometry,
+      parcel_number: String(attrs[mapping.parcel_field] ?? "").trim(),
+      owner_name: String(attrs[mapping.owner_field] ?? "").trim(),
+      deeded_acres:
+        acresRaw !== null && acresRaw !== undefined && acresRaw !== "" &&
+        Number.isFinite(deeded) && deeded > 0
+          ? deeded
           : null,
-      };
-    });
+      computed_acres: computedAcres,
+      situs: mapping.situs_field
+        ? String(attrs[mapping.situs_field] ?? "").trim() || null
+        : null,
+    };
+  });
 }

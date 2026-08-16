@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       where,
       maxFeatures: MAX_FEATURES,
     });
-    const normalized = normalizeFeatures(features, service);
+    const normalized = normalizeFeatures(features, service, service.display_name);
     return NextResponse.json({
       features: normalized,
       truncated,
@@ -127,7 +127,7 @@ async function entitySearch(
   // the canonical owner name so client and server agree on grouping.
   const seen = new Set<string>();
   const out: EntityParcelFeature[] = [];
-  for (const feature of normalizeFeatures(collected, service)) {
+  for (const feature of normalizeFeatures(collected, service, service.display_name)) {
     if (feature.parcel_number.length > 0) {
       if (seen.has(feature.parcel_number)) continue;
       seen.add(feature.parcel_number);

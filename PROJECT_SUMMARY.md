@@ -23,8 +23,10 @@ and Postgres row level security guarantees each org sees only its own data.
 - Anthropic API (claude-sonnet-4-6) planned for AI document extraction in
   Phase 3+
 - Mobile-first responsive PWA (manifest + icons wired; no service worker yet)
+- @turf/area for geodesic pre-import acre estimates in the GIS proxy
 - Vitest (dev only) for unit tests: npm test runs lib/ownerNames.test.ts
-  covering owner-name normalization and clustering
+  (owner-name normalization and clustering) and lib/geo/spatialRef.test.ts
+  (Web Mercator detection and reprojection)
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -461,7 +463,21 @@ Functions and views:
     resultOffset pagination, f=geojson with Esri JSON +
     @terraformer/arcgis fallback, 200-feature cap in the classic modes
     with a narrow-your-search notice, 15s timeout with a friendly
-    error.
+    error. ACRES HANDLING (counties publish acres attributes
+    inconsistently; Colbert returns 0.0 or null on many parcels): the
+    proxy nulls any acres attribute that is missing or <= 0 (junk 0
+    never displays or saves; deeded_acres stores NULL, never 0) and
+    computes computed_acres for every feature with @turf/area
+    (geodesic, 1 decimal). The UI prefers real deeded acres and falls
+    back to the estimate with an "est." suffix and "Estimated from
+    parcel boundary" hint; mixed totals note "incl. estimates";
+    post-import the PostGIS generated column stays the source of truth
+    (turf agrees within a fraction of a percent). Features the county
+    returns without geometry are kept, flagged "no boundary returned",
+    and cannot be selected for import. A spatial reference guard
+    (lib/geo/spatialRef.ts, unit-tested) detects servers that ignore
+    outSR=4326 and return Web Mercator, reprojects to WGS84 before any
+    display or save, and console-warns naming the service.
   - /admin/gis (platform admins only; Admin nav item appears only for
     them): registry list with status chips and re-verify, add-service
     flow (paste layer URL, auto-read fields with guessed mappings,

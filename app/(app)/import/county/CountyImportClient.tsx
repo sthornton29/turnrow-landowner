@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatNumber } from "@/lib/format";
-import { approxAcres, toMultiPolygon } from "@/lib/geo/normalize";
+import { toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
 import { clusterOwners, pickDisplayName } from "@/lib/ownerNames";
 import { ENTITY_TYPE_LABELS, guessEntityType } from "@/lib/entities";
@@ -22,8 +22,29 @@ const CountySearchMap = dynamic(
 
 interface ResultRow extends EntityParcelFeature {
   localId: string;
-  multiPolygon: MultiPolygon;
-  gisAcres: number;
+  // null when the county returned no boundary: flagged, not importable.
+  multiPolygon: MultiPolygon | null;
+}
+
+// Acres preference: the county's deeded figure when it is a real
+// positive number, otherwise the geodesic estimate computed by the
+// proxy from the boundary. Junk 0.0 attributes (Colbert) never show.
+function acresOf(
+  r: ResultRow
+): { value: number; estimated: boolean } | null {
+  if (r.deeded_acres !== null && r.deeded_acres > 0) {
+    return { value: r.deeded_acres, estimated: false };
+  }
+  if (r.computed_acres !== null) {
+    return { value: r.computed_acres, estimated: true };
+  }
+  return null;
+}
+
+function acresText(r: ResultRow): string {
+  const acres = acresOf(r);
+  if (!acres) return "no boundary returned";
+  return `${formatAcres(acres.value)} ac${acres.estimated ? " est." : ""}`;
 }
 
 interface KnownAlias {
@@ -148,15 +169,12 @@ export default function CountyImportClient({
       if (!res.ok) throw new Error(body.error ?? "Search failed.");
       const rows: ResultRow[] = [];
       for (const f of body.features as EntityParcelFeature[]) {
-        const mp = toMultiPolygon(f.geometry);
-        if (!mp) continue;
         rows.push({
           ...f,
           owner_normalized: f.owner_normalized ?? "",
           owner_stripped: f.owner_stripped ?? [],
           localId: crypto.randomUUID(),
-          multiPolygon: mp,
-          gisAcres: approxAcres(mp),
+          multiPolygon: f.geometry ? toMultiPolygon(f.geometry) : null,
         });
       }
       setResults(rows);
@@ -174,7 +192,7 @@ export default function CountyImportClient({
             id: r.localId,
             ownerName: r.owner_name,
             normalized: r.owner_normalized,
-            acres: r.deeded_acres ?? r.gisAcres,
+            acres: acresOf(r)?.value ?? 0,
           })),
           aliasMap
         );
@@ -203,6 +221,12 @@ export default function CountyImportClient({
   }
 
   function toggle(localId: string) {
+    // Rows without a boundary cannot be selected for import.
+    const row = rowById.get(localId);
+    if (row && !row.multiPolygon) {
+      setHighlighted(localId);
+      return;
+    }
     setSelected((set) => {
       const next = new Set(set);
       if (next.has(localId)) next.delete(localId);
@@ -214,9 +238,10 @@ export default function CountyImportClient({
 
   const selectedRows = results.filter((r) => selected.has(r.localId));
   const selectedAcres = selectedRows.reduce(
-    (sum, r) => sum + (r.deeded_acres ?? r.gisAcres),
+    (sum, r) => sum + (acresOf(r)?.value ?? 0),
     0
   );
+  const selectedHasEstimates = selectedRows.some((r) => acresOf(r)?.estimated);
 
   // ---------------------------------------------------------------------
   // Owner group helpers (entity mode)
@@ -229,7 +254,11 @@ export default function CountyImportClient({
   }
 
   function groupAcres(group: OwnerGroup): number {
-    return groupRows(group).reduce((sum, r) => sum + (r.deeded_acres ?? r.gisAcres), 0);
+    return groupRows(group).reduce((sum, r) => sum + (acresOf(r)?.value ?? 0), 0);
+  }
+
+  function groupHasEstimates(group: OwnerGroup): boolean {
+    return groupRows(group).some((r) => acresOf(r)?.estimated);
   }
 
   function groupSelectedCount(group: OwnerGroup): number {
@@ -250,8 +279,9 @@ export default function CountyImportClient({
     const include = groupSelectedCount(group) === 0;
     const next = new Set(selected);
     for (const id of group.rowIds) {
-      if (include) next.add(id);
-      else next.delete(id);
+      // Only rows with a boundary are importable.
+      if (include && rowById.get(id)?.multiPolygon) next.add(id);
+      else if (!include) next.delete(id);
     }
     setSelected(next);
   }
@@ -487,7 +517,12 @@ export default function CountyImportClient({
     let firstParcelId: string | null = null;
     let importedCount = 0;
 
-    for (const row of selectedRows) {
+    // Selection already blocks boundary-less rows; this narrows the type.
+    const importRows = selectedRows.filter(
+      (r): r is ResultRow & { multiPolygon: MultiPolygon } =>
+        r.multiPolygon !== null
+    );
+    for (const row of importRows) {
       const dup = duplicates.get(row.localId);
       if (dup) {
         const choice = dupChoices[row.localId] ?? "skip";
@@ -581,11 +616,13 @@ export default function CountyImportClient({
     router.push(`/map?focus=${focus}`);
   }
 
-  const mapFeatures = results.map((r) => ({
-    localId: r.localId,
-    geometry: r.geometry,
-    selected: selected.has(r.localId),
-  }));
+  const mapFeatures = results
+    .filter((r) => r.geometry !== null)
+    .map((r) => ({
+      localId: r.localId,
+      geometry: r.geometry!,
+      selected: selected.has(r.localId),
+    }));
 
   if (services.length === 0) {
     return (
@@ -609,9 +646,17 @@ export default function CountyImportClient({
   const assignPanel =
     selected.size > 0 ? (
       <div className="space-y-3 rounded-xl border border-kelly-100 bg-kelly-50 p-4">
-        <h2 className="text-base font-semibold text-pine-900">
+        <h2
+          className="text-base font-semibold text-pine-900"
+          title={
+            selectedHasEstimates
+              ? "Some acres estimated from parcel boundaries"
+              : undefined
+          }
+        >
           Import {formatNumber(selected.size)} parcel
-          {selected.size === 1 ? "" : "s"} ({formatAcres(selectedAcres)} acres)
+          {selected.size === 1 ? "" : "s"} ({formatAcres(selectedAcres)} acres
+          {selectedHasEstimates ? " incl. estimates" : ""})
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white">
@@ -926,7 +971,11 @@ export default function CountyImportClient({
                 >
                   <div className="flex gap-3">
                     <div className="w-28 shrink-0">
-                      <MiniParcelSketch shapes={rows.map((r) => r.multiPolygon)} />
+                      <MiniParcelSketch
+                        shapes={rows
+                          .map((r) => r.multiPolygon)
+                          .filter((mp): mp is MultiPolygon => mp !== null)}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -939,10 +988,18 @@ export default function CountyImportClient({
                           </span>
                         ) : null}
                       </div>
-                      <p className="text-sm text-gray-600">
+                      <p
+                        className="text-sm text-gray-600"
+                        title={
+                          groupHasEstimates(group)
+                            ? "Some acres estimated from parcel boundaries"
+                            : undefined
+                        }
+                      >
                         {formatNumber(rows.length)} parcel
                         {rows.length === 1 ? "" : "s"} ·{" "}
                         {formatAcres(groupAcres(group))} acres
+                        {groupHasEstimates(group) ? " incl. est." : ""}
                         {selectedCount > 0 && selectedCount < rows.length
                           ? ` · ${formatNumber(selectedCount)} of ${formatNumber(rows.length)} included`
                           : ""}
@@ -1023,6 +1080,7 @@ export default function CountyImportClient({
                               checked={selected.has(r.localId)}
                               onChange={() => toggle(r.localId)}
                               onClick={(e) => e.stopPropagation()}
+                              disabled={!r.multiPolygon}
                               className="h-4 w-4 accent-kelly-500"
                             />
                             <span className="font-medium text-gray-900">
@@ -1033,8 +1091,20 @@ export default function CountyImportClient({
                                 {r.owner_stripped.join(", ")}
                               </span>
                             ) : null}
-                            <span className="ml-auto text-gray-500">
-                              {formatAcres(r.deeded_acres ?? r.gisAcres)} ac
+                            <span
+                              className={
+                                "ml-auto " +
+                                (acresOf(r)
+                                  ? "text-gray-500"
+                                  : "text-xs text-amber-700")
+                              }
+                              title={
+                                acresOf(r)?.estimated
+                                  ? "Estimated from parcel boundary"
+                                  : undefined
+                              }
+                            >
+                              {acresText(r)}
                             </span>
                           </li>
                         ))}
@@ -1070,7 +1140,13 @@ export default function CountyImportClient({
               {formatNumber(results.length)} parcel{results.length === 1 ? "" : "s"} found
             </span>
             <button
-              onClick={() => setSelected(new Set(results.map((r) => r.localId)))}
+              onClick={() =>
+                setSelected(
+                  new Set(
+                    results.filter((r) => r.multiPolygon).map((r) => r.localId)
+                  )
+                )
+              }
               className="text-sm font-medium text-kelly-700 hover:underline"
             >
               Select all
@@ -1082,8 +1158,16 @@ export default function CountyImportClient({
               None
             </button>
             {selected.size > 0 ? (
-              <span className="ml-auto text-sm font-medium text-pine-900">
+              <span
+                className="ml-auto text-sm font-medium text-pine-900"
+                title={
+                  selectedHasEstimates
+                    ? "Some acres estimated from parcel boundaries"
+                    : undefined
+                }
+              >
                 {formatNumber(selected.size)} selected · {formatAcres(selectedAcres)} acres
+                {selectedHasEstimates ? " incl. estimates" : ""}
               </span>
             ) : null}
           </div>
@@ -1105,12 +1189,23 @@ export default function CountyImportClient({
                   checked={selected.has(r.localId)}
                   onChange={() => toggle(r.localId)}
                   onClick={(e) => e.stopPropagation()}
+                  disabled={!r.multiPolygon}
                   className="h-4 w-4 accent-kelly-500"
                 />
                 <span className="font-medium text-gray-900">{r.parcel_number}</span>
                 <span className="text-sm text-gray-500">{r.owner_name}</span>
-                <span className="ml-auto text-sm text-gray-500">
-                  {formatAcres(r.deeded_acres ?? r.gisAcres)} ac
+                <span
+                  className={
+                    "ml-auto text-sm " +
+                    (acresOf(r) ? "text-gray-500" : "text-amber-700")
+                  }
+                  title={
+                    acresOf(r)?.estimated
+                      ? "Estimated from parcel boundary"
+                      : undefined
+                  }
+                >
+                  {acresText(r)}
                   {r.situs ? ` · ${r.situs}` : ""}
                 </span>
               </li>

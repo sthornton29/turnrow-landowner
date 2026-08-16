@@ -25,10 +25,17 @@ export interface LayerField {
 
 // A search result feature with attributes normalized to standard keys.
 export interface CountyParcelFeature {
-  geometry: GeoJSON.Geometry;
+  // null when the county returned no boundary for this record; such
+  // rows are shown flagged and cannot be imported.
+  geometry: GeoJSON.Geometry | null;
   parcel_number: string;
   owner_name: string;
+  // null unless the county attribute is a real positive number: junk
+  // 0.0 values (Colbert publishes many) never survive the proxy.
   deeded_acres: number | null;
+  // Geodesic acres computed from the boundary with @turf/area, one
+  // decimal; the display fallback when deeded acres are missing.
+  computed_acres: number | null;
   situs: string | null;
 }
 
