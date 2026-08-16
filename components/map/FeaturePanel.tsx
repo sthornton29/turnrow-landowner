@@ -180,6 +180,7 @@ export default function FeaturePanel({
   farmActivity = null,
   onClose,
   onEditGeometry,
+  onSplit,
   onChanged,
 }: {
   entityType: EntityType;
@@ -189,6 +190,7 @@ export default function FeaturePanel({
   farmActivity?: FarmActivityInfo[] | null;
   onClose: () => void;
   onEditGeometry: () => void;
+  onSplit?: () => void; // timber stands: split with a drawn line
   onChanged: () => void;
 }) {
   const supabase = createClient();
@@ -374,6 +376,22 @@ export default function FeaturePanel({
             >
               {geometryButtonLabel}
             </button>
+            {entityType === "timber_stand" && onSplit ? (
+              <button
+                onClick={onSplit}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Split
+              </button>
+            ) : null}
+            {entityType === "property" ? (
+              <Link
+                href={`/timber-scan/${row.id}`}
+                className="rounded-lg border border-pine-800 px-3 py-1.5 text-sm font-medium text-pine-900 hover:bg-kelly-50"
+              >
+                Timber Scan
+              </Link>
+            ) : null}
             <button
               onClick={remove}
               disabled={busy}

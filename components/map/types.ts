@@ -8,7 +8,7 @@ import type {
   TimberStandGeo,
 } from "@/types/db";
 
-export type MapMode = "view" | "draw" | "edit" | "place";
+export type MapMode = "view" | "draw" | "edit" | "place" | "split";
 
 export interface SelectedFeature {
   entityType: EntityType;

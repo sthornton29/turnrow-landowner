@@ -29,17 +29,39 @@ export default async function TimberPage() {
       </div>
 
       {(stands ?? []).length === 0 ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-          No timber stands yet. Draw them on the{" "}
-          <Link href="/map" className="font-medium text-kelly-700 hover:underline">
-            map
-          </Link>{" "}
-          (Add, then Boundary, then Timber) or assign imported boundaries as
-          timber stands on the{" "}
-          <Link href="/import" className="font-medium text-kelly-700 hover:underline">
-            import page
-          </Link>
-          .
+        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
+          <p>
+            No timber stands yet. The fastest start: run{" "}
+            <span className="font-semibold text-pine-900">Timber Scan</span> on
+            a property; it proposes stand boundaries from USDA land cover,
+            already broken into pine, hardwood, and mixed, for you to correct
+            and confirm.
+          </p>
+          {(properties ?? []).length > 0 ? (
+            <p className="flex flex-wrap justify-center gap-2">
+              {(properties ?? []).slice(0, 4).map((p) => (
+                <Link
+                  key={p.id}
+                  href={`/timber-scan/${p.id}`}
+                  className="rounded-lg border border-pine-800 px-3 py-1.5 font-medium text-pine-900 hover:bg-kelly-50"
+                >
+                  Scan {p.name}
+                </Link>
+              ))}
+            </p>
+          ) : null}
+          <p>
+            You can also draw stands on the{" "}
+            <Link href="/map" className="font-medium text-kelly-700 hover:underline">
+              map
+            </Link>{" "}
+            (Add, then Boundary, then Timber) or assign imported boundaries as
+            timber stands on the{" "}
+            <Link href="/import" className="font-medium text-kelly-700 hover:underline">
+              import page
+            </Link>
+            .
+          </p>
         </div>
       ) : (
         (properties ?? [])

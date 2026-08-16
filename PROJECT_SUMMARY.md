@@ -1,7 +1,7 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-16 (entity level, five new Alabama counties, FSA
-numbers on properties)
+Last updated: 2026-08-16 (Timber Scan added; earlier same day: entity
+level, five new Alabama counties, FSA numbers, county import loop)
 
 ## What this product is
 
@@ -23,7 +23,10 @@ and Postgres row level security guarantees each org sees only its own data.
 - Anthropic API (claude-sonnet-4-6) planned for AI document extraction in
   Phase 3+
 - Mobile-first responsive PWA (manifest + icons wired; no service worker yet)
-- @turf/area for geodesic pre-import acre estimates in the GIS proxy
+- @turf/area for geodesic pre-import acre estimates in the GIS proxy;
+  @turf/intersect, difference, union, buffer, simplify for Timber Scan
+  clipping and the split tools; geotiff + proj4 for CDL raster decode
+  and EPSG:5070 <-> 4326 reprojection
 - Vitest (dev only) for unit tests: npm test runs lib/ownerNames.test.ts
   (owner-name normalization and clustering) and lib/geo/spatialRef.test.ts
   (Web Mercator detection and reprojection)
@@ -254,6 +257,52 @@ Entity level (migrations 0007 and 0009; org RLS, same policy pattern):
 - Future ideas, deliberately out of scope for now: ownership
   percentages/members within an entity, inter-entity leases, per-entity
   user permissions.
+
+Timber Scan (migration 0011 + /api/timber-scan + /timber-scan/[id]):
+
+- Proposes timber stand boundaries for a property automatically, broken
+  out into pine/hardwood/mixed/wetland-hardwood, from the USDA NASS
+  Cropland Data Layer via CropScape (30m annual land cover; endpoints
+  and forest class codes 141/142/143 live-verified during the build;
+  190 woody wetlands maps to hardwood with a prefilled bottomland
+  note). Geometry AND class both come from the raster; no vision model
+  ever produces geometry.
+- timber_scans table (org RLS, composite property FK): cached scan
+  result jsonb per (property, cdl_year); Rescan forces refresh.
+- Pipeline (lib/timberScan/, unit-tested against a synthetic fixture of
+  the classic north Alabama layout): classify pixels per class ->
+  gentle lone-pixel despeckle (1px hardwood drains survive) ->
+  pixel-center clip to the property boundary -> per-class pixel-edge
+  polygonization (own tracer; class borders are coincident by
+  construction, verified in the fixture test; only lossless collinear
+  merging, because lossy simplification would break that guarantee) ->
+  holes under 1 acre filled, slivers under 2 acres dropped unless
+  elongated ~5x (drain shapes kept) -> per-polygon composition readout
+  from pixels ("92% pine, 8% hardwood") -> reproject 5070->4326 (proj4)
+  -> exact vector clip to the property line and difference against
+  saved stands (never proposes what is mapped) -> ag field overlap
+  flagged over 1 acre.
+- Review page /timber-scan/[id]: summary banner (wooded acres + per
+  class breakout), draft proposals over satellite in DRAFT-only colors
+  (amber pine, sky hardwood, violet mixed, teal wetland; dashed), chips
+  with class/acres/composition, per-proposal accept / remove / merge
+  (across classes, composition re-blended, dominant re-suggested) /
+  vertex edit / split with a drawn line (thin-buffer difference), an
+  honest-limitations panel (30m accuracy, sub-100ft drains, same-type
+  merging, young plantings invisible), and a confirm form per accepted
+  stand (name defaults Stand N, pine requires the planted/natural
+  choice, species prefilled Loblolly for pine only, wetland note
+  prefilled) saving through the normal insert + set_geometry path.
+- AI assist (/api/timber-scan/vision): planted vs natural for pine
+  proposals only, on demand per stand or all-at-once, one Mapbox Static
+  zoom-16 image + one claude-sonnet-4-6 forced-tool call per stand,
+  never automatic; suggestions prefill amber-highlighted and unclear
+  suggests nothing.
+- Entry points: Timber Scan button on property detail, the map's
+  property click panel, and the /timber empty state. The split tool was
+  also added for EXISTING saved stands (map panel Split button: draw a
+  line, largest part keeps the record, other parts become new stands
+  with copied info).
 
 The farm side lives in the separate grain-tracker repo (the Turnrow farm
 software): migration 070_partner_shares.sql, share management UI at

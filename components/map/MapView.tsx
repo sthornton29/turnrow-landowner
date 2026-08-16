@@ -24,6 +24,9 @@ import {
 import { ASSET_TYPES } from "@/lib/assetTypes";
 import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
+import turfBuffer from "@turf/buffer";
+import turfDifference from "@turf/difference";
+import turfArea from "@turf/area";
 import {
   cropColor,
   cropLegend,
@@ -446,6 +449,10 @@ export default function MapView({
     map.on("draw.create", (e: { features: Feature[] }) => {
       const geometry = e.features[0]?.geometry;
       if (!geometry) return;
+      if (splitTargetRef.current && geometry.type === "LineString") {
+        applySplitRef.current(geometry);
+        return;
+      }
       if (editTargetRef.current) {
         saveEditedRef.current();
         return;
@@ -664,7 +671,123 @@ export default function MapView({
     setEditHint(null);
     drawKindRef.current = null;
     editTargetRef.current = null;
+    splitTargetRef.current = null;
   }
+
+  // ---- Split a saved timber stand with a drawn line ----
+  const splitTargetRef = useRef<SelectedFeature | null>(null);
+
+  function startSplitStand() {
+    const draw = drawRef.current;
+    if (!draw || !selected || selected.entityType !== "timber_stand") return;
+    splitTargetRef.current = selected;
+    setSelected(null);
+    setSaveError(null);
+    setMode("split");
+    setEditHint(
+      "Draw a line all the way across the stand. Double tap the last point to finish."
+    );
+    draw.deleteAll();
+    draw.changeMode("draw_line_string");
+  }
+
+  const applySplitRef = useRef<(line: Geometry) => void>(() => {});
+  applySplitRef.current = async (line: Geometry) => {
+    const target = splitTargetRef.current;
+    if (!target || line.type !== "LineString") return;
+    const stand = timber.find((t) => t.id === target.id);
+    const shape = stand?.boundary_geojson;
+    if (!stand || !shape) {
+      resetDrawState();
+      return;
+    }
+    // Subtract a hair-thin buffer of the line; each remaining part
+    // becomes its own stand.
+    const blade = turfBuffer(
+      { type: "Feature", properties: {}, geometry: line },
+      0.0005,
+      { units: "kilometers" }
+    );
+    const remainder = blade
+      ? turfDifference({
+          type: "FeatureCollection",
+          features: [
+            { type: "Feature", properties: {}, geometry: shape },
+            blade,
+          ],
+        })
+      : null;
+    const parts: MultiPolygon["coordinates"] =
+      remainder?.geometry.type === "MultiPolygon"
+        ? remainder.geometry.coordinates
+        : remainder?.geometry.type === "Polygon"
+          ? [remainder.geometry.coordinates]
+          : [];
+    if (parts.length < 2) {
+      setSaveError("The line did not cross the whole stand; nothing was split.");
+      drawRef.current?.deleteAll();
+      drawRef.current?.changeMode("draw_line_string");
+      return;
+    }
+    const acresOfPart = (c: MultiPolygon["coordinates"][number]) =>
+      turfArea({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Polygon", coordinates: c },
+      }) / 4046.8564224;
+    const ordered = [...parts].sort((a, b) => acresOfPart(b) - acresOfPart(a));
+    if (
+      !window.confirm(
+        `Split "${stand.name}" into ${ordered.length} stands (about ${ordered
+          .map((p) => acresOfPart(p).toFixed(1))
+          .join(" and ")} acres)? Stand info is copied to the new stand${ordered.length > 2 ? "s" : ""}.`
+      )
+    ) {
+      resetDrawState();
+      return;
+    }
+    setSaving(true);
+    const failures: string[] = [];
+    const largest: Geometry = { type: "Polygon", coordinates: ordered[0] };
+    const gErr = await applyGeometry(target, largest);
+    if (gErr) failures.push(gErr.message);
+    for (let i = 1; i < ordered.length; i++) {
+      const { data, error } = await supabase
+        .from("timber_stands")
+        .insert({
+          organization_id: orgId,
+          property_id: stand.property_id,
+          name: `${stand.name} (${i + 1})`,
+          stand_type: stand.stand_type,
+          species: stand.species,
+          year_established: stand.year_established,
+          site_index: stand.site_index,
+          last_thinning_year: stand.last_thinning_year,
+          last_burn_year: stand.last_burn_year,
+          notes: stand.notes,
+        })
+        .select("id")
+        .single();
+      if (error || !data) {
+        failures.push(error?.message ?? "insert failed");
+        continue;
+      }
+      const gErr2 = await applyGeometry(
+        { entityType: "timber_stand", id: data.id },
+        { type: "Polygon", coordinates: ordered[i] }
+      );
+      if (gErr2) failures.push(gErr2.message);
+    }
+    setSaving(false);
+    if (failures.length > 0) {
+      setSaveError("Split problems: " + failures.slice(0, 2).join("; "));
+      return;
+    }
+    const sel = { ...target };
+    resetDrawState();
+    await loadData();
+    setSelected(sel);
+  };
 
   function startAdd(kind: "boundary" | "line" | "asset_point") {
     const draw = drawRef.current;
@@ -1182,6 +1305,7 @@ export default function MapView({
           }
           onClose={() => setSelected(null)}
           onEditGeometry={startEditGeometry}
+          onSplit={startSplitStand}
           onChanged={loadData}
         />
       ) : null}

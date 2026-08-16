@@ -145,12 +145,20 @@ export default async function PropertyDetailPage({
               />
             </div>
           </div>
-          <Link
-            href="/map"
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-          >
-            View on map
-          </Link>
+          <span className="flex gap-2">
+            <Link
+              href={`/timber-scan/${property.id}`}
+              className="rounded-lg border border-pine-800 px-4 py-2 text-sm font-semibold text-pine-900 hover:bg-kelly-50"
+            >
+              Timber Scan
+            </Link>
+            <Link
+              href="/map"
+              className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+            >
+              View on map
+            </Link>
+          </span>
         </div>
         <div className="mt-2">
           <RowEditor entityType="property" row={property} />
