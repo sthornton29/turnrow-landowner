@@ -11,6 +11,12 @@ import {
   type RentStructure,
   type SchedulePayment,
 } from "@/lib/leaseLogic";
+import {
+  matchLeaseLand,
+  type ExtractedLeaseLand,
+  type MatchableParcel,
+  type MatchableProperty,
+} from "@/lib/leaseLand";
 
 export interface LeasePrefill {
   lease_type?: LeaseType | null;
@@ -24,6 +30,17 @@ export interface LeasePrefill {
   terms?: LeaseTerms | null;
   payment_schedule?: SchedulePayment[] | null;
   special_provisions?: string | null;
+  leased_properties?: ExtractedLeaseLand[] | null;
+  leased_acres_total?: number | null;
+}
+
+// One row of the Leased land section: a lease can cover several
+// properties, and a property can appear in several leases.
+interface LandRow {
+  propertyId: string;
+  acres: string;
+  sourceText: string | null; // how the document described this land
+  aiDerived: boolean; // amber until the user touches the row
 }
 
 interface ExistingLease {
@@ -51,6 +68,8 @@ export default function LeaseForm({
   prefill,
   unsure = [],
   sourceFile,
+  properties = [],
+  parcels = [],
 }: {
   orgId: string;
   tenants: Array<{ id: string; name: string }>;
@@ -58,6 +77,10 @@ export default function LeaseForm({
   prefill?: LeasePrefill | null;
   unsure?: string[];
   sourceFile?: File | null;
+  // For the Leased land section on NEW leases (the lease page manages
+  // land after creation).
+  properties?: MatchableProperty[];
+  parcels?: MatchableParcel[];
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -104,8 +127,41 @@ export default function LeaseForm({
   const [provisions, setProvisions] = useState(
     lease?.special_provisions ?? prefill?.special_provisions ?? ""
   );
+  // Leased land: extracted tract descriptions matched against existing
+  // properties (FSA and parcel numbers are strong evidence; names,
+  // county, and acreage supporting). Suggestions only; every link is
+  // confirmed here before saving.
+  const [land, setLand] = useState<LandRow[]>(() => {
+    if (lease) return [];
+    const extracted = prefill?.leased_properties ?? [];
+    return extracted.map((item): LandRow => {
+      const match = matchLeaseLand(item, properties, parcels);
+      const matched = match.propertyId
+        ? properties.find((p) => p.id === match.propertyId)
+        : null;
+      return {
+        propertyId: match.propertyId ?? "",
+        acres:
+          item.acres !== null
+            ? String(item.acres)
+            : matched?.acres != null
+              ? String(Math.round(matched.acres * 10) / 10)
+              : "",
+        sourceText: item.description || null,
+        aiDerived: true,
+      };
+    });
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function updateLand(i: number, patch: Partial<LandRow>) {
+    setLand((rows) =>
+      rows.map((row, j) =>
+        j === i ? { ...row, ...patch, aiDerived: false } : row
+      )
+    );
+  }
 
   const isUnsure = (key: string) =>
     unsure.includes(key) || unsure.includes(`terms.${key}`);
@@ -184,6 +240,23 @@ export default function LeaseForm({
       setError("Could not save: " + (err?.message ?? ""));
       setBusy(false);
       return;
+    }
+
+    // Link the confirmed leased land (a lease can cover several
+    // properties). Rows with no property picked are simply not linked;
+    // the lease page can link land any time. Best effort: the lease
+    // exists either way, so failures here never strand the user on a
+    // form that would double-create on retry.
+    const landInserts = land
+      .filter((r) => r.propertyId)
+      .map((r) => ({
+        organization_id: orgId,
+        lease_id: data.id,
+        property_id: r.propertyId,
+        leased_acres: r.acres.trim() === "" ? null : Number(r.acres),
+      }));
+    if (landInserts.length > 0) {
+      await supabase.from("lease_lands").insert(landInserts);
     }
 
     // Attach the source document the terms were extracted from.
@@ -525,6 +598,118 @@ export default function LeaseForm({
           </div>
         </div>
       )}
+
+      {/* Leased land: new leases only; the lease page manages links
+          afterward. Multiple rows = multiple properties on one lease. */}
+      {!lease && properties.length > 0 ? (
+        <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="flex items-center justify-between">
+            <label
+              className={
+                "text-sm font-medium text-gray-700" +
+                (isUnsure("leased_properties") ? " rounded bg-amber-100 px-1" : "")
+              }
+            >
+              Leased land
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                setLand((rows) => [
+                  ...rows,
+                  { propertyId: "", acres: "", sourceText: null, aiDerived: false },
+                ])
+              }
+              className="text-sm font-medium text-kelly-700 hover:underline"
+            >
+              + Add property
+            </button>
+          </div>
+          {land.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              {prefill
+                ? "The document did not clearly identify the land. Add the properties this lease covers, or link them later on the lease page."
+                : "Add the properties this lease covers (a lease can cover several). You can also link land later on the lease page."}
+            </p>
+          ) : (
+            land.map((row, i) => {
+              const matched = properties.find((p) => p.id === row.propertyId);
+              return (
+                <div key={i} className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={row.propertyId}
+                      onChange={(e) => {
+                        const propertyId = e.target.value;
+                        const prop = properties.find((p) => p.id === propertyId);
+                        setLand((rows) =>
+                          rows.map((r, j) =>
+                            j === i
+                              ? {
+                                  ...r,
+                                  propertyId,
+                                  aiDerived: false,
+                                  acres:
+                                    r.acres.trim() === "" && prop?.acres != null
+                                      ? String(Math.round(prop.acres * 10) / 10)
+                                      : r.acres,
+                                }
+                              : r
+                          )
+                        );
+                      }}
+                      className={
+                        "min-w-44 flex-1 rounded-lg border px-2 py-1.5 text-sm " +
+                        (row.aiDerived
+                          ? "border-amber-400 bg-amber-50"
+                          : "border-gray-300")
+                      }
+                    >
+                      <option value="">Pick the property...</option>
+                      {properties.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {row.aiDerived && p.id === row.propertyId
+                            ? " (suggested match)"
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={row.acres}
+                      onChange={(e) => updateLand(i, { acres: e.target.value })}
+                      placeholder="Leased acres"
+                      className="w-28 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      title="Contract acres often differ from GIS acres"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setLand((rows) => rows.filter((_, j) => j !== i))}
+                      className="text-xs font-medium text-red-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  {row.sourceText ? (
+                    <p className="text-xs text-gray-500">
+                      Document: {'"'}
+                      {row.sourceText}
+                      {'"'}
+                      {row.aiDerived && !row.propertyId
+                        ? " (no property matched; pick one or leave unlinked)"
+                        : matched && row.aiDerived
+                          ? ` matched to ${matched.name}`
+                          : ""}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : null}
 
       {/* Payment schedule */}
       <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3">

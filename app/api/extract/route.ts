@@ -68,13 +68,43 @@ const LEASE_TOOL: Anthropic.Tool = {
         },
       },
       special_provisions: { type: ["string", "null"], description: "Renewal/termination provisions and any special provisions worth noting, condensed" },
+      leased_properties: {
+        type: "array",
+        description:
+          "Every distinct tract/farm/property the lease covers, one entry per tract (a lease can cover several). Pull the identifiers the document actually uses: farm names, roads/communities, county, stated acres, FSA farm/tract numbers, tax parcel numbers, legal description fragments. Empty array if the document does not identify the land.",
+        items: {
+          type: "object",
+          properties: {
+            description: {
+              type: "string",
+              description:
+                "How the document identifies this land, condensed, e.g. 'the Blythe farm on CR 34, approx. 250 acres'",
+            },
+            acres: { type: ["number", "null"], description: "Acres stated for this tract" },
+            county: { type: ["string", "null"] },
+            state: { type: ["string", "null"] },
+            fsa_numbers: {
+              type: "array",
+              items: { type: "string" },
+              description: "FSA farm/tract numbers mentioned for this land",
+            },
+            parcel_numbers: {
+              type: "array",
+              items: { type: "string" },
+              description: "Tax parcel numbers mentioned for this land",
+            },
+          },
+          required: ["description", "fsa_numbers", "parcel_numbers"],
+          additionalProperties: false,
+        },
+      },
       unsure_fields: {
         type: "array",
         items: { type: "string" },
         description: "Field names from this schema you are not confident about (ambiguous, conflicting, or barely legible in the document)",
       },
     },
-    required: ["lease_type", "terms", "payment_schedule", "unsure_fields"],
+    required: ["lease_type", "terms", "payment_schedule", "leased_properties", "unsure_fields"],
     additionalProperties: false,
   },
 };

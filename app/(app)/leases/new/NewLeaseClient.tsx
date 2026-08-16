@@ -3,15 +3,20 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import LeaseForm, { type LeasePrefill } from "@/components/leases/LeaseForm";
+import type { MatchableParcel, MatchableProperty } from "@/lib/leaseLand";
 
 // Create-lease flow: upload-and-extract is the primary path, manual entry
 // always available. Nothing saves until the user reviews and confirms.
 export default function NewLeaseClient({
   orgId,
   tenants,
+  properties,
+  parcels,
 }: {
   orgId: string;
   tenants: Array<{ id: string; name: string }>;
+  properties: MatchableProperty[];
+  parcels: MatchableParcel[];
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"choose" | "extracting" | "form">("choose");
@@ -94,8 +99,9 @@ export default function NewLeaseClient({
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center">
           <p className="font-medium text-gray-900">Reading the document...</p>
           <p className="mt-1 text-sm text-gray-500">
-            Extracting parties, dates, rent structure, and payment schedule.
-            This usually takes under a minute.
+            Extracting parties, dates, rent structure, payment schedule, and
+            which of your properties the lease covers. This usually takes
+            under a minute.
           </p>
         </div>
       ) : null}
@@ -108,6 +114,8 @@ export default function NewLeaseClient({
             prefill={prefill}
             unsure={unsure}
             sourceFile={sourceFile}
+            properties={properties}
+            parcels={parcels}
           />
         </div>
       ) : null}

@@ -448,7 +448,20 @@ Functions and views:
     forced tool call whose schema mirrors the form). The review form shows
     every extracted value; fields the model flagged as unsure are
     highlighted amber; extracted tenant names fuzzy-match existing tenants
-    (suggested match) or offer to create one. Nothing saves until
+    (suggested match) or offer to create one. The lease extraction also
+    pulls every tract the document covers (description, acres, county,
+    FSA farm numbers, tax parcel numbers) and lib/leaseLand.ts
+    (unit-tested) matches each against existing properties: FSA and
+    parcel numbers are strong evidence (digits-only comparison), name
+    words, county, and acreage-within-15% supporting; a Leased land
+    section on the review form preselects the suggested property per
+    tract (amber until touched, source text quoted underneath), supports
+    any number of properties on one lease (and manual + Add property
+    rows), prefills leased acres from the document else GIS acres, and
+    saves confirmed rows as lease_lands. Unmatched tracts stay visible
+    with their document text and simply save unlinked (linkable later on
+    the lease page). Multiple leases per property need no special
+    handling (lease_lands is many-to-many). Nothing saves until
     confirmed; extraction failures fall back to the manual form. The
     source PDF is attached to the record on save. Manual entry always
     available.
