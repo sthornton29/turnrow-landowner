@@ -44,6 +44,29 @@ export interface PropertyGeo {
   boundary_geojson: MultiPolygon | null;
   created_at: string;
   updated_at: string;
+  entity_id: string | null;
+}
+
+// The ownership level above properties: LLCs, corporations, trusts, and
+// individuals. Unified with the county-records owner matching: aliases
+// (entity_aliases) hang off these same rows.
+export type LandEntityType =
+  | "individual"
+  | "llc"
+  | "corporation"
+  | "partnership"
+  | "trust"
+  | "estate"
+  | "other";
+
+export interface LandEntity {
+  id: string;
+  organization_id: string;
+  name: string;
+  entity_type: LandEntityType;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ParcelGeo {
@@ -154,7 +177,8 @@ export type DocumentEntityType =
   | "tenant"
   | "lease"
   | "timber_sale"
-  | "tax_statement";
+  | "tax_statement"
+  | "entity";
 
 export interface DocumentRow {
   id: string;

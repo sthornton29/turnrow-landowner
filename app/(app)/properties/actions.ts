@@ -14,6 +14,7 @@ export async function createProperty(formData: FormData) {
     name,
     county: String(formData.get("county") ?? "").trim() || null,
     state: String(formData.get("state") ?? "").trim() || null,
+    entity_id: String(formData.get("entity_id") ?? "").trim() || null,
   });
   revalidatePath("/properties");
 }

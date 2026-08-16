@@ -11,6 +11,8 @@ import { formatDollars } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import type { AssetType } from "@/types/db";
 import RowEditor from "@/components/lists/RowEditor";
+import EntityPicker from "@/components/entities/EntityPicker";
+import MoveChildren from "@/components/properties/MoveChildren";
 import { deleteProperty } from "../actions";
 
 export const metadata = { title: "Property" };
@@ -21,11 +23,11 @@ export default async function PropertyDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase } = await requireOrg();
+  const { supabase, profile } = await requireOrg();
 
   const { data: property } = await supabase
     .from("properties")
-    .select("id, name, county, state, notes, acres")
+    .select("id, name, county, state, notes, acres, entity_id")
     .eq("id", id)
     .single();
   if (!property) notFound();
@@ -63,6 +65,12 @@ export default async function PropertyDetailPage({
       .eq("property_id", id)
       .order("name"),
   ]);
+
+  const [{ data: entities }, { data: allProperties }] = await Promise.all([
+    supabase.from("entities").select("id, name").order("name"),
+    supabase.from("properties").select("id, name").order("name"),
+  ]);
+  const moveTargets = allProperties ?? [];
 
   // Annual income allocated to this property from all leases and timber sales
   const incomeInputs = await loadIncomeInputs(supabase);
@@ -110,6 +118,15 @@ export default async function PropertyDetailPage({
                 {property.notes}
               </p>
             ) : null}
+            <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+              <span>Held by</span>
+              <EntityPicker
+                orgId={profile.organization_id!}
+                propertyId={property.id}
+                entities={entities ?? []}
+                value={property.entity_id}
+              />
+            </div>
           </div>
           <Link
             href="/map"
@@ -162,6 +179,18 @@ export default async function PropertyDetailPage({
             ))}
           </ul>
         )}
+        <div className="mt-2">
+          <MoveChildren
+            table="parcels"
+            itemLabel="parcel"
+            items={(parcels ?? []).map((p) => ({
+              id: p.id,
+              label: `Parcel ${p.parcel_number} (${formatAcres(p.acres)} ac)`,
+            }))}
+            properties={moveTargets}
+            currentPropertyId={property.id}
+          />
+        </div>
       </section>
 
       <section>
@@ -189,6 +218,18 @@ export default async function PropertyDetailPage({
             ))}
           </ul>
         )}
+        <div className="mt-2">
+          <MoveChildren
+            table="fields"
+            itemLabel="field"
+            items={(fields ?? []).map((f) => ({
+              id: f.id,
+              label: `${f.name} (${formatAcres(f.acres)} ac)`,
+            }))}
+            properties={moveTargets}
+            currentPropertyId={property.id}
+          />
+        </div>
       </section>
 
       <section>
@@ -224,6 +265,18 @@ export default async function PropertyDetailPage({
             ))}
           </ul>
         )}
+        <div className="mt-2">
+          <MoveChildren
+            table="timber_stands"
+            itemLabel="timber stand"
+            items={(stands ?? []).map((s) => ({
+              id: s.id,
+              label: `${s.name} (${formatAcres(s.acres)} ac)`,
+            }))}
+            properties={moveTargets}
+            currentPropertyId={property.id}
+          />
+        </div>
       </section>
 
       <section>
@@ -256,6 +309,18 @@ export default async function PropertyDetailPage({
             ))}
           </ul>
         )}
+        <div className="mt-2">
+          <MoveChildren
+            table="roads"
+            itemLabel="road"
+            items={(roads ?? []).map((r) => ({
+              id: r.id,
+              label: `${r.name} (${(r.miles ?? 0).toFixed(2)} mi)`,
+            }))}
+            properties={moveTargets}
+            currentPropertyId={property.id}
+          />
+        </div>
       </section>
 
       <section>
@@ -298,6 +363,18 @@ export default async function PropertyDetailPage({
             ))}
           </ul>
         )}
+        <div className="mt-2">
+          <MoveChildren
+            table="assets"
+            itemLabel="asset"
+            items={(assets ?? []).map((a) => ({
+              id: a.id,
+              label: `${a.name}${a.is_active ? "" : " (inactive)"}`,
+            }))}
+            properties={moveTargets}
+            currentPropertyId={property.id}
+          />
+        </div>
       </section>
 
       {incomeYears.length > 0 ? (

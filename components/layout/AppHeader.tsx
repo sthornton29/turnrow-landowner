@@ -58,7 +58,10 @@ export default function AppHeader({
         <nav className="ml-auto hidden items-center gap-1 md:flex">
           {nav.map((item) => {
             const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+              pathname === item.href ||
+              pathname.startsWith(item.href + "/") ||
+              // Entities is a tab of the Properties section
+              (item.href === "/properties" && pathname.startsWith("/entities"));
             return (
               <Link
                 key={item.href}

@@ -12,6 +12,7 @@ import {
   type TaxStatementRow,
 } from "@/lib/tax";
 import EntityDocuments from "@/components/documents/EntityDocuments";
+import { NO_ENTITY } from "@/lib/entities";
 
 interface Parcel {
   id: string;
@@ -29,12 +30,14 @@ export default function TaxStatusClient({
   properties,
   initialStatements,
   initialPayments,
+  entities,
 }: {
   orgId: string;
   parcels: Parcel[];
-  properties: Array<{ id: string; name: string }>;
+  properties: Array<{ id: string; name: string; entity_id: string | null }>;
   initialStatements: TaxStatementRow[];
   initialPayments: TaxPaymentRow[];
+  entities: Array<{ id: string; name: string }>;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [statements, setStatements] = useState(initialStatements);
@@ -66,6 +69,19 @@ export default function TaxStatusClient({
   const propertyName = new Map(properties.map((p) => [p.id, p.name]));
   const parcelById = new Map(parcels.map((p) => [p.id, p]));
 
+  // Entity filter: parcel -> property -> entity. Unmatched statements
+  // belong to no parcel yet, so they only show under "All entities".
+  const [entityFilter, setEntityFilter] = useState("");
+  const entityOfProperty = new Map(
+    properties.map((p) => [p.id, p.entity_id ?? NO_ENTITY])
+  );
+  const entityOfParcel = (parcel: Parcel) =>
+    entityOfProperty.get(parcel.property_id) ?? NO_ENTITY;
+  const visibleParcels = entityFilter
+    ? parcels.filter((p) => entityOfParcel(p) === entityFilter)
+    : parcels;
+  const visibleParcelIds = new Set(visibleParcels.map((p) => p.id));
+
   const paidByStatement = useMemo(() => {
     const map = new Map<string, number>();
     for (const p of payments) {
@@ -74,17 +90,56 @@ export default function TaxStatusClient({
     return map;
   }, [payments]);
 
-  const yearStatements = statements.filter((s) => s.tax_year === year);
+  const allYearStatements = statements.filter((s) => s.tax_year === year);
+  const yearStatements = entityFilter
+    ? allYearStatements.filter(
+        (s) => s.parcel_id && visibleParcelIds.has(s.parcel_id)
+      )
+    : allYearStatements;
   const matched = yearStatements.filter((s) => s.parcel_id);
   const unmatched = yearStatements.filter((s) => !s.parcel_id);
   const coveredParcelIds = new Set(matched.map((s) => s.parcel_id!));
-  const missingParcels = parcels.filter((p) => !coveredParcelIds.has(p.id));
+  const missingParcels = visibleParcels.filter((p) => !coveredParcelIds.has(p.id));
 
   const totalDue = yearStatements.reduce((s, x) => s + x.amount_due, 0);
   const totalPaid = yearStatements.reduce(
     (s, x) => s + (paidByStatement.get(x.id) ?? 0),
     0
   );
+
+  // Per-entity rollup for the "All entities" view: is everything each
+  // entity owns covered and paid?
+  const entityRollup = useMemo(() => {
+    if (entities.length === 0 || entityFilter) return [];
+    const keys = [...entities.map((e) => e.id), NO_ENTITY];
+    return keys
+      .map((key) => {
+        const entityParcels = parcels.filter((p) => entityOfParcel(p) === key);
+        if (entityParcels.length === 0) return null;
+        const ids = new Set(entityParcels.map((p) => p.id));
+        const entityStatements = allYearStatements.filter(
+          (s) => s.parcel_id && ids.has(s.parcel_id)
+        );
+        const due = entityStatements.reduce((s, x) => s + x.amount_due, 0);
+        const paid = entityStatements.reduce(
+          (s, x) => s + (paidByStatement.get(x.id) ?? 0),
+          0
+        );
+        return {
+          key,
+          name:
+            key === NO_ENTITY
+              ? "No entity"
+              : (entities.find((e) => e.id === key)?.name ?? "Entity"),
+          parcels: entityParcels.length,
+          covered: new Set(entityStatements.map((s) => s.parcel_id)).size,
+          due,
+          paid,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entities, entityFilter, parcels, allYearStatements, paidByStatement]);
 
   const today = new Date();
   const statusOf = (s: TaxStatementRow) =>
@@ -238,6 +293,21 @@ export default function TaxStatusClient({
           </p>
         </div>
         <span className="ml-auto flex items-center gap-2">
+          {entities.length > 0 ? (
+            <select
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">All entities</option>
+              {entities.map((entity) => (
+                <option key={entity.id} value={entity.id}>
+                  {entity.name}
+                </option>
+              ))}
+              <option value={NO_ENTITY}>No entity</option>
+            </select>
+          ) : null}
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
@@ -261,10 +331,10 @@ export default function TaxStatusClient({
       {/* Summary tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
-          { label: "Parcels", value: formatNumber(parcels.length) },
+          { label: "Parcels", value: formatNumber(visibleParcels.length) },
           {
             label: "Statements on file",
-            value: `${formatNumber(coveredParcelIds.size)} of ${formatNumber(parcels.length)}`,
+            value: `${formatNumber(coveredParcelIds.size)} of ${formatNumber(visibleParcels.length)}`,
           },
           { label: "Total due", value: formatDollars(totalDue) },
           { label: "Total paid", value: formatDollars(totalPaid) },
@@ -281,6 +351,69 @@ export default function TaxStatusClient({
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+      {/* Per-entity rollup: is everything each entity owns covered and paid? */}
+      {entityRollup.length > 0 ? (
+        <section className="rounded-xl border border-gray-200 bg-white">
+          <h2 className="border-b border-gray-200 px-4 py-3 text-base font-semibold text-gray-900">
+            {year} by entity
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-2">Entity</th>
+                  <th className="px-4 py-2 text-right">Statements</th>
+                  <th className="px-4 py-2 text-right">Due</th>
+                  <th className="px-4 py-2 text-right">Paid</th>
+                  <th className="px-4 py-2 text-right">Outstanding</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entityRollup.map((r) => (
+                  <tr key={r.key} className="border-b border-gray-100 last:border-0">
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() => setEntityFilter(r.key)}
+                        className={
+                          "font-medium hover:underline " +
+                          (r.key === NO_ENTITY ? "text-gray-500" : "text-gray-900")
+                        }
+                      >
+                        {r.name}
+                      </button>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      <span
+                        className={
+                          r.covered < r.parcels ? "font-medium text-amber-700" : ""
+                        }
+                      >
+                        {formatNumber(r.covered)} of {formatNumber(r.parcels)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {formatDollars(r.due)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {formatDollars(r.paid)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      <span
+                        className={
+                          r.due - r.paid > 0.005 ? "font-medium text-red-700" : ""
+                        }
+                      >
+                        {formatDollars(Math.max(r.due - r.paid, 0))}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {/* Missing statements: the headline warning */}
       {missingParcels.length > 0 ? (
@@ -307,7 +440,7 @@ export default function TaxStatusClient({
             ))}
           </ul>
         </section>
-      ) : parcels.length > 0 ? (
+      ) : visibleParcels.length > 0 ? (
         <p className="rounded-xl border border-kelly-100 bg-kelly-50 p-3 text-sm font-medium text-pine-900">
           Every parcel has a {year} statement on file.
         </p>

@@ -147,6 +147,7 @@ export default function FeaturePanel({
   entityType,
   row,
   propertyName,
+  entityName = null,
   farmActivity = null,
   onClose,
   onEditGeometry,
@@ -155,6 +156,7 @@ export default function FeaturePanel({
   entityType: EntityType;
   row: AnyGeoRow;
   propertyName: string | null;
+  entityName?: string | null; // holding entity, shown for properties
   farmActivity?: FarmActivityInfo[] | null;
   onClose: () => void;
   onEditGeometry: () => void;
@@ -265,6 +267,12 @@ export default function FeaturePanel({
               <div className="flex justify-between">
                 <dt className="text-gray-500">Property</dt>
                 <dd className="font-medium text-gray-900">{propertyName}</dd>
+              </div>
+            ) : null}
+            {entityName ? (
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Entity</dt>
+                <dd className="font-medium text-gray-900">{entityName}</dd>
               </div>
             ) : null}
             {detailRows(entityType, row).map(([label, value]) => (

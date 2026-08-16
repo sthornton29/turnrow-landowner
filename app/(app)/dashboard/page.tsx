@@ -23,8 +23,13 @@ function staticMapUrl(box: [number, number, number, number]): string {
   return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${lon.toFixed(5)},${lat.toFixed(5)},${zoom}/640x300@2x?access_token=${token}`;
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ entity?: string }>;
+}) {
   const { supabase, profile } = await requireOrg();
+  const { entity: entityParam } = await searchParams;
 
   const [
     { data: org },
@@ -33,6 +38,7 @@ export default async function DashboardPage() {
     { data: fields },
     { data: timber },
     { data: assets },
+    { data: entities },
     { data: expectedPayments },
     { data: paymentRows },
     { data: leases },
@@ -46,11 +52,15 @@ export default async function DashboardPage() {
       .select("name")
       .eq("id", profile.organization_id)
       .single(),
-    supabase.from("properties_geo").select("id, acres, boundary_geojson"),
-    supabase.from("parcels").select("id"),
-    supabase.from("fields").select("id, acres"),
-    supabase.from("timber_stands").select("id, acres"),
-    supabase.from("assets").select("id, asset_type").eq("is_active", true),
+    supabase.from("properties_geo").select("id, acres, boundary_geojson, entity_id"),
+    supabase.from("parcels").select("id, property_id"),
+    supabase.from("fields").select("id, acres, property_id"),
+    supabase.from("timber_stands").select("id, acres, property_id"),
+    supabase
+      .from("assets")
+      .select("id, asset_type, property_id")
+      .eq("is_active", true),
+    supabase.from("entities").select("id, name").order("name"),
     supabase
       .from("expected_payments")
       .select("id, lease_id, timber_sale_id, label, due_date, expected_amount")
@@ -98,9 +108,26 @@ export default async function DashboardPage() {
     )
     .slice(0, 8);
 
-  const propertyAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
-  const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
-  const timberAcres = (timber ?? []).reduce((s, t) => s + (t.acres ?? 0), 0);
+  // Entity filter for the stat tiles (only shown when the org holds land
+  // in more than one entity). Alerts and cards below stay org-wide.
+  const entityList = entities ?? [];
+  const showEntityChips = entityList.length > 1;
+  const entityFilter = showEntityChips ? (entityParam ?? "") : "";
+  const filteredProperties = entityFilter
+    ? (properties ?? []).filter((p) =>
+        entityFilter === "none" ? !p.entity_id : p.entity_id === entityFilter
+      )
+    : (properties ?? []);
+  const propertyIds = new Set(filteredProperties.map((p) => p.id));
+  const inScope = (row: { property_id: string | null }) =>
+    !entityFilter || (row.property_id !== null && propertyIds.has(row.property_id));
+  const scopedFields = (fields ?? []).filter(inScope);
+  const scopedTimber = (timber ?? []).filter(inScope);
+  const scopedAssets = (assets ?? []).filter(inScope);
+
+  const propertyAcres = filteredProperties.reduce((s, p) => s + (p.acres ?? 0), 0);
+  const fieldAcres = scopedFields.reduce((s, f) => s + (f.acres ?? 0), 0);
+  const timberAcres = scopedTimber.reduce((s, t) => s + (t.acres ?? 0), 0);
   const box = bboxOf(
     (properties ?? []).map((p) => p.boundary_geojson as MultiPolygon | null)
   );
@@ -157,11 +184,11 @@ export default async function DashboardPage() {
     : 0;
 
   const countOf = (...types: string[]) =>
-    (assets ?? []).filter((a) => types.includes(a.asset_type)).length;
+    scopedAssets.filter((a) => types.includes(a.asset_type)).length;
 
   const stats = [
     { label: "Total acres", value: formatAcres(propertyAcres) },
-    { label: "Properties", value: formatNumber((properties ?? []).length) },
+    { label: "Properties", value: formatNumber(filteredProperties.length) },
     { label: "Field acres", value: formatAcres(fieldAcres) },
     { label: "Timber acres", value: formatAcres(timberAcres) },
     { label: "Wells", value: formatNumber(countOf("well")) },
@@ -286,6 +313,29 @@ export default async function DashboardPage() {
             <span className="ml-auto text-kelly-600">&rarr;</span>
           </div>
         </Link>
+      ) : null}
+
+      {showEntityChips ? (
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { key: "", label: "All entities" },
+            ...entityList.map((e) => ({ key: e.id, label: e.name })),
+            { key: "none", label: "No entity" },
+          ].map((chip) => (
+            <Link
+              key={chip.key || "all"}
+              href={chip.key ? `/dashboard?entity=${chip.key}` : "/dashboard"}
+              className={
+                "rounded-full border px-3 py-1 text-sm font-medium " +
+                (entityFilter === chip.key
+                  ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
+              }
+            >
+              {chip.label}
+            </Link>
+          ))}
+        </div>
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

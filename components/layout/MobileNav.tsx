@@ -69,7 +69,9 @@ export default function MobileNav() {
       <div className="grid h-16 grid-cols-5">
         {TABS.map((tab) => {
           const active =
-            pathname === tab.href || pathname.startsWith(tab.href + "/");
+            pathname === tab.href ||
+            pathname.startsWith(tab.href + "/") ||
+            (tab.href === "/properties" && pathname.startsWith("/entities"));
           return (
             <Link
               key={tab.href}

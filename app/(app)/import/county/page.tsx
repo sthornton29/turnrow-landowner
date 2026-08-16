@@ -6,27 +6,32 @@ export const metadata = { title: "Import from county records" };
 export default async function CountyImportPage() {
   const { supabase, profile } = await requireOrg();
 
-  const [{ data: services }, { data: properties }, { data: parcels }, { data: aliases }] =
-    await Promise.all([
-      supabase
-        .from("county_gis_services")
-        .select("*")
-        .eq("status", "active")
-        .order("state")
-        .order("county"),
-      supabase.from("properties").select("id, name, county").order("name"),
-      supabase.from("parcels").select("id, parcel_number, county, property_id"),
-      supabase
-        .from("owner_aliases")
-        .select("normalized_alias, owner_entity_id, owner_entities(display_name)"),
-    ]);
+  const [
+    { data: services },
+    { data: properties },
+    { data: parcels },
+    { data: aliases },
+    { data: entities },
+  ] = await Promise.all([
+    supabase
+      .from("county_gis_services")
+      .select("*")
+      .eq("status", "active")
+      .order("state")
+      .order("county"),
+    supabase.from("properties").select("id, name, county, entity_id").order("name"),
+    supabase.from("parcels").select("id, parcel_number, county, property_id"),
+    supabase
+      .from("entity_aliases")
+      .select("normalized_alias, entity_id, entities(name)"),
+    supabase.from("entities").select("id, name").order("name"),
+  ]);
 
   const knownAliases = (aliases ?? []).map((a) => ({
     normalized_alias: a.normalized_alias as string,
-    owner_entity_id: a.owner_entity_id as string,
+    entity_id: a.entity_id as string,
     entity_name:
-      (a.owner_entities as unknown as { display_name: string } | null)?.display_name ??
-      "",
+      (a.entities as unknown as { name: string } | null)?.name ?? "",
   }));
 
   return (
@@ -36,6 +41,7 @@ export default async function CountyImportPage() {
       properties={properties ?? []}
       existingParcels={parcels ?? []}
       knownAliases={knownAliases}
+      entities={entities ?? []}
     />
   );
 }

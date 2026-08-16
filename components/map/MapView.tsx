@@ -22,6 +22,7 @@ import {
   toMultiPolygon,
 } from "@/lib/geo/normalize";
 import { ASSET_TYPES } from "@/lib/assetTypes";
+import { entityColor } from "@/lib/entities";
 import {
   cropColor,
   cropLegend,
@@ -124,6 +125,8 @@ export default function MapView({
   const [assets, setAssets] = useState<AssetGeo[]>([]);
   const [loading, setLoading] = useState(true);
   const [cropsOn, setCropsOn] = useState(false);
+  const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
+  const [entityColorsOn, setEntityColorsOn] = useState(false);
   const [farmActivity, setFarmActivity] = useState<{
     byField: Record<string, FarmActivityInfo[]>;
     byProperty: Record<string, FarmActivityInfo[]>;
@@ -162,7 +165,7 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, t, r, a, mappings, farmData, connections] = await Promise.all([
+    const [p, pa, f, t, r, a, mappings, farmData, connections, ents] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
@@ -172,7 +175,9 @@ export default function MapView({
       supabase.from("field_mappings").select("*").eq("status", "confirmed"),
       supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
       supabase.from("farm_connections").select("id, label"),
+      supabase.from("entities").select("id, name").order("name"),
     ]);
+    setEntities((ents.data as Array<{ id: string; name: string }>) ?? []);
     setProperties((p.data as PropertyGeo[]) ?? []);
     setParcels((pa.data as ParcelGeo[]) ?? []);
     setFields((f.data as FieldGeo[]) ?? []);
@@ -251,6 +256,14 @@ export default function MapView({
     if (!pid) return null;
     return properties.find((p) => p.id === pid)?.name ?? null;
   }, [selected, selectedRow, properties]);
+
+  // Holding entity for a selected property's panel
+  const selectedEntityName = useMemo(() => {
+    if (!selectedRow || !selected || selected.entityType !== "property") return null;
+    const entityId = (selectedRow as PropertyGeo).entity_id;
+    if (!entityId) return null;
+    return entities.find((e) => e.id === entityId)?.name ?? null;
+  }, [selected, selectedRow, entities]);
 
   // ---------------------------------------------------------------- map init
 
@@ -456,7 +469,22 @@ export default function MapView({
     const setData = (source: string, fc: FeatureCollection) =>
       (map.getSource(source) as GeoJSONSource)?.setData(fc);
 
-    setData("properties", rowsToFC(properties, "property"));
+    // Properties carry their entity's color for the color-by-entity mode
+    const entityIndex = new Map(entities.map((e, i) => [e.id, i]));
+    const propertiesFC = rowsToFC(properties, "property");
+    for (const feature of propertiesFC.features) {
+      const row = properties.find((p) => p.id === feature.properties?.id);
+      if (row?.entity_id !== null && row?.entity_id !== undefined) {
+        const idx = entityIndex.get(row.entity_id);
+        if (idx !== undefined) {
+          feature.properties = {
+            ...feature.properties,
+            entityColor: entityColor(idx),
+          };
+        }
+      }
+    }
+    setData("properties", propertiesFC);
     setData("parcels", rowsToFC(parcels, "parcel"));
     // Fields carry their current-year crop color for the Crops toggle
     const fieldsFC = rowsToFC(fields, "field");
@@ -485,7 +513,32 @@ export default function MapView({
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, timber, roads, assets, farmActivity]);
+  }, [mapLoaded, properties, parcels, fields, timber, roads, assets, farmActivity, entities]);
+
+  // Color-by-entity toggle: recolor property outlines by holding entity
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !map.getLayer("properties-line")) return;
+    if (entityColorsOn) {
+      map.setPaintProperty("properties-line", "line-color", [
+        "coalesce",
+        ["get", "entityColor"],
+        "#ffffff",
+      ]);
+      map.setPaintProperty("properties-line", "line-width", 3);
+      map.setPaintProperty("properties-fill", "fill-color", [
+        "coalesce",
+        ["get", "entityColor"],
+        "#ffffff",
+      ]);
+      map.setPaintProperty("properties-fill", "fill-opacity", 0.08);
+    } else {
+      map.setPaintProperty("properties-line", "line-color", "#ffffff");
+      map.setPaintProperty("properties-line", "line-width", 2.5);
+      map.setPaintProperty("properties-fill", "fill-color", "#ffffff");
+      map.setPaintProperty("properties-fill", "fill-opacity", 0.05);
+    }
+  }, [entityColorsOn, mapLoaded, entities]);
 
   // Crops toggle: recolor field polygons by current-year crop
   useEffect(() => {
@@ -896,6 +949,36 @@ export default function MapView({
       {/* Left control column */}
       <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
+        {entities.length > 1 ? (
+          <div className="rounded-lg bg-white/95 p-2 shadow-md">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                checked={entityColorsOn}
+                onChange={(e) => setEntityColorsOn(e.target.checked)}
+                className="h-4 w-4 accent-kelly-500"
+              />
+              By entity
+            </label>
+            {entityColorsOn ? (
+              <div className="mt-1 space-y-0.5">
+                {entities.map((entity, i) => (
+                  <p key={entity.id} className="flex items-center gap-1.5 text-xs text-gray-700">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-[2px] border border-gray-300"
+                      style={{ background: entityColor(i) }}
+                    />
+                    <span className="truncate">{entity.name}</span>
+                  </p>
+                ))}
+                <p className="flex items-center gap-1.5 text-xs text-gray-700">
+                  <span className="h-3 w-3 shrink-0 rounded-[2px] border border-gray-300 bg-white" />
+                  No entity
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {Object.keys(farmActivity.byField).length > 0 ? (
           <div className="rounded-lg bg-white/95 p-2 shadow-md">
             <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
@@ -1060,6 +1143,7 @@ export default function MapView({
           entityType={selected.entityType}
           row={selectedRow}
           propertyName={selectedPropertyName}
+          entityName={selectedEntityName}
           farmActivity={
             selected.entityType === "field"
               ? (farmActivity.byField[selected.id] ?? null)

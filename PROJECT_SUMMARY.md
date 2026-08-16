@@ -1,6 +1,6 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-16 (owner entity matching added to the county import)
+Last updated: 2026-08-16 (entity level + five new Alabama counties)
 
 ## What this product is
 
@@ -161,7 +161,15 @@ Phase 5 (migration 0005):
   mappings (parcel_field, owner_field, acres_field, situs_field), status
   (active | broken | untested), last_verified_at, notes. Seeded with
   Lawrence and Colbert County, Alabama (KCS-hosted MapServers behind the
-  counties' ISV viewers), both live-verified during the build.
+  counties' ISV viewers), both live-verified during the build. Migration
+  0008 seeds five more live-verified Alabama counties: Morgan (web5 KCS),
+  Lauderdale (web5 KCS), Limestone (county-run ArcGIS at
+  gis.limestonecounty-al.gov, KCS-built data, no deeded-acres field so
+  acres_field is null and the app computes GIS acres), Madison (web3 KCS
+  behind the login-gated revenue ISV; the MapServer itself is public;
+  owner field PropertyOwner), and Franklin (web6 KCS, layer 105, parcel
+  field ParcelID_GISlink). Each was verified with layer metadata, a
+  sample record, and an owner LIKE query returning f=geojson parcels.
 - parcels gains deeded_acres (county-supplied, shown beside computed GIS
   acres) and source (attribution text); parcels_geo view recreated with
   both.
@@ -208,19 +216,36 @@ Phase 6 server pieces:
   schedules it every 6 hours; proxy.ts exempts the path from auth
   redirects.
 
-Owner entity tables (migration 0007; org RLS, same policy pattern):
+Entity level (migrations 0007 and 0009; org RLS, same policy pattern):
 
-- owner_entities: display_name (the most complete name variant).
-  unique (id, organization_id) as a composite-FK target.
-- owner_aliases: owner_entity_id (composite FK in-tenant), alias
-  (verbatim as the county printed it), normalized_alias (canonical form
-  from lib/ownerNames.ts), source_county, source_state. Unique
-  (organization_id, normalized_alias) makes re-imports idempotent.
-  Written when the user imports from an entity group in the county
-  import; later entity searches pre-group records whose normalized
-  owner matches a known alias and show a "Known entity" badge. The
-  table is intentionally available for later reuse by the tax statement
-  upload's owner matching, but the tax flow is unchanged.
+- entities: the ownership level above properties (families hold land in
+  LLCs, corporations, trusts, and their own names). name, entity_type
+  (individual | llc | corporation | partnership | trust | estate |
+  other), notes; unique (id, organization_id) as a composite-FK target.
+  UNIFIED with the county-records owner matching: migration 0007
+  created this table as owner_entities; 0009 renamed it, so a confirmed
+  county grouping and a title-holding entity are the same row (migrated
+  rows got a best-guess entity_type from their name, user-correctable;
+  lib/entities.ts guessEntityType mirrors the guess for new imports).
+- entity_aliases (renamed from owner_aliases; entity_id composite FK):
+  alias (verbatim as the county printed it), normalized_alias
+  (canonical form from lib/ownerNames.ts), source_county, source_state.
+  Unique (organization_id, normalized_alias) makes re-imports
+  idempotent. Written when the user imports from an owner group in the
+  county import; later entity searches pre-group records whose
+  normalized owner matches a known alias and show a "Known entity"
+  badge. Available for later reuse by the tax statement upload's owner
+  matching, but the tax upload flow is unchanged.
+- properties.entity_id: nullable composite FK to entities (a landowner
+  with land in their own name is never forced to create an entity).
+  Deleting an entity detaches its properties via the column-list form
+  of on delete set null (PG15+), which clears only entity_id.
+  properties_geo recreated with entity_id appended.
+- documents entity_type check gains 'entity' (operating agreements,
+  formation docs on the entity page).
+- Future ideas, deliberately out of scope for now: ownership
+  percentages/members within an entity, inter-entity leases, per-entity
+  user permissions.
 
 The farm side lives in the separate grain-tracker repo (the Turnrow farm
 software): migration 070_partner_shares.sql, share management UI at
@@ -267,6 +292,9 @@ Functions and views:
   - /dashboard: stat tiles (total acres, properties, field acres, timber
     acres, wells, pivots, grain bins, buildings), static satellite
     thumbnail (Mapbox Static Images API) linking to the map, quick links.
+    When the org holds land in more than one entity, an entity chip row
+    (?entity= query param) scopes the stat tiles to one entity or "No
+    entity"; alert cards and the map thumbnail stay org-wide.
   - /map: full-screen Mapbox satellite map. Six toggleable layers:
     properties (white outline), parcels (dashed light line), fields (kelly
     green), timber stands (dark green fill, light mint dashed outline),
@@ -289,8 +317,28 @@ Functions and views:
     review before saving, failures skipped and reported. Properties in a
     batch save first so other rows can reference them.
   - /properties, /properties/[id], /parcels, /fields: non-map browsing with
-    acres totals and inline editing. Property detail lists its parcels,
-    fields, timber stands, roads, and assets; delete property cascades.
+    acres totals and inline editing. The Properties section has two tabs
+    (Properties, Entities; same pattern as the Leases tabs, and the nav
+    highlights Properties for both). The properties list groups by
+    entity with per-entity property counts and acre subtotals once any
+    entity exists (flat "All" view one tap away via ?view=flat) and
+    every property row carries an inline "Held by" entity picker with
+    inline new-entity creation. Property detail shows and edits the
+    holding entity the same way. Property detail also carries the
+    RESTRUCTURING tools: every child section (parcels, fields, timber
+    stands, roads, assets) has a "Move ... to another property" control
+    with per-item checkboxes and a target property picker; moving is
+    just a property_id update (composite FKs keep it in-tenant,
+    boundaries and generated acres untouched, property outlines are NOT
+    redrawn). Built so entity-shaped properties can be dissolved into
+    real entities plus real properties. Delete property cascades.
+  - /entities and /entities/[id] (Entities tab): list with per-entity
+    type, property count, and total acres plus a "No entity" bucket of
+    unassigned properties; create with name + type. Detail page: edit
+    name/type/notes, properties with acre subtotals, the known
+    county-record spellings saved from imports (entity_aliases), and
+    documents (entity_type "entity": operating agreements, formation
+    docs). Deleting an entity detaches its properties.
   - /timber: stands grouped by property with total timber acres and inline
     editing of stand info.
   - /assets: filterable list (property, type, show-inactive) with counts
@@ -325,10 +373,20 @@ Functions and views:
     Property taxes / Net rows, by-property table with taxes and net
     received columns (taxes route statement -> parcel -> property;
     unmatched to Unassigned; expense basis: taxes due = expected expense,
-    tax payments = actual). Property detail pages show allocated income
+    tax payments = actual). Once entities exist, an entity chip row
+    filters the by-property table and the table groups properties under
+    entity subtotal rows (expected, received, taxes, net per entity;
+    Unassigned income shows only under All entities). Property detail pages show allocated income
     with taxes paid and net; the dashboard shows a "Payments needing
     attention" card (past due + due within 60 days).
-  - /taxes (Tax Statement Status): year selector; summary tiles (parcels,
+  - /taxes (Tax Statement Status): year selector; entity filter select
+    plus a "by entity" rollup table (statements covered X of Y, due,
+    paid, outstanding per entity, amber/red highlights) so "is
+    everything this entity owns covered and paid" reads at a glance;
+    picking an entity scopes the tiles, missing-statement warnings, and
+    statement list to that entity's parcels (statement -> parcel ->
+    property -> entity; unmatched statements show under All entities
+    only); summary tiles (parcels,
     statements on file X of Y, total due/paid/outstanding); parcels with
     NO statement on file surfaced at the top; unmatched statements with a
     resolve control; statement cards with computed status chips, inline
@@ -370,9 +428,13 @@ Functions and views:
     one tap each: split a variant out ("Not this owner"), merge groups,
     or exclude individual parcels via checkboxes or map taps. Checked
     groups flow into the same assign-and-import panel below. Importing
-    from a group saves the grouping as an owner entity + aliases
-    (migration 0007) so later searches pre-group under a "Known entity"
-    badge. The classic owner-name and parcel-number searches are
+    from a group saves the grouping as an entity + aliases so later
+    searches pre-group under a "Known entity" badge. The assign step
+    also has a "Held by entity" picker: default is AUTO (in owner
+    search mode the property links to the owner entity the import
+    creates or extends, when unambiguous; in classic modes it keeps the
+    target property's current entity), or pick an existing entity,
+    create one inline with name + type, or choose No entity. The classic owner-name and parcel-number searches are
     unchanged: results as a synced list + selectable satellite map (row
     click zooms the polygon, polygon click toggles the row), select-all
     with running parcel and acre totals. All modes share: assign to an
@@ -406,7 +468,12 @@ Functions and views:
     date, Growing/Harvested chip, yield per acre (or "Not shared" when
     the farmer keeps yields private). Totals line for plantings and
     acres.
-  - Map: a Crops toggle (appears once farm data exists) recolors mapped
+  - Map: a "By entity" toggle (appears when more than one entity exists)
+    recolors property outlines by holding entity with a small legend
+    (subtle distinct colors from lib/entities.ts ENTITY_COLORS, chosen
+    to read over satellite and avoid kelly = fields; "No entity" stays
+    white), and the property click panel shows the holding entity. A
+    Crops toggle (appears once farm data exists) recolors mapped
     fields by current-year crop with a legend (corn yellow, cotton white,
     soybeans kelly, wheat amber, canola light green, other purple; chosen
     to read over satellite imagery). The field/property click panel gains
@@ -457,3 +524,9 @@ Functions and views:
   (migration 0007). Entity search mode groups all of an owner's parcels
   across name variants, user-correctable grouping, confirmed groupings
   remembered as owner entities + aliases. Described above.
+- Post-Phase 6b (DONE): five more Alabama counties in the GIS registry
+  (migration 0008: Morgan, Lauderdale, Limestone, Madison, Franklin, all
+  live-verified) and the entity level above properties (migration 0009:
+  entities unified with owner matching, properties.entity_id,
+  restructuring tools for moving children between properties, entity
+  views across properties/income/taxes/dashboard/map). Described above.

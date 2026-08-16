@@ -9,8 +9,10 @@ import { formatAcres, formatNumber } from "@/lib/format";
 import { approxAcres, toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
 import { clusterOwners, pickDisplayName } from "@/lib/ownerNames";
+import { ENTITY_TYPE_LABELS, guessEntityType } from "@/lib/entities";
 import MiniParcelSketch from "@/components/county/MiniParcelSketch";
 import type { CountyGisService, EntityParcelFeature } from "@/lib/gis";
+import type { LandEntityType } from "@/types/db";
 import type { MultiPolygon } from "geojson";
 
 const CountySearchMap = dynamic(
@@ -26,9 +28,15 @@ interface ResultRow extends EntityParcelFeature {
 
 interface KnownAlias {
   normalized_alias: string;
-  owner_entity_id: string;
+  entity_id: string;
   entity_name: string;
 }
+
+// Sentinels for the assign step's entity choice. AUTO means: in entity
+// search mode, the owner entity this import creates or extends; in the
+// classic modes, keep the target property's entity as it is.
+const ENTITY_AUTO = "__auto__";
+const ENTITY_NEW = "__new__";
 
 // A proposed entity: one owner however the county wrote the name.
 // Membership is a list of result-row ids; inclusion in the import is
@@ -51,10 +59,16 @@ export default function CountyImportClient({
   properties,
   existingParcels,
   knownAliases,
+  entities,
 }: {
   orgId: string;
   services: CountyGisService[];
-  properties: Array<{ id: string; name: string; county: string | null }>;
+  properties: Array<{
+    id: string;
+    name: string;
+    county: string | null;
+    entity_id: string | null;
+  }>;
   existingParcels: Array<{
     id: string;
     parcel_number: string;
@@ -62,6 +76,7 @@ export default function CountyImportClient({
     property_id: string;
   }>;
   knownAliases: KnownAlias[];
+  entities: Array<{ id: string; name: string }>;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -86,6 +101,9 @@ export default function CountyImportClient({
   );
   const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
   const [newPropertyName, setNewPropertyName] = useState("");
+  const [importEntityId, setImportEntityId] = useState(ENTITY_AUTO);
+  const [newEntityName, setNewEntityName] = useState("");
+  const [newEntityType, setNewEntityType] = useState<LandEntityType>("llc");
   const [mergeOutline, setMergeOutline] = useState(true);
   const [dupChoices, setDupChoices] = useState<Record<string, "skip" | "update">>({});
   const [importing, setImporting] = useState(false);
@@ -146,10 +164,10 @@ export default function CountyImportClient({
       setSearched(true);
       if (searchType === "entity") {
         const aliasMap = new Map(
-          knownAliases.map((a) => [a.normalized_alias, a.owner_entity_id])
+          knownAliases.map((a) => [a.normalized_alias, a.entity_id])
         );
         const entityNames = new Map(
-          knownAliases.map((a) => [a.owner_entity_id, a.entity_name])
+          knownAliases.map((a) => [a.entity_id, a.entity_name])
         );
         const clusters = clusterOwners(
           rows.map((r) => ({
@@ -332,10 +350,13 @@ export default function CountyImportClient({
   }, [selectedRows, existingParcels, service]);
 
   // After an entity-mode import, remember the confirmed grouping: the
-  // group becomes (or extends) an owner entity and each name variant is
-  // saved as an alias, so the next search pre-groups automatically.
-  async function saveOwnerEntities(failures: string[]) {
-    if (!service) return;
+  // group becomes (or extends) an entity and each name variant is saved
+  // as an alias, so the next search pre-groups automatically. Returns
+  // the distinct entity ids the imported groups mapped to, so the
+  // assign step can link the property to its owner.
+  async function saveOwnerEntities(failures: string[]): Promise<string[]> {
+    if (!service) return [];
+    const entityIds: string[] = [];
     const importedGroups = groups.filter((g) =>
       g.rowIds.some((id) => selected.has(id))
     );
@@ -355,8 +376,12 @@ export default function CountyImportClient({
       let entityId = group.knownEntity?.id ?? null;
       if (!entityId) {
         const { data, error: err } = await supabase
-          .from("owner_entities")
-          .insert({ organization_id: orgId, display_name: group.displayName })
+          .from("entities")
+          .insert({
+            organization_id: orgId,
+            name: group.displayName,
+            entity_type: guessEntityType(group.displayName),
+          })
           .select("id")
           .single();
         if (err || !data) {
@@ -365,10 +390,12 @@ export default function CountyImportClient({
         }
         entityId = data.id;
       }
+      if (!entityId) continue;
+      entityIds.push(entityId);
       const aliasRows = Array.from(byNormalized.entries()).map(
         ([normalized, verbatim]) => ({
           organization_id: orgId,
-          owner_entity_id: entityId!,
+          entity_id: entityId!,
           alias: verbatim,
           normalized_alias: normalized,
           source_county: service.county,
@@ -376,19 +403,50 @@ export default function CountyImportClient({
         })
       );
       const { error: aliasErr } = await supabase
-        .from("owner_aliases")
+        .from("entity_aliases")
         .upsert(aliasRows, {
           onConflict: "organization_id,normalized_alias",
           ignoreDuplicates: true,
         });
       if (aliasErr) failures.push("Owner aliases: " + aliasErr.message);
     }
+    return Array.from(new Set(entityIds));
   }
 
   async function runImport() {
     if (!service || selectedRows.length === 0) return;
     setImporting(true);
     setError(null);
+
+    // Resolve the entity choice. undefined = leave the property's entity
+    // alone (AUTO may fill it in later from the owner grouping).
+    let chosenEntityId: string | null | undefined;
+    if (importEntityId === ENTITY_NEW) {
+      if (!newEntityName.trim()) {
+        setError("Name the new entity.");
+        setImporting(false);
+        return;
+      }
+      const { data, error: err } = await supabase
+        .from("entities")
+        .insert({
+          organization_id: orgId,
+          name: newEntityName.trim(),
+          entity_type: newEntityType,
+        })
+        .select("id")
+        .single();
+      if (err || !data) {
+        setError("Could not create the entity: " + (err?.message ?? ""));
+        setImporting(false);
+        return;
+      }
+      chosenEntityId = data.id;
+    } else if (importEntityId === "") {
+      chosenEntityId = null;
+    } else if (importEntityId !== ENTITY_AUTO) {
+      chosenEntityId = importEntityId;
+    }
 
     // Resolve the target property
     let targetPropertyId = propertyId;
@@ -406,6 +464,7 @@ export default function CountyImportClient({
           name: newPropertyName.trim(),
           county: service.county,
           state: service.state,
+          entity_id: chosenEntityId ?? null,
         })
         .select("id")
         .single();
@@ -488,7 +547,20 @@ export default function CountyImportClient({
     }
 
     if (searchType === "entity" && importedCount > 0) {
-      await saveOwnerEntities(failures);
+      const ownerEntityIds = await saveOwnerEntities(failures);
+      // AUTO: link the property to the owner entity this import produced,
+      // when it is unambiguous (exactly one imported group).
+      if (importEntityId === ENTITY_AUTO && ownerEntityIds.length === 1) {
+        chosenEntityId = ownerEntityIds[0];
+      }
+    }
+
+    if (chosenEntityId !== undefined && importedCount > 0) {
+      const { error: entErr } = await supabase
+        .from("properties")
+        .update({ entity_id: chosenEntityId })
+        .eq("id", targetPropertyId);
+      if (entErr) failures.push("Property entity: " + entErr.message);
     }
 
     setImporting(false);
@@ -595,6 +667,52 @@ export default function CountyImportClient({
             />
             Set property boundary to merged outline
           </label>
+        </div>
+
+        {/* Which entity holds this property (optional, one tap) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-gray-700">Held by entity:</span>
+          <select
+            value={importEntityId}
+            onChange={(e) => setImportEntityId(e.target.value)}
+            className={`${inputClass} bg-white`}
+          >
+            <option value={ENTITY_AUTO}>
+              {searchType === "entity"
+                ? "Owner entity from this import (default)"
+                : assignMode === "existing"
+                  ? "Keep property's current entity"
+                  : "No entity for now"}
+            </option>
+            {entities.map((entity) => (
+              <option key={entity.id} value={entity.id}>
+                {entity.name}
+              </option>
+            ))}
+            <option value="">No entity</option>
+            <option value={ENTITY_NEW}>+ New entity...</option>
+          </select>
+          {importEntityId === ENTITY_NEW ? (
+            <>
+              <input
+                value={newEntityName}
+                onChange={(e) => setNewEntityName(e.target.value)}
+                placeholder="Entity name"
+                className={`${inputClass} min-w-44 bg-white`}
+              />
+              <select
+                value={newEntityType}
+                onChange={(e) => setNewEntityType(e.target.value as LandEntityType)}
+                className={`${inputClass} bg-white`}
+              >
+                {Object.entries(ENTITY_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
         </div>
 
         {duplicates.size > 0 ? (
