@@ -26,6 +26,7 @@ import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
 import turfBuffer from "@turf/buffer";
 import turfDifference from "@turf/difference";
+import turfUnion from "@turf/union";
 import turfArea from "@turf/area";
 import {
   cropColor,
@@ -162,6 +163,14 @@ export default function MapView({
   const [saveError, setSaveError] = useState<string | null>(null);
   const editTargetRef = useRef<SelectedFeature | null>(null);
   const [editHint, setEditHint] = useState<string | null>(null);
+  // Boolean editing: draw a polygon to add to or cut from the boundary
+  // being edited (or the one being created). Results may be
+  // non-contiguous; everything stores as MultiPolygon anyway.
+  const boundaryOpRef = useRef<"add" | "subtract" | null>(null);
+  const [editTargetType, setEditTargetType] = useState<EntityType | null>(null);
+  const [pendingExtraDraw, setPendingExtraDraw] = useState(false);
+  const pendingPolyRef = useRef<MultiPolygon | null>(null);
+  pendingPolyRef.current = pendingPoly;
   const didFitRef = useRef(false);
   const didFocusRef = useRef(false);
 
@@ -453,6 +462,10 @@ export default function MapView({
         applySplitRef.current(geometry);
         return;
       }
+      if (boundaryOpRef.current) {
+        applyBoundaryOpRef.current(geometry, String(e.features[0].id ?? ""));
+        return;
+      }
       if (editTargetRef.current) {
         saveEditedRef.current();
         return;
@@ -672,7 +685,95 @@ export default function MapView({
     drawKindRef.current = null;
     editTargetRef.current = null;
     splitTargetRef.current = null;
+    boundaryOpRef.current = null;
+    setPendingExtraDraw(false);
+    setEditTargetType(null);
   }
+
+  // ---- Add/cut an area with a drawn polygon ----
+
+  function startBoundaryOp(op: "add" | "subtract") {
+    const draw = drawRef.current;
+    if (!draw) return;
+    boundaryOpRef.current = op;
+    if (!editTargetRef.current) setPendingExtraDraw(true);
+    setEditHint(
+      op === "add"
+        ? "Draw the area to add (it does not need to touch). Double tap the last point to finish."
+        : "Draw the area to cut out. Double tap the last point to finish."
+    );
+    draw.changeMode("draw_polygon");
+  }
+
+  const applyBoundaryOpRef = useRef<(g: Geometry, drawnId: string) => void>(
+    () => {}
+  );
+  applyBoundaryOpRef.current = (geometry, drawnId) => {
+    const op = boundaryOpRef.current;
+    boundaryOpRef.current = null;
+    const draw = drawRef.current;
+    const drawn = toMultiPolygon(geometry);
+    if (!draw || !op || !drawn) return;
+
+    const asFeature = (g: MultiPolygon): Feature<MultiPolygon> => ({
+      type: "Feature",
+      properties: {},
+      geometry: g,
+    });
+    const combine = (base: MultiPolygon | null): MultiPolygon | null => {
+      if (!base) return op === "add" ? drawn : null;
+      const result =
+        op === "add"
+          ? turfUnion({
+              type: "FeatureCollection",
+              features: [asFeature(base), asFeature(drawn)],
+            })
+          : turfDifference({
+              type: "FeatureCollection",
+              features: [asFeature(base), asFeature(drawn)],
+            });
+      return result ? toMultiPolygon(result.geometry) : null;
+    };
+
+    if (editTargetRef.current) {
+      // Editing a saved boundary: combine with everything already on
+      // the draw canvas except the polygon just drawn.
+      const parts: MultiPolygon["coordinates"] = [];
+      for (const f of draw.getAll().features) {
+        if (String(f.id) === drawnId) continue;
+        const mp = toMultiPolygon(f.geometry);
+        if (mp) parts.push(...mp.coordinates);
+      }
+      const base: MultiPolygon | null =
+        parts.length > 0 ? { type: "MultiPolygon", coordinates: parts } : null;
+      const combined = combine(base);
+      if (!combined) {
+        setSaveError("That cut would remove the whole boundary.");
+        draw.delete(drawnId);
+        return;
+      }
+      draw.deleteAll();
+      const ids = draw.add(asFeature(combined));
+      draw.changeMode("direct_select", { featureId: ids[0] });
+      setSaveError(null);
+      setEditHint("Drag the points to adjust, add or cut more, then press Save.");
+    } else {
+      // Building a NEW boundary: fold into the pending shape and bring
+      // the save dialog back.
+      const combined = combine(pendingPolyRef.current);
+      if (!combined) {
+        setSaveError("That cut would remove the whole boundary.");
+        draw.delete(drawnId);
+        setPendingExtraDraw(false);
+        return;
+      }
+      draw.deleteAll();
+      draw.add(asFeature(combined));
+      setPendingPoly(combined);
+      setSaveError(null);
+      setPendingExtraDraw(false);
+    }
+  };
 
   // ---- Split a saved timber stand with a drawn line ----
   const splitTargetRef = useRef<SelectedFeature | null>(null);
@@ -822,6 +923,7 @@ export default function MapView({
     setSaveError(null);
     setSelected(null);
 
+    setEditTargetType(selected.entityType);
     const isPoint = g?.type === "Point" || g?.type === "MultiPoint";
     const isLineTarget =
       selected.entityType === "road" ||
@@ -1218,6 +1320,22 @@ export default function MapView({
                 {saving ? "Saving..." : "Save"}
               </button>
             ) : null}
+            {mode === "edit" && editTargetType && POLYGON_TYPES.includes(editTargetType) ? (
+              <>
+                <button
+                  onClick={() => startBoundaryOp("add")}
+                  className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
+                >
+                  Add area
+                </button>
+                <button
+                  onClick={() => startBoundaryOp("subtract")}
+                  className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
+                >
+                  Cut area
+                </button>
+              </>
+            ) : null}
             {mode === "place" && !pendingPoint ? (
               <>
                 <button
@@ -1258,7 +1376,7 @@ export default function MapView({
       ) : null}
 
       {/* Save dialogs */}
-      {pendingPoly && mode === "draw" ? (
+      {pendingPoly && mode === "draw" && !pendingExtraDraw ? (
         <NewBoundaryDialog
           approxAcres={approxAcres(pendingPoly)}
           properties={properties}
@@ -1267,6 +1385,8 @@ export default function MapView({
           error={saveError}
           onSave={saveNewBoundary}
           onCancel={resetDrawState}
+          onAddArea={() => startBoundaryOp("add")}
+          onCutArea={() => startBoundaryOp("subtract")}
         />
       ) : null}
       {pendingLine && mode === "draw" ? (

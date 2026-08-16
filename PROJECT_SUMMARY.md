@@ -371,8 +371,13 @@ Functions and views:
     geometry (same lib/geo/propertyMatch.ts logic as the file import)
     with a "Suggested from location" chip that clears if the user picks
     a different property. Geometry edits
-    use mapbox-gl-draw vertex editing; acres/miles recompute server-side
-    on every save. CSS-based fullscreen toggle (not the native Fullscreen
+    use mapbox-gl-draw vertex editing plus BOOLEAN EDITING for polygon
+    boundaries (property/parcel/field/timber stand): the edit toolbar's
+    Add area and Cut area buttons let the user draw a polygon that is
+    unioned into or differenced out of the shape (turf), and the
+    new-boundary save dialog offers the same before saving; results may
+    be non-contiguous (MultiPolygon storage everywhere). Acres/miles
+    recompute server-side on every save. CSS-based fullscreen toggle (not the native Fullscreen
     API, so iOS modals stay visible). /map?focus=asset:<id> zooms to and
     selects an entity (used by list pages).
   - /import: upload GeoJSON/JSON, KML, KMZ, zipped shapefiles. Polygons

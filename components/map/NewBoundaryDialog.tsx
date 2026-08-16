@@ -31,6 +31,8 @@ export default function NewBoundaryDialog({
   error,
   onSave,
   onCancel,
+  onAddArea,
+  onCutArea,
 }: {
   approxAcres: number | null;
   properties: PropertyGeo[];
@@ -39,6 +41,8 @@ export default function NewBoundaryDialog({
   error: string | null;
   onSave: (payload: NewBoundaryPayload) => void;
   onCancel: () => void;
+  onAddArea?: () => void; // draw another polygon and merge it in
+  onCutArea?: () => void; // draw a polygon and cut it out
 }) {
   const [entityType, setEntityType] = useState<BoundaryType>(
     properties.length > 0 ? "field" : "property"
@@ -66,6 +70,29 @@ export default function NewBoundaryDialog({
       {approxAcres !== null ? (
         <p className="mt-0.5 text-sm text-gray-500">
           About {formatAcres(approxAcres)} acres (exact acres computed on save)
+        </p>
+      ) : null}
+      {onAddArea || onCutArea ? (
+        <p className="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
+          {onAddArea ? (
+            <button
+              type="button"
+              onClick={onAddArea}
+              className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              + Add area
+            </button>
+          ) : null}
+          {onCutArea ? (
+            <button
+              type="button"
+              onClick={onCutArea}
+              className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Cut area out
+            </button>
+          ) : null}
+          <span className="text-xs text-gray-500">Areas do not need to touch.</span>
         </p>
       ) : null}
 
