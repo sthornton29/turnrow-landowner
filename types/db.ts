@@ -100,6 +100,7 @@ export interface FieldGeo {
 export type AssetType =
   | "well"
   | "irrigation_pivot"
+  | "irrigation_lateral"
   | "underground_pipe"
   | "riser"
   | "shop"

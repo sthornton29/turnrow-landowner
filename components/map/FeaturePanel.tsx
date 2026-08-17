@@ -126,7 +126,7 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     if (a.estimated_value !== null) {
       rows.push(["Est. value", formatDollars(a.estimated_value)]);
     }
-    // Coverage circle summary for pivots (the raw parameters are
+    // Coverage summary for pivots and laterals (the raw parameters are
     // map-managed and skipped below).
     if (a.asset_type === "irrigation_pivot" && a.details?.center_lon != null) {
       const full = a.details.full_circle !== false;
@@ -136,7 +136,32 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
         !full && Number.isFinite(start) && Number.isFinite(end)
           ? Math.round((((end - start) % 360) + 360) % 360) || 360
           : null;
-      rows.push(["Coverage", full ? "Full circle" : `${sweep}° sweep`]);
+      const shape = a.details.custom_shape === true;
+      const positions = Array.isArray(a.details.positions)
+        ? a.details.positions.length
+        : 0;
+      rows.push([
+        "Coverage",
+        (shape ? "Custom shape" : full ? "Full circle" : `${sweep}° sweep`) +
+          (positions > 0
+            ? ` · ${positions + 1} towable position${positions ? "s" : ""}`
+            : ""),
+      ]);
+    }
+    // Plantable vs gross watered acres, when cutouts make them differ.
+    {
+      const plantable = Number(a.details?.acres_covered);
+      const watered = Number(a.details?.acres_watered);
+      if (
+        Number.isFinite(plantable) &&
+        Number.isFinite(watered) &&
+        Math.abs(watered - plantable) >= 0.05
+      ) {
+        rows.push([
+          "Irrigated acres",
+          `${formatAcres(plantable)} plantable of ${formatAcres(watered)} watered`,
+        ]);
+      }
     }
     // Type-specific details, labeled from the config
     for (const f of ASSET_TYPES[a.asset_type]?.fields ?? []) {
@@ -389,13 +414,17 @@ export default function FeaturePanel({
               const isPivot =
                 entityType === "asset" &&
                 (row as AssetGeo).asset_type === "irrigation_pivot";
+              const details = (row as AssetGeo).details;
+              const customShape = isPivot && details?.custom_shape === true;
               const hasCircle =
-                isPivot && (row as AssetGeo).details?.center_lon != null;
+                isPivot && !customShape && details?.center_lon != null;
               return (
                 <>
-                  {/* Pivot circles are parametric: a 64-vertex circle is
-                      uneditable by hand, so circled pivots get the
-                      editor instead of raw geometry editing. */}
+                  {/* Pivot shapes are parametric: a 64-vertex circle is
+                      uneditable by hand, so shaped pivots get the
+                      editor instead of raw geometry editing. A pivot
+                      converted to a custom shape edits vertices like
+                      any polygon (one-way). */}
                   {!hasCircle ? (
                     <button
                       onClick={onEditGeometry}
@@ -404,12 +433,12 @@ export default function FeaturePanel({
                       {geometryButtonLabel}
                     </button>
                   ) : null}
-                  {isPivot && onPivotCircle ? (
+                  {isPivot && !customShape && onPivotCircle ? (
                     <button
                       onClick={onPivotCircle}
                       className="rounded-lg border border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 hover:bg-sky-50"
                     >
-                      {hasCircle ? "Edit coverage circle" : "Add coverage circle"}
+                      {hasCircle ? "Edit coverage" : "Add coverage circle"}
                     </button>
                   ) : null}
                 </>

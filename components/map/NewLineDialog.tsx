@@ -4,13 +4,14 @@ import { useState } from "react";
 import { ROAD_TYPE_LABELS } from "@/lib/assetTypes";
 import type { PropertyGeo, RoadType } from "@/types/db";
 
-export type LineKind = "road" | "underground_pipe" | "fence";
+export type LineKind = "road" | "underground_pipe" | "fence" | "irrigation_lateral";
 
 export interface NewLinePayload {
   kind: LineKind;
   name: string;
   propertyId: string | null; // required for road
   roadType: RoadType | null;
+  machineLengthFt: number | null; // laterals: coverage = path x length
 }
 
 // Shown after a line is drawn: is it a road, buried pipe, or a fence?
@@ -36,6 +37,7 @@ export default function NewLineDialog({
   );
 
   function handleSubmit(formData: FormData) {
+    const lengthRaw = String(formData.get("machine_length_ft") ?? "").trim();
     onSave({
       kind,
       name: String(formData.get("name") ?? "").trim(),
@@ -44,6 +46,8 @@ export default function NewLineDialog({
         kind === "road"
           ? ((String(formData.get("road_type") ?? "") || null) as RoadType | null)
           : null,
+      machineLengthFt:
+        kind === "irrigation_lateral" && lengthRaw ? Number(lengthRaw) : null,
     });
   }
 
@@ -56,12 +60,13 @@ export default function NewLineDialog({
       <form action={handleSubmit} className="mt-3 space-y-3">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">This is a</label>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-4 gap-1.5">
             {(
               [
                 ["road", "Road"],
                 ["underground_pipe", "Pipe"],
                 ["fence", "Fence"],
+                ["irrigation_lateral", "Lateral"],
               ] as Array<[LineKind, string]>
             ).map(([k, label]) => (
               <button
@@ -90,6 +95,26 @@ export default function NewLineDialog({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
           />
         </div>
+
+        {kind === "irrigation_lateral" ? (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Machine length (ft)
+            </label>
+            <input
+              name="machine_length_ft"
+              type="number"
+              required
+              min={50}
+              placeholder="e.g. 1200"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              The drawn line is the travel path; coverage is that path swept
+              by the machine length.
+            </p>
+          </div>
+        ) : null}
 
         {kind === "road" ? (
           <div>

@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import { approxAcres, toMultiPolygon } from "./normalize";
 import {
   bearingTo,
+  compositeFromDetails,
+  compositePivotGeometry,
   destination,
+  detailsFromComposite,
   distanceFt,
+  lateralGeometry,
   pivotPolygon,
   snapEndBearing,
   sweepDegrees,
+  type CompositePivotParams,
 } from "./pivot";
 
 const CENTER: [number, number] = [-87.0, 34.5]; // north Alabama
@@ -98,6 +103,184 @@ describe("sweepDegrees", () => {
     expect(sweepDegrees(270, 90)).toBe(180); // through north
     expect(sweepDegrees(90, 0)).toBe(270);
     expect(sweepDegrees(45, 45)).toBe(360);
+  });
+});
+
+const FULL_1300_ACRES = (Math.PI * 1300 * 1300) / 43560;
+
+const composite = (over: Partial<CompositePivotParams>): CompositePivotParams => ({
+  center: CENTER,
+  radiusFt: 1300,
+  fullCircle: true,
+  startBearingDeg: null,
+  endBearingDeg: null,
+  extensions: [],
+  skips: [],
+  cutouts: [],
+  positions: [],
+  ...over,
+});
+
+describe("compositePivotGeometry", () => {
+  it("an extension zone adds the sector ring area", () => {
+    // Quarter-circle end gun zone at 1400 ft over a 1300 ft base:
+    // adds (90/360) * pi * (1400^2 - 1300^2) / 43560 acres.
+    const { grossAcres } = compositePivotGeometry(
+      composite({
+        extensions: [{ startBearingDeg: 0, endBearingDeg: 90, outerRadiusFt: 1400 }],
+      })
+    );
+    const expected =
+      FULL_1300_ACRES + (0.25 * Math.PI * (1400 * 1400 - 1300 * 1300)) / 43560;
+    expect(Math.abs(grossAcres - expected) / expected).toBeLessThan(0.01);
+  });
+
+  it("an extension shorter than the base radius adds nothing", () => {
+    const { grossAcres } = compositePivotGeometry(
+      composite({
+        extensions: [{ startBearingDeg: 0, endBearingDeg: 90, outerRadiusFt: 1000 }],
+      })
+    );
+    expect(Math.abs(grossAcres - FULL_1300_ACRES) / FULL_1300_ACRES).toBeLessThan(0.01);
+  });
+
+  it("a skip wedge subtracts its share, extensions included", () => {
+    // 90 degree skip on a full circle: three quarters remain.
+    const { grossAcres } = compositePivotGeometry(
+      composite({ skips: [{ startBearingDeg: 0, endBearingDeg: 90 }] })
+    );
+    const expected = FULL_1300_ACRES * 0.75;
+    expect(Math.abs(grossAcres - expected) / expected).toBeLessThan(0.01);
+  });
+
+  it("cutouts reduce plantable acres but not gross watered acres", () => {
+    // A small square pond inside the circle.
+    const d = 0.001; // ~100m square
+    const pond: [number, number][] = [
+      [CENTER[0] - d, CENTER[1] - d],
+      [CENTER[0] + d, CENTER[1] - d],
+      [CENTER[0] + d, CENTER[1] + d],
+      [CENTER[0] - d, CENTER[1] + d],
+      [CENTER[0] - d, CENTER[1] - d],
+    ];
+    const { grossAcres, plantableAcres, plantable } = compositePivotGeometry(
+      composite({ cutouts: [{ type: "Polygon", coordinates: [pond] }] })
+    );
+    expect(Math.abs(grossAcres - FULL_1300_ACRES) / FULL_1300_ACRES).toBeLessThan(0.01);
+    expect(plantableAcres).toBeLessThan(grossAcres);
+    // The hole is real: the plantable polygon has an inner ring.
+    const rings =
+      plantable.type === "Polygon"
+        ? plantable.coordinates.length
+        : plantable.coordinates[0].length;
+    expect(rings).toBeGreaterThan(1);
+  });
+
+  it("towable positions union into a multipolygon with summed acres", () => {
+    const second = destination(CENTER, 3000, 90) as [number, number]; // well clear
+    const { watered, grossAcres } = compositePivotGeometry(
+      composite({
+        radiusFt: 1000,
+        positions: [
+          {
+            center: second,
+            radiusFt: 1000,
+            fullCircle: true,
+            startBearingDeg: null,
+            endBearingDeg: null,
+            extensions: [],
+            skips: [],
+          },
+        ],
+      })
+    );
+    const one = (Math.PI * 1000 * 1000) / 43560;
+    expect(watered.type).toBe("MultiPolygon");
+    expect(Math.abs(grossAcres - 2 * one) / (2 * one)).toBeLessThan(0.01);
+  });
+});
+
+describe("lateralGeometry", () => {
+  it("a straight run covers path length x machine length", () => {
+    // Half-mile run (2640 ft) with a 400 ft machine: 2640*400/43560 ac.
+    const end = destination(CENTER, 2640 * 0.3048, 90) as [number, number];
+    const result = lateralGeometry([CENTER, end], 400, [])!;
+    const expected = (2640 * 400) / 43560;
+    expect(Math.abs(result.grossAcres - expected) / expected).toBeLessThan(0.01);
+  });
+
+  it("supports cutouts like pivots", () => {
+    const end = destination(CENTER, 800, 90) as [number, number];
+    const d = 0.0005;
+    const mid = destination(CENTER, 400, 90) as [number, number];
+    const cut: [number, number][] = [
+      [mid[0] - d, mid[1] - d],
+      [mid[0] + d, mid[1] - d],
+      [mid[0] + d, mid[1] + d],
+      [mid[0] - d, mid[1] + d],
+      [mid[0] - d, mid[1] - d],
+    ];
+    const result = lateralGeometry([CENTER, end], 400, [
+      { type: "Polygon", coordinates: [cut] },
+    ])!;
+    expect(result.plantableAcres).toBeLessThan(result.grossAcres);
+  });
+
+  it("rejects degenerate input", () => {
+    expect(lateralGeometry([CENTER], 400, [])).toBeNull();
+    expect(lateralGeometry([CENTER, CENTER], 0, [])).toBeNull();
+  });
+});
+
+describe("details round trip", () => {
+  it("serializes and reads back the composite shape", () => {
+    const params = composite({
+      fullCircle: false,
+      startBearingDeg: 10,
+      endBearingDeg: 190,
+      extensions: [{ startBearingDeg: 40, endBearingDeg: 70, outerRadiusFt: 1390 }],
+      skips: [{ startBearingDeg: 100, endBearingDeg: 120 }],
+      cutouts: [
+        {
+          type: "Polygon",
+          coordinates: [[[0, 0], [0.001, 0], [0.001, 0.001], [0, 0]]],
+        },
+      ],
+      positions: [
+        {
+          center: [-86.9, 34.6],
+          radiusFt: 900,
+          fullCircle: true,
+          startBearingDeg: null,
+          endBearingDeg: null,
+          extensions: [],
+          skips: [],
+        },
+      ],
+    });
+    const details = detailsFromComposite(params);
+    const back = compositeFromDetails(details)!;
+    expect(back.radiusFt).toBe(1300);
+    expect(back.startBearingDeg).toBe(10);
+    expect(back.extensions).toHaveLength(1);
+    expect(back.extensions[0].outerRadiusFt).toBe(1390);
+    expect(back.skips).toHaveLength(1);
+    expect(back.cutouts).toHaveLength(1);
+    expect(back.positions).toHaveLength(1);
+    expect(back.positions[0].radiusFt).toBe(900);
+  });
+
+  it("reads pre-composite pivot details as empty zone lists", () => {
+    const back = compositeFromDetails({
+      center_lon: -87,
+      center_lat: 34.5,
+      wetted_length_ft: 1300,
+      full_circle: true,
+    })!;
+    expect(back.extensions).toEqual([]);
+    expect(back.skips).toEqual([]);
+    expect(back.cutouts).toEqual([]);
+    expect(back.positions).toEqual([]);
   });
 });
 

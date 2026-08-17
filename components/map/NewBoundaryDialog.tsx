@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { formatAcres } from "@/lib/format";
-import type { EntityType, PropertyGeo } from "@/types/db";
+import { STAND_TYPE_LABELS } from "@/lib/assetTypes";
+import type { EntityType, PropertyGeo, StandType } from "@/types/db";
 
 type BoundaryType = "field" | "parcel" | "property" | "timber_stand";
 
@@ -12,6 +13,12 @@ export interface NewBoundaryPayload {
   propertyId: string | null; // required for parcel/field/timber_stand
   county: string | null;
   state: string | null;
+  // Timber stand details, saved with the stand in one step (no
+  // post-save trip to the detail page). Only standType is required.
+  standType: StandType | null;
+  species: string | null;
+  yearEstablished: number | null;
+  standNotes: string | null;
 }
 
 const TYPE_LABEL: Record<BoundaryType, string> = {
@@ -57,9 +64,27 @@ export default function NewBoundaryDialog({
   const [propertyId, setPropertyId] = useState(
     suggestedPropertyId ?? properties[0]?.id ?? ""
   );
+  // Timber stand fields: state (not form values) so they survive the
+  // whole multi-area session like type/name/property do.
+  const [standType, setStandType] = useState<StandType | null>(null);
+  const [species, setSpecies] = useState("");
   const needsProperty = entityType !== "property";
+  const isTimber = entityType === "timber_stand";
+
+  function pickStandType(t: StandType) {
+    setStandType(t);
+    // Prefill the dominant species for pine, but never stomp a hand
+    // -typed value (only replace empty or the other prefill).
+    if (
+      (t === "planted_pine" || t === "natural_pine") &&
+      (species.trim() === "" || species === "Loblolly pine")
+    ) {
+      setSpecies("Loblolly pine");
+    }
+  }
 
   function handleSubmit(formData: FormData) {
+    const year = String(formData.get("year_established") ?? "").trim();
     onSave({
       entityType,
       name: String(formData.get("name") ?? "").trim(),
@@ -68,6 +93,12 @@ export default function NewBoundaryDialog({
         : null,
       county: String(formData.get("county") ?? "").trim() || null,
       state: String(formData.get("state") ?? "").trim() || null,
+      standType: isTimber ? standType : null,
+      species: isTimber ? species.trim() || null : null,
+      yearEstablished: isTimber && year ? Number(year) : null,
+      standNotes: isTimber
+        ? String(formData.get("stand_notes") ?? "").trim() || null
+        : null,
     });
   }
 
@@ -146,6 +177,67 @@ export default function NewBoundaryDialog({
           />
         </div>
 
+        {isTimber ? (
+          <>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Stand type
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(Object.keys(STAND_TYPE_LABELS) as StandType[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => pickStandType(t)}
+                    className={
+                      "rounded-lg border px-2 py-1.5 text-xs font-medium " +
+                      (standType === t
+                        ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50")
+                    }
+                  >
+                    {STAND_TYPE_LABELS[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Species
+                </label>
+                <input
+                  value={species}
+                  onChange={(e) => setSpecies(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Year established
+                </label>
+                <input
+                  name="year_established"
+                  type="number"
+                  placeholder="Optional"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Notes
+              </label>
+              <input
+                name="stand_notes"
+                placeholder="Optional"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+              />
+            </div>
+          </>
+        ) : null}
+
         {needsProperty ? (
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -203,7 +295,12 @@ export default function NewBoundaryDialog({
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={saving || (needsProperty && properties.length === 0)}
+            disabled={
+              saving ||
+              (needsProperty && properties.length === 0) ||
+              (isTimber && !standType)
+            }
+            title={isTimber && !standType ? "Pick a stand type first" : undefined}
             className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600 disabled:opacity-60"
           >
             {saving ? "Saving..." : "Save"}

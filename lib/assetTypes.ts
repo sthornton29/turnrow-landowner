@@ -116,12 +116,52 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
       { key: "serial_number", label: "Serial number", input: "text" },
       // Coverage circle parameters, managed by the map's pivot editor.
       // The polygon is DERIVED from these and regenerated on every
-      // parametric edit; wetted_length_ft doubles as the radius.
+      // parametric edit; wetted_length_ft doubles as the base radius.
       { key: "center_lon", label: "Center longitude", input: "number", mapManaged: true },
       { key: "center_lat", label: "Center latitude", input: "number", mapManaged: true },
       { key: "full_circle", label: "Full circle", input: "boolean", mapManaged: true },
       { key: "start_bearing_deg", label: "Start bearing", input: "number", mapManaged: true },
       { key: "end_bearing_deg", label: "End bearing", input: "number", mapManaged: true },
+      // Composite shape parameters (real machines are not perfect
+      // circles): extension zones (end guns, corner arms, benders),
+      // skip wedges (obstacle wraps), cutout polygons (pond, road:
+      // watered but not plantable), towable positions, and the one-way
+      // custom-shape flag. Arrays/objects, carried through form saves
+      // by cleanDetails like the scalars above.
+      { key: "extensions", label: "Extension zones", input: "text", mapManaged: true },
+      { key: "skips", label: "Skip sectors", input: "text", mapManaged: true },
+      { key: "cutouts", label: "Exclusion cutouts", input: "text", mapManaged: true },
+      { key: "positions", label: "Towable positions", input: "text", mapManaged: true },
+      { key: "custom_shape", label: "Custom shape", input: "boolean", mapManaged: true },
+      { key: "acres_watered", label: "Gross watered acres", input: "number", mapManaged: true },
+    ],
+  },
+  irrigation_lateral: {
+    label: "Lateral / linear move",
+    letter: "L",
+    defaultGeometry: "line",
+    canLinkToWell: true,
+    fields: [
+      {
+        key: "make",
+        label: "Make",
+        input: "select",
+        options: opts(
+          ["valley", "Valley"],
+          ["zimmatic", "Zimmatic"],
+          ["reinke", "Reinke"],
+          ["tl", "T-L"],
+          ["pierce", "Pierce"],
+          ["other", "Other"]
+        ),
+      },
+      { key: "length_ft", label: "Machine length", input: "number", unit: "ft" },
+      { key: "acres_covered", label: "Acres covered", input: "number", unit: "ac" },
+      // Coverage parameters from the map: the drawn travel path and any
+      // cutouts; coverage = path swept by the machine length.
+      { key: "path", label: "Travel path", input: "text", mapManaged: true },
+      { key: "cutouts", label: "Exclusion cutouts", input: "text", mapManaged: true },
+      { key: "acres_watered", label: "Gross watered acres", input: "number", mapManaged: true },
     ],
   },
   underground_pipe: {
@@ -284,18 +324,14 @@ export function cleanDetails(
   assetType: AssetType,
   raw: Record<string, FormDataEntryValue>,
   existing: Record<string, unknown> = {}
-): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const field of ASSET_TYPES[assetType].fields) {
     if (field.mapManaged) {
+      // Carry stored values through untouched, including arrays and
+      // objects (composite pivot zones, lateral paths, cutouts).
       const kept = existing[field.key];
-      if (
-        typeof kept === "string" ||
-        typeof kept === "number" ||
-        typeof kept === "boolean"
-      ) {
-        out[field.key] = kept;
-      }
+      if (kept !== undefined && kept !== null) out[field.key] = kept;
       continue;
     }
     const v = raw[field.key];
@@ -322,11 +358,14 @@ export const STAND_TYPE_LABELS: Record<string, string> = {
 // Saved timber stand map colors, one per stand_type. Chosen to read over
 // satellite and stay distinct from kelly (fields), the crop palette
 // (corn #facc15, cotton white, soybeans kelly, wheat #d97706, canola
-// #a3e635, other light violet #a78bfa), the entity outline palette, and
-// the Timber Scan DRAFT palette (light amber/sky/violet/teal, dashed):
-// saved stands are solid and deep so drafts never look saved.
+// #a3e635, other light violet #a78bfa), the entity outline palette, the
+// pivot light blues (#7dd3fc/#38bdf8), and the Timber Scan DRAFT
+// palette (light amber/sky/violet/teal, dashed): saved stands are solid
+// and deep so drafts never look saved. STANDING RULE: timber types
+// never use hues adjacent to the field/crop greens (planted pine moved
+// from deep forest green to deep teal for exactly this reason).
 export const STAND_TYPE_COLORS: Record<string, string> = {
-  planted_pine: "#166534", // deep forest green
+  planted_pine: "#0f766e", // deep teal, unmistakably not a field green
   natural_pine: "#6b8e23", // olive drab
   hardwood: "#c2410c", // burnt orange
   mixed: "#7c3aed", // deep violet

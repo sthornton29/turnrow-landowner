@@ -1,11 +1,10 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 (income projections straight from lease
-assumptions + deletable expected payments; Tenant Data panel with
-multi-crop assumption years, strict crop matching, and the cents-per-lb
-fill boundary; pivot circles drawable from the Add menu; earlier same
-day: lease price methods, timber stand map colors, multi-area draw
-fixes, pivot coverage circle editor)
+Last updated: 2026-08-17 (composite pivot shapes: extensions, skips,
+cutouts, towables, laterals, migration 0013; timber details inline in
+the boundary save dialog; planted pine to deep teal; draggable
+crosshair; earlier same day: income projections from lease assumptions,
+Tenant Data panel, pivot circles, lease price methods)
 
 ## What this product is
 
@@ -98,9 +97,9 @@ Phase 2 tables (all with the same org RLS + composite property FK):
   field_road | other), notes, MultiLineString geom, generated length_feet
   and miles.
 - assets: ONE table with a type system. property_id (nullable),
-  asset_type (well, irrigation_pivot, underground_pipe, riser, shop, shed,
-  barn, grain_bin, house, fence, pond_dam, other), name (only required
-  field), geometry accepting Point/Line/Polygon, year_installed, condition
+  asset_type (well, irrigation_pivot, irrigation_lateral via migration
+  0013, underground_pipe, riser, shop, shed, barn, grain_bin, house,
+  fence, pond_dam, other), name (only required field), geometry accepting Point/Line/Polygon, year_installed, condition
   (excellent/good/fair/poor), estimated_value, notes, details jsonb
   (type-specific fields validated in the app against lib/assetTypes.ts,
   which drives the dynamic forms and panels), parent_asset_id
@@ -481,12 +480,25 @@ Functions and views:
     the same detail panel pattern (right card desktop, bottom sheet
     mobile). The Add menu offers: Boundary (polygon draw; save as field,
     parcel, property, or timber stand), Road/pipe/fence (line draw),
-    Asset pin (crosshair placement mode: pan to line up, Place here, or My
-    location via GPS; moving a pin reuses the same mode), and Irrigation
-    pivot (crosshair places the center, then the parametric circle
-    editor opens directly; Save asks for name + property, suggested
+    Asset pin (crosshair placement mode: pan to line up, DRAG the
+    crosshair itself anywhere on the map (generous touch target), or My
+    location via GPS; Place here confirms wherever it sits; moving a
+    pin reuses the same mode), and Irrigation
+    pivot (crosshair places the center, then the parametric editor
+    opens directly; Save asks for name + property, suggested
     from the center's location, and inserts the pivot with its
-    parameters and derived polygon in one step). Every save
+    parameters and derived polygon in one step). The line dialog's
+    kinds are Road, Pipe, Fence, and Lateral (irrigation_lateral: the
+    drawn line is the machine's travel path; a required machine length
+    in feet sweeps it into flat-ended strip coverage via
+    lib/geo/pivot.ts lateralGeometry, saved as the polygon with the
+    path kept in details; light blue rendering with an L marker;
+    minimal fields: make, length_ft, supply well link). When the
+    boundary dialog's type is Timber, it expands in place with stand
+    type (required, five types), species (prefills "Loblolly pine" on
+    a pine pick, never stomping a typed value), year established, and
+    notes, all persisting across multi-area sessions; the stand saves
+    complete in one step. Every save
     dialog preselects the property whose boundary contains the drawn
     geometry (same lib/geo/propertyMatch.ts logic as the file import)
     with a "Suggested from location" chip that clears if the user picks
@@ -506,29 +518,47 @@ Functions and views:
     completed areas exist ("Discard 3 drawn areas?"). Acres/miles
     recompute server-side on every save. TIMBER STANDS render like
     fields: prominent per-type fills + solid same-color outlines
-    (STAND_TYPE_COLORS in lib/assetTypes.ts: planted pine deep forest
-    #166534, natural pine olive #6b8e23, hardwood burnt orange #c2410c,
+    (STAND_TYPE_COLORS in lib/assetTypes.ts: planted pine deep teal
+    #0f766e, natural pine olive #6b8e23, hardwood burnt orange #c2410c,
     mixed deep violet #7c3aed, other gray; all checked distinct from
-    kelly, the crop palette, entity outlines, and the light dashed
-    Timber Scan draft palette), white name labels, and a "Timber types"
+    kelly, the crop palette, entity outlines, the pivot light blues,
+    and the light dashed Timber Scan draft palette; STANDING RULE:
+    timber types never use hues adjacent to the field/crop greens),
+    white name labels, and a "Timber types"
     legend in the control column listing only types present. PIVOT
-    COVERAGE CIRCLES: a parametric editor (never vertex editing; the
-    polygon is derived and regenerated) with draggable center/radius
-    handles, a typed feet input (the radius IS wetted_length_ft; end
-    gun throw by dragging further), Full/Partial toggle with two arc
+    COVERAGE SHAPES: a parametric editor (never vertex editing; the
+    geometry is derived and regenerated) with draggable center/radius
+    handles, a typed feet input (the radius IS wetted_length_ft),
+    Full/Partial toggle with two arc
     handles (compass bearings, clockwise sweep, live degrees, ~3
     degree snap to 90/180/270), live acres, and Save through
-    set_geometry. Parameters (center_lon/lat, full_circle,
-    start/end_bearing_deg) live in the pivot's details as mapManaged
-    fields (cleanDetails carries them through form saves; the asset
-    page shows a "edited on the map" note). Circles render light blue
-    fill + solid light blue outline in the assets layer, distinct from
-    everything else, with the P marker kept at the center; the panel
-    shows Coverage (Full circle or N degree sweep), radius, and acres,
-    and offers Add/Edit coverage circle (replacing raw geometry editing
-    once a circle exists). lib/geo/pivot.ts unit-tests the circle and
-    sector math (pi r squared sanity, sector = full x sweep/360,
-    bearing conventions, wraparound sweeps, snapping). CSS-based fullscreen toggle (not the native Fullscreen
+    set_geometry. COMPOSITE MODEL for real machines: extension zones
+    (+ Extension: a {start/end bearing, outer radius} sector unioned
+    on, with its own angle/radius handles and feet input; models end
+    gun sectors, corner-arm lobes, and bender reach, several allowed),
+    skip sectors (+ Skip: a wedge differenced out, orange handles;
+    obstacle wraps), exclusion cutouts (+ Cutout: draw a small polygon
+    that cuts a HOLE; pond, waterway, road: watered but not
+    plantable), towable positions (+ Position: another full parameter
+    set, geometry is the MultiPolygon union, own handles), and a
+    one-way "Convert to custom shape" escape hatch (confirm dialog;
+    freezes the polygon for ordinary vertex editing, custom_shape flag
+    remembered). TWO ACRE NUMBERS: acres_covered (headline) =
+    plantable after cutouts; acres_watered = gross; the panel shows
+    "212.4 plantable of 218.1 watered" when they differ. The saved
+    polygon is the plantable shape (holes punch through to satellite).
+    All parameters live in details as mapManaged fields (cleanDetails
+    carries scalars AND arrays/objects through form saves). Pivots and
+    laterals render light blue fill + solid light blue outline with
+    the letter marker kept at the primary center; panels show
+    Coverage (Full circle, N degree sweep, or Custom shape, plus
+    towable position count) and offer Add/Edit coverage (replacing raw
+    geometry editing unless converted to custom shape).
+    lib/geo/pivot.ts unit-tests the geometry (pi r squared sanity,
+    sector = full x sweep/360, extension ring acreage, skip
+    subtraction, cutout holes, towable multipolygon sums, lateral
+    strip area, details round trip, bearing conventions, wraparound
+    sweeps, snapping). CSS-based fullscreen toggle (not the native Fullscreen
     API, so iOS modals stay visible). /map?focus=asset:<id> zooms to and
     selects an entity (used by list pages).
   - /import: upload GeoJSON/JSON, KML, KMZ, zipped shapefiles. Polygons
@@ -855,3 +885,10 @@ Functions and views:
   boundary; income projections computed straight from lease
   assumptions (no Generate step needed, projection note, deletable
   expected payments). Described above.
+- Post-Phase 6d (DONE, 2026-08-17, migration 0013): real-world pivot
+  shapes (composite parametric model: extension zones, skip sectors,
+  cutout holes with plantable-vs-watered acres, towable positions,
+  custom-shape escape hatch, and the irrigation_lateral asset type);
+  timber stand details inline in the boundary save dialog; planted
+  pine recolored deep teal; draggable crosshair placement. Described
+  above.
