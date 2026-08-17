@@ -25,6 +25,21 @@ import {
   type FarmFieldDataRow,
   type FieldMappingRow,
 } from "@/lib/farmDisplay";
+import {
+  projectedYieldForYear,
+  rmaConfigForCrop,
+  tenantPriceCard,
+  type ProjectedYieldRow,
+  type TenantPriceCard,
+  type TenantPriceRow,
+} from "@/lib/leasePricing";
+import {
+  RecipeComputeCard,
+  RecipeEditor,
+  RmaBenchmarkCard,
+  TenantPriceCardView,
+} from "@/components/leases/PriceMethodCards";
+import type { PriceMethod, PriceRecipe, RmaBenchmarkConfig } from "@/lib/leaseLogic";
 
 // Actual yield from a farm connection, offered as a one-click prefill for
 // crop share projection assumptions (user still reviews and saves).
@@ -93,30 +108,44 @@ export default function LeaseDetail({
   const [farmMappings, setFarmMappings] = useState<FieldMappingRow[]>([]);
   const [farmData, setFarmData] = useState<FarmFieldDataRow[]>([]);
   const [farmConnections, setFarmConnections] = useState<
-    Array<{ id: string; label: string }>
+    Array<{ id: string; label: string; scopes: Record<string, boolean> | null }>
   >([]);
+  const [marketingPrices, setMarketingPrices] = useState<TenantPriceRow[]>([]);
+  const [projectedYields, setProjectedYields] = useState<ProjectedYieldRow[]>([]);
 
   const load = useCallback(async () => {
-    const isCropShare =
-      lease.lease_type === "agricultural" && lease.rent_structure === "crop_share";
-    const [l, a, fm, fd, fc] = await Promise.all([
+    const wantsFarm =
+      lease.lease_type === "agricultural" &&
+      (lease.rent_structure === "crop_share" || lease.rent_structure === "flex");
+    const [l, a, fm, fd, fc, mp, py] = await Promise.all([
       supabase.from("lease_lands").select("*").eq("lease_id", lease.id),
       supabase.from("lease_year_assumptions").select("*").eq("lease_id", lease.id).order("year"),
-      isCropShare
+      wantsFarm
         ? supabase.from("field_mappings").select("*").eq("status", "confirmed")
         : Promise.resolve({ data: [] }),
-      isCropShare
+      wantsFarm
         ? supabase.from("farm_field_data").select("*")
         : Promise.resolve({ data: [] }),
-      isCropShare
-        ? supabase.from("farm_connections").select("id, label")
+      wantsFarm
+        ? supabase.from("farm_connections").select("id, label, scopes")
+        : Promise.resolve({ data: [] }),
+      wantsFarm
+        ? supabase.from("farm_marketing_prices").select("*")
+        : Promise.resolve({ data: [] }),
+      wantsFarm
+        ? supabase.from("farm_projected_yields").select("*")
         : Promise.resolve({ data: [] }),
     ]);
     setLands((l.data as LandLink[]) ?? []);
     setAssumptions((a.data as AssumptionRow[]) ?? []);
     setFarmMappings((fm.data as FieldMappingRow[]) ?? []);
     setFarmData((fd.data as FarmFieldDataRow[]) ?? []);
-    setFarmConnections((fc.data as Array<{ id: string; label: string }>) ?? []);
+    setFarmConnections(
+      (fc.data as Array<{ id: string; label: string; scopes: Record<string, boolean> | null }>) ??
+        []
+    );
+    setMarketingPrices((mp.data as TenantPriceRow[]) ?? []);
+    setProjectedYields((py.data as ProjectedYieldRow[]) ?? []);
   }, [supabase, lease.id, lease.lease_type, lease.rent_structure]);
 
   useEffect(() => {
@@ -155,6 +184,49 @@ export default function LeaseDetail({
     () => generateLeasePayments(lease, totalAcres, assumptionsByYear),
     [lease, totalAcres, assumptionsByYear]
   );
+
+  // Which farm connections and remote fields cover this lease's land
+  // (shared by the actual-yield, tenant-price, and projected-yield
+  // helpers).
+  const relevantFarm = useMemo(() => {
+    const keys = new Set<string>();
+    const connectionIds = new Set<string>();
+    const leasedFieldIds = new Set(lands.map((l) => l.field_id).filter(Boolean));
+    const wholePropertyIds = new Set(
+      lands.filter((l) => !l.field_id).map((l) => l.property_id)
+    );
+    for (const m of farmMappings) {
+      const mappedField = m.local_field_id ? fieldById.get(m.local_field_id) : null;
+      const onLease =
+        (m.local_field_id && leasedFieldIds.has(m.local_field_id)) ||
+        (mappedField && wholePropertyIds.has(mappedField.property_id)) ||
+        (m.local_property_id && wholePropertyIds.has(m.local_property_id));
+      if (onLease) {
+        keys.add(`${m.farm_connection_id}|${m.remote_field_id}`);
+        connectionIds.add(m.farm_connection_id);
+      }
+    }
+    return { keys, connectionIds: Array.from(connectionIds) };
+  }, [lands, farmMappings, fieldById]);
+
+  const priceMethod: PriceMethod = lease.terms?.price_method ?? "manual";
+  const priceScopedConnections = useMemo(
+    () =>
+      new Set(
+        farmConnections
+          .filter((c) => c.scopes?.projected_prices)
+          .map((c) => c.id)
+      ),
+    [farmConnections]
+  );
+  const yieldScopedKeys = useMemo(() => {
+    const scoped = new Set(
+      farmConnections.filter((c) => c.scopes?.projected_yields).map((c) => c.id)
+    );
+    return new Set(
+      Array.from(relevantFarm.keys).filter((k) => scoped.has(k.split("|")[0]))
+    );
+  }, [farmConnections, relevantFarm]);
 
   // Actual harvested yields from farm connections, per year, restricted to the
   // land this lease covers. Weighted average over the dominant crop's fields.
@@ -261,6 +333,22 @@ export default function LeaseDetail({
       });
     }
     load();
+  }
+
+  // Save a confirmed custom pricing recipe into the lease terms.
+  const [editingRecipe, setEditingRecipe] = useState(false);
+  async function saveRecipe(recipe: PriceRecipe) {
+    const terms = { ...(lease.terms ?? {}), custom_recipe: recipe };
+    const { error: err } = await supabase
+      .from("leases")
+      .update({ terms })
+      .eq("id", lease.id);
+    if (err) {
+      setError("Could not save the recipe: " + err.message);
+      return;
+    }
+    setEditingRecipe(false);
+    router.refresh();
   }
 
   async function setStatus(status: LeaseStatus) {
@@ -445,6 +533,42 @@ export default function LeaseDetail({
               ? `Base rent is computed from the base rate and leased acres; enter your estimated bonus per year. Bonus: ${lease.terms?.bonus_description ?? "not described"}`
               : "Crop share income is projected from these assumptions per year."}
           </p>
+          {priceMethod === "custom" ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-medium text-gray-900">Pricing recipe</span>
+                {lease.terms?.custom_recipe ? (
+                  <span className="text-gray-600">
+                    {lease.terms.custom_recipe.description}
+                  </span>
+                ) : (
+                  <span className="text-amber-700">
+                    Not set up yet; design it from the lease{"'"}s pricing clause.
+                  </span>
+                )}
+                <button
+                  onClick={() => setEditingRecipe((e) => !e)}
+                  className="ml-auto text-sm font-medium text-kelly-700 hover:underline"
+                >
+                  {editingRecipe
+                    ? "Close"
+                    : lease.terms?.custom_recipe
+                      ? "Edit recipe"
+                      : "Set up recipe"}
+                </button>
+              </div>
+              {editingRecipe ? (
+                <div className="mt-2">
+                  <RecipeEditor
+                    initialClause={lease.terms?.pricing_clause ?? ""}
+                    recipe={lease.terms?.custom_recipe ?? null}
+                    onSave={saveRecipe}
+                    onCancel={() => setEditingRecipe(false)}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="space-y-2">
             {years.map((year) => {
               const a = assumptionsByYear.get(year) ?? {};
@@ -457,6 +581,21 @@ export default function LeaseDetail({
                   value={a}
                   projected={projected}
                   farmActual={farmActualByYear.get(year) ?? null}
+                  priceMethod={priceMethod}
+                  tenantCard={tenantPriceCard(
+                    relevantFarm.connectionIds,
+                    priceScopedConnections,
+                    marketingPrices,
+                    year,
+                    a.crop ?? null
+                  )}
+                  projectedYield={projectedYieldForYear(
+                    projectedYields,
+                    yieldScopedKeys,
+                    year
+                  )}
+                  rmaConfig={rmaConfigForCrop(lease.terms?.rma_config, a.crop ?? null)}
+                  recipe={lease.terms?.custom_recipe ?? null}
                   onSave={(data) => saveAssumption(year, data)}
                 />
               );
@@ -496,6 +635,11 @@ function AssumptionRowEditor({
   value,
   projected,
   farmActual = null,
+  priceMethod = "manual",
+  tenantCard,
+  projectedYield = null,
+  rmaConfig = null,
+  recipe = null,
   onSave,
 }: {
   year: number;
@@ -503,37 +647,95 @@ function AssumptionRowEditor({
   value: YearAssumptions;
   projected: number | null;
   farmActual?: FarmActual | null;
+  priceMethod?: PriceMethod;
+  tenantCard: TenantPriceCard;
+  projectedYield?: { crop: string; yieldPerAcre: number; unit: string | null } | null;
+  rmaConfig?: RmaBenchmarkConfig | null;
+  recipe?: PriceRecipe | null;
   onSave: (data: YearAssumptions) => void;
 }) {
   const [data, setData] = useState<YearAssumptions>(value);
   const [dirty, setDirty] = useState(false);
+  // Inputs filled by a helper stay amber until saved (or hand-edited).
+  const [amberKeys, setAmberKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setData(value);
     setDirty(false);
+    setAmberKeys(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(value)]);
 
   function set<K extends keyof YearAssumptions>(key: K, v: YearAssumptions[K]) {
     setData((d) => ({ ...d, [key]: v }));
     setDirty(true);
+    setAmberKeys((keys) => {
+      const next = new Set(keys);
+      next.delete(key as string);
+      return next;
+    });
+  }
+  function fillFromHelper(patch: Partial<YearAssumptions>) {
+    setData((d) => ({ ...d, ...patch }));
+    setDirty(true);
+    setAmberKeys((keys) => new Set([...keys, ...Object.keys(patch)]));
   }
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
+  const amber = (key: string) =>
+    amberKeys.has(key) ? " border-amber-400 bg-amber-50" : " border-gray-300";
+
+  // The price helper card for this year, driven by the lease's method.
+  // Crop share rows get a Use button targeting expected_price; flex rows
+  // show the card as a reference beside the bonus estimate.
+  const usePrice =
+    structure === "crop_share"
+      ? (price: number) => fillFromHelper({ expected_price: price })
+      : undefined;
+  const priceHelper =
+    priceMethod === "tenant_average" ? (
+      <TenantPriceCardView card={tenantCard} onUse={usePrice} />
+    ) : priceMethod === "rma_benchmark" ? (
+      rmaConfig ? (
+        <RmaBenchmarkCard config={rmaConfig} year={year} onUse={usePrice} />
+      ) : (
+        <p className="text-xs text-gray-500">
+          Add a crop benchmark (state and formula) in the lease terms first.
+        </p>
+      )
+    ) : priceMethod === "custom" ? (
+      recipe ? (
+        <RecipeComputeCard
+          recipe={recipe}
+          year={year}
+          crop={data.crop ?? null}
+          rmaState={rmaConfig?.state ?? "AL"}
+          tenantCard={tenantCard}
+          onUse={usePrice}
+        />
+      ) : (
+        <p className="text-xs text-gray-500">Set up the pricing recipe above first.</p>
+      )
+    ) : null;
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
       <span className="w-12 font-medium text-gray-900">{year}</span>
       {structure === "flex" ? (
-        <label className="flex items-center gap-1 text-sm text-gray-600">
-          Bonus estimate $
-          <input
-            type="number"
-            step="0.01"
-            value={data.bonus_estimate ?? ""}
-            onChange={(e) => set("bonus_estimate", num(e.target.value))}
-            className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm"
-          />
-        </label>
+        <>
+          <label className="flex items-center gap-1 text-sm text-gray-600">
+            Bonus estimate $
+            <input
+              type="number"
+              step="0.01"
+              value={data.bonus_estimate ?? ""}
+              onChange={(e) => set("bonus_estimate", num(e.target.value))}
+              className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm"
+            />
+          </label>
+          {priceHelper ? (
+            <div className="w-full basis-full">{priceHelper}</div>
+          ) : null}
+        </>
       ) : (
         <>
           <input
@@ -556,7 +758,7 @@ function AssumptionRowEditor({
             value={data.expected_yield ?? ""}
             onChange={(e) => set("expected_yield", num(e.target.value))}
             placeholder="Yield/ac"
-            className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm"
+            className={"w-20 rounded-lg border px-2 py-1 text-sm" + amber("expected_yield")}
           />
           <input
             type="number"
@@ -564,7 +766,7 @@ function AssumptionRowEditor({
             value={data.expected_price ?? ""}
             onChange={(e) => set("expected_price", num(e.target.value))}
             placeholder="Price"
-            className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm"
+            className={"w-20 rounded-lg border px-2 py-1 text-sm" + amber("expected_price")}
           />
           <input
             type="number"
@@ -576,20 +778,39 @@ function AssumptionRowEditor({
           />
           {farmActual && data.expected_yield !== farmActual.yieldPerAcre ? (
             <button
-              onClick={() => {
-                setData((d) => ({
-                  ...d,
-                  crop: d.crop || farmActual.crop,
+              onClick={() =>
+                fillFromHelper({
+                  crop: data.crop || farmActual.crop,
                   expected_yield: farmActual.yieldPerAcre,
-                }));
-                setDirty(true);
-              }}
+                })
+              }
               title={`Actual yield from ${farmActual.source}`}
               className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-50"
             >
               Use actual: {formatNumber(farmActual.yieldPerAcre)} {farmActual.unitLabel} (
               {farmActual.crop}, from farm data)
             </button>
+          ) : null}
+          {!farmActual &&
+          projectedYield &&
+          data.expected_yield !== projectedYield.yieldPerAcre ? (
+            // Pre-harvest only; the post-harvest Use actual wins above.
+            <button
+              onClick={() =>
+                fillFromHelper({
+                  crop: data.crop || projectedYield.crop,
+                  expected_yield: projectedYield.yieldPerAcre,
+                })
+              }
+              title="Your tenant's projected yield for this land"
+              className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-50"
+            >
+              Use tenant{"'"}s projected yield:{" "}
+              {formatNumber(projectedYield.yieldPerAcre)} ({projectedYield.crop})
+            </button>
+          ) : null}
+          {priceHelper ? (
+            <div className="w-full basis-full">{priceHelper}</div>
           ) : null}
         </>
       )}

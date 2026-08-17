@@ -16,6 +16,41 @@ export const LEASE_STATUS_LABELS: Record<LeaseStatus, string> = {
 
 // ---------------------------------------------------------------- terms
 
+// How a crop share / flex lease establishes its average price. The
+// method only changes where the SUGGESTED price for each year's
+// assumption comes from; assumptions themselves work exactly as before
+// and every suggestion is reviewed before saving.
+export type PriceMethod = "manual" | "tenant_average" | "rma_benchmark" | "custom";
+
+export const PRICE_METHOD_LABELS: Record<PriceMethod, string> = {
+  manual: "Manual (enter prices yourself)",
+  tenant_average: "Tenant's average price (farm connection)",
+  rma_benchmark: "RMA insurance benchmark (public data)",
+  custom: "Custom recipe (from the lease's pricing clause)",
+};
+
+// Per-crop RMA benchmark configuration on the lease.
+export interface RmaBenchmarkConfig {
+  crop: string;
+  state: string; // 2-letter
+  formula: "projected" | "harvest" | "average";
+}
+
+// A custom pricing recipe: designed once (AI-assisted, user-reviewed),
+// computed deterministically every year by lib/priceExpression.ts.
+export interface PriceRecipeInput {
+  name: string; // identifier used in the expression, snake_case
+  label: string;
+  source: "manual" | "rma_projected" | "rma_harvest" | "tenant_average";
+  guidance: string | null; // where the human finds a manual value
+}
+
+export interface PriceRecipe {
+  description: string;
+  inputs: PriceRecipeInput[];
+  expression: string;
+}
+
 export interface LeaseTerms {
   // cash
   cash_basis?: "per_acre" | "lump_sum" | null;
@@ -28,6 +63,11 @@ export interface LeaseTerms {
   landowner_share_pct?: number | null;
   shares_expenses?: boolean | null;
   expense_share_pct?: number | null;
+  // price method (flex + crop_share)
+  price_method?: PriceMethod | null;
+  rma_config?: RmaBenchmarkConfig[] | null;
+  custom_recipe?: PriceRecipe | null;
+  pricing_clause?: string | null; // verbatim clause from extraction, prefills recipe setup
   // hunting
   hunt_basis?: "lump_sum" | "per_acre" | null;
   amount?: number | null;

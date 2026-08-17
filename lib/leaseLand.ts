@@ -20,6 +20,7 @@ export interface MatchableProperty {
   id: string;
   name: string;
   county: string | null;
+  state?: string | null; // used for RMA benchmark defaults, not matching
   acres: number | null;
   fsa_numbers: string[] | null;
 }

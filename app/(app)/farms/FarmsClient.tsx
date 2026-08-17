@@ -161,8 +161,33 @@ export default function FarmsClient({
                   {c.status === "revoked" ? "Ended by farmer" : c.status}
                 </span>
                 <span className="text-sm text-gray-500">
-                  {formatNumber(c.field_count ?? 0)} fields · yields{" "}
-                  {c.scopes?.yields ? "included" : "not shared"}
+                  {formatNumber(c.field_count ?? 0)} fields
+                </span>
+                <span className="flex flex-wrap gap-1">
+                  {(
+                    [
+                      ["yields", "Yields"],
+                      ["projected_prices", "Projected prices"],
+                      ["projected_yields", "Projected yields"],
+                    ] as Array<[string, string]>
+                  ).map(([key, label]) => (
+                    <span
+                      key={key}
+                      className={
+                        "rounded-full px-2 py-0.5 text-xs font-medium " +
+                        ((c.scopes as Record<string, boolean> | null)?.[key]
+                          ? "bg-kelly-100 text-kelly-700"
+                          : "bg-gray-100 text-gray-400")
+                      }
+                      title={
+                        (c.scopes as Record<string, boolean> | null)?.[key]
+                          ? `${label} shared by your farmer`
+                          : `${label} not shared`
+                      }
+                    >
+                      {label}
+                    </span>
+                  ))}
                 </span>
                 <span className="ml-auto text-xs text-gray-400">
                   {c.last_synced_at

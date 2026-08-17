@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   LEASE_STATUS_LABELS,
+  PRICE_METHOD_LABELS,
   type LeaseStatus,
   type LeaseTerms,
   type LeaseType,
+  type PriceMethod,
   type RentStructure,
   type SchedulePayment,
 } from "@/lib/leaseLogic";
@@ -32,6 +34,8 @@ export interface LeasePrefill {
   special_provisions?: string | null;
   leased_properties?: ExtractedLeaseLand[] | null;
   leased_acres_total?: number | null;
+  price_method?: PriceMethod | null;
+  pricing_clause?: string | null;
 }
 
 // One row of the Leased land section: a lease can cover several
@@ -116,7 +120,13 @@ export default function LeaseForm({
   const [rentStructure, setRentStructure] = useState<RentStructure>(
     lease?.rent_structure ?? prefill?.rent_structure ?? "cash"
   );
-  const [terms, setTerms] = useState<LeaseTerms>(lease?.terms ?? prefill?.terms ?? {});
+  const [terms, setTerms] = useState<LeaseTerms>(() => ({
+    ...(lease?.terms ?? prefill?.terms ?? {}),
+    // The extraction reports the price method and pricing clause at the
+    // top level; fold them into terms where they live.
+    ...(!lease && prefill?.price_method ? { price_method: prefill.price_method } : {}),
+    ...(!lease && prefill?.pricing_clause ? { pricing_clause: prefill.pricing_clause } : {}),
+  }));
   const [schedule, setSchedule] = useState<SchedulePayment[]>(
     lease?.payment_schedule?.length
       ? lease.payment_schedule
@@ -542,6 +552,121 @@ export default function LeaseForm({
                 Projections use per-year assumptions (crop, acres, yield, price, shared
                 expenses) you enter on the lease page.
               </p>
+            </div>
+          ) : null}
+
+          {/* Price method: where each year's suggested average price
+              comes from. Assumptions work exactly as before; every
+              suggestion is reviewed before saving. */}
+          {rentStructure === "flex" || rentStructure === "crop_share" ? (
+            <div className="space-y-2 border-t border-gray-200 pt-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Price method
+              </label>
+              <select
+                value={terms.price_method ?? "manual"}
+                onChange={(e) => setTerm("price_method", e.target.value as PriceMethod)}
+                className={inputClass + ring("price_method")}
+              >
+                {Object.entries(PRICE_METHOD_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              {(terms.price_method ?? "manual") === "rma_benchmark" ? (
+                <div className="space-y-1.5">
+                  {(terms.rma_config ?? []).map((row, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-1.5">
+                      <input
+                        value={row.crop}
+                        onChange={(e) =>
+                          setTerm(
+                            "rma_config",
+                            (terms.rma_config ?? []).map((r, j) =>
+                              j === i ? { ...r, crop: e.target.value } : r
+                            )
+                          )
+                        }
+                        placeholder="Crop"
+                        className="w-28 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      />
+                      <input
+                        value={row.state}
+                        onChange={(e) =>
+                          setTerm(
+                            "rma_config",
+                            (terms.rma_config ?? []).map((r, j) =>
+                              j === i ? { ...r, state: e.target.value.toUpperCase() } : r
+                            )
+                          )
+                        }
+                        placeholder="State"
+                        maxLength={2}
+                        className="w-16 rounded-lg border border-gray-300 px-2 py-1.5 text-sm uppercase"
+                      />
+                      <select
+                        value={row.formula}
+                        onChange={(e) =>
+                          setTerm(
+                            "rma_config",
+                            (terms.rma_config ?? []).map((r, j) =>
+                              j === i
+                                ? { ...r, formula: e.target.value as typeof row.formula }
+                                : r
+                            )
+                          )
+                        }
+                        className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="average">Average of projected and harvest</option>
+                        <option value="projected">Projected price only</option>
+                        <option value="harvest">Harvest price only</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTerm(
+                            "rma_config",
+                            (terms.rma_config ?? []).filter((_, j) => j !== i)
+                          )
+                        }
+                        className="text-xs font-medium text-red-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTerm("rma_config", [
+                        ...(terms.rma_config ?? []),
+                        {
+                          crop: "Corn",
+                          state:
+                            properties.find((p) => p.state)?.state?.toUpperCase() ?? "AL",
+                          formula: "average" as const,
+                        },
+                      ])
+                    }
+                    className="text-sm font-medium text-kelly-700 hover:underline"
+                  >
+                    + Add crop benchmark
+                  </button>
+                  <p className="text-xs text-gray-500">
+                    RMA covers corn, soybeans, wheat, cotton, and canola.
+                    Windows and prices are per state.
+                  </p>
+                </div>
+              ) : null}
+              {(terms.price_method ?? "manual") === "custom" ? (
+                <p className="text-xs text-gray-500">
+                  {terms.custom_recipe
+                    ? `Recipe saved: ${terms.custom_recipe.description}`
+                    : "Set up the pricing recipe on the lease page after saving."}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>

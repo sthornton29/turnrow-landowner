@@ -1,7 +1,7 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-16 (Timber Scan added; earlier same day: entity
-level, five new Alabama counties, FSA numbers, county import loop)
+Last updated: 2026-08-17 (lease price methods; 2026-08-16: Timber Scan,
+entity level, five new Alabama counties, FSA numbers, county import loop)
 
 ## What this product is
 
@@ -257,6 +257,61 @@ Entity level (migrations 0007 and 0009; org RLS, same policy pattern):
 - Future ideas, deliberately out of scope for now: ownership
   percentages/members within an entity, inter-entity leases, per-entity
   user permissions.
+
+Lease price methods (migration 0012; price_method lives in leases.terms
+jsonb): crop share and flex leases record HOW their average crop price
+is established, and the app fills each year's price assumption from the
+right source, always reviewed (amber until saved) and never auto-saved:
+
+- manual (default, today's behavior); tenant_average (farm connection);
+  rma_benchmark (public USDA data, zero connections needed); custom
+  (AI-designed recipe, deterministically computed). The lease AI
+  extraction suggests the method from the pricing clause and stores the
+  clause verbatim in terms.pricing_clause for recipe setup.
+- tenant_average: the partner API's Part A scopes (projected_prices,
+  projected_yields, opt-in and default OFF on the farm side) sync into
+  farm_marketing_prices (one aggregate number per crop by design:
+  price, unit, is_final, as_of) and farm_projected_yields (per shared
+  field x crop, basis expected|actual) alongside the normal cron +
+  manual refresh; /farms cards show scope chips. The year row's card
+  labels PROJECTED vs "Tenant's final average price" (settlement
+  nudge), and a "Use tenant's projected yield" helper sits beside the
+  existing post-harvest "Use actual" (actuals win). Scope off / no
+  connection is a quiet explanatory line, never an error, never an
+  in-app request.
+- rma_benchmark: lib/rma.ts implements grain-tracker/docs/RMA_PRICING.md
+  and was live-verified 2026-08-17 (Alabama corn 2026: projected $4.42
+  Released in the Jan 15-Feb 14 window, harvest In Discovery Aug 1-31
+  against ZCU26). Defensive Atom parsing with loud shape-change errors
+  and name-boundary anchoring (ProjectedPriceBeginDate must not shadow
+  ProjectedPrice), pickPrimaryRow (Conventional practice, preferred
+  type, earliest actuarial date), statuses authoritative with
+  day-N-of-M running-average labels, the single unit-conversion
+  boundary (canola x50 to $/bu, cotton native), staleness daily
+  in-window / weekly idle, write-then-swap via /api/rma-price (cache
+  reads as the user; cache writes via the service role; a failed fetch
+  returns the cached value flagged stale, never blanks it; no_offer is
+  data). Per-lease terms.rma_config rows: crop, state (defaults from
+  the leased properties), formula projected|harvest|average (average
+  preselected). Covers corn, soybeans, wheat, cotton, canola.
+- custom: /api/price-recipe turns a pasted or extracted pricing clause
+  into a recipe (description, typed inputs with source hints manual |
+  rma_projected | rma_harvest | tenant_average and human guidance, and
+  an arithmetic expression) reviewed amber and editable before saving
+  into terms.custom_recipe; honest copy that the AI structures the
+  clause but fetches no bespoke market data. Yearly "Compute price"
+  auto-fills sourced inputs, takes manual ones with guidance, evaluates
+  with lib/priceExpression.ts (hand-written tokenizer/parser, never
+  eval; malformed expressions rejected at save time) and shows the
+  substituted formula ("(4.66 + 4.2) / 2 + 0.10 = $4.53") with Use
+  this price.
+- Flex leases show the method's resolved price card beside the bonus
+  estimate as reference; the bonus stays a user-entered number.
+- Unit tests: priceExpression (precedence, malformed, division by
+  zero), rma (fixture parse, shadowing, conversions, staleness,
+  formula resolution with mixed statuses), leasePricing (tenant card
+  states projected/final/scope-off, acre-weighted projected yields,
+  config resolution).
 
 Timber Scan (migration 0011 + /api/timber-scan + /timber-scan/[id]):
 

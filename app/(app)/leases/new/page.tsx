@@ -10,7 +10,7 @@ export default async function NewLeasePage() {
       supabase.from("tenants").select("id, name").order("name"),
       supabase
         .from("properties")
-        .select("id, name, county, acres, fsa_numbers")
+        .select("id, name, county, state, acres, fsa_numbers")
         .order("name"),
       supabase.from("parcels").select("property_id, parcel_number"),
     ]);

@@ -68,6 +68,17 @@ const LEASE_TOOL: Anthropic.Tool = {
         },
       },
       special_provisions: { type: ["string", "null"], description: "Renewal/termination provisions and any special provisions worth noting, condensed" },
+      price_method: {
+        type: ["string", "null"],
+        enum: ["manual", "tenant_average", "rma_benchmark", "custom", null],
+        description:
+          "Crop share and flex leases only: how the lease establishes the average crop price. tenant_average when the price is the tenant's/operator's own average selling price; rma_benchmark when it references crop insurance projected/harvest prices, RMA, or spring/fall price discovery; custom when the clause defines its own formula (futures settlements on specific dates, elevator posted price plus basis, etc.); manual when the lease is silent or prices are simply agreed each year. Null for cash and hunting leases.",
+      },
+      pricing_clause: {
+        type: ["string", "null"],
+        description:
+          "The lease's pricing clause VERBATIM (the sentences defining how the price is determined), for later recipe setup. Null if the document has none.",
+      },
       leased_properties: {
         type: "array",
         description:

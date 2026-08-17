@@ -11,8 +11,10 @@ import {
   FarmApiError,
   getFields,
   getHandshake,
+  getMarketingPrices,
   getPlantings,
   getProduction,
+  getProjectedYields,
 } from "@/lib/farmApi";
 import { suggestLocalField } from "@/lib/farmDisplay";
 
@@ -131,6 +133,60 @@ export async function syncConnection(
         },
         { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
       );
+    }
+
+    // Tenant projected prices and yields, when the farmer has those
+    // scopes on. Scope-off responses are quiet non-events; revocation
+    // still surfaces. Cached locally so the app keeps working when the
+    // farm software is unreachable.
+    if (handshake.scopes?.projected_prices) {
+      try {
+        const prices = await getMarketingPrices(token, year);
+        for (const price of prices) {
+          await supabase.from("farm_marketing_prices").upsert(
+            {
+              organization_id: connection.organization_id,
+              farm_connection_id: connection.id,
+              crop_year: price.crop_year,
+              crop: price.crop ?? "",
+              projected_avg_price: price.projected_avg_price,
+              unit: price.unit,
+              is_final: Boolean(price.is_final),
+              as_of: price.as_of ?? null,
+              synced_at: new Date().toISOString(),
+            },
+            { onConflict: "farm_connection_id,crop_year,crop" }
+          );
+        }
+      } catch (err) {
+        if (err instanceof FarmApiError && err.isRevoked) throw err;
+        // Prices alone failing never fails the sync.
+      }
+    }
+    if (handshake.scopes?.projected_yields) {
+      try {
+        const projectedYields = await getProjectedYields(token, year);
+        for (const row of projectedYields) {
+          await supabase.from("farm_projected_yields").upsert(
+            {
+              organization_id: connection.organization_id,
+              farm_connection_id: connection.id,
+              remote_field_id: row.field_id,
+              crop_year: row.crop_year,
+              crop: row.crop ?? "",
+              planted_acres: row.planted_acres,
+              yield_per_acre: row.yield_per_acre,
+              unit: row.unit,
+              basis: row.basis,
+              practices: row.practices,
+              synced_at: new Date().toISOString(),
+            },
+            { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
+          );
+        }
+      } catch (err) {
+        if (err instanceof FarmApiError && err.isRevoked) throw err;
+      }
     }
 
     await supabase

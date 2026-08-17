@@ -15,15 +15,51 @@ export class FarmApiError extends Error {
   get isRevoked() {
     return this.status === 403 && this.code === "share_revoked";
   }
+  get isScopeOff() {
+    return this.status === 403 && this.code === "not_in_share_scope";
+  }
+}
+
+export interface FarmScopes {
+  fields: boolean;
+  plantings: boolean;
+  harvest: boolean;
+  yields: boolean;
+  // Opt-in, default OFF on the farm side.
+  projected_prices?: boolean;
+  projected_yields?: boolean;
 }
 
 export interface FarmHandshake {
   operation_name: string;
   landowner_name: string | null;
   label?: string | null;
-  scopes: { fields: boolean; plantings: boolean; harvest: boolean; yields: boolean };
+  scopes: FarmScopes;
   field_count: number;
   api_version: string;
+}
+
+// One aggregate number per crop by design (no components, no bushel
+// quantities; the tenant's marketing position cannot be reconstructed).
+export interface RemoteMarketingPrice {
+  crop: string;
+  crop_year: number;
+  unit: "usd_per_bu" | "cents_per_lb";
+  projected_avg_price: number | null;
+  is_final: boolean;
+  as_of: string;
+}
+
+export interface RemoteProjectedYield {
+  field_id: string;
+  field_name: string | null;
+  crop: string;
+  crop_year: number;
+  planted_acres: number | null;
+  yield_per_acre: number | null;
+  unit: "bu_per_ac" | "lbs_per_ac" | null;
+  basis: "expected" | "actual";
+  practices: Array<{ practice: string; acres: number; yield_per_acre: number }> | null;
 }
 
 export interface RemoteField {
@@ -136,5 +172,27 @@ export async function getPlantings(token: string, year: number): Promise<RemoteP
 
 export async function getProduction(token: string, year: number): Promise<RemoteProduction[]> {
   const body = await farmFetch<{ data: RemoteProduction[] }>(`/production?year=${year}`, { token });
+  return body.data ?? [];
+}
+
+export async function getMarketingPrices(
+  token: string,
+  year: number
+): Promise<RemoteMarketingPrice[]> {
+  const body = await farmFetch<{ data: RemoteMarketingPrice[] }>(
+    `/marketing-prices?year=${year}`,
+    { token }
+  );
+  return body.data ?? [];
+}
+
+export async function getProjectedYields(
+  token: string,
+  year: number
+): Promise<RemoteProjectedYield[]> {
+  const body = await farmFetch<{ data: RemoteProjectedYield[] }>(
+    `/projected-yields?year=${year}`,
+    { token }
+  );
   return body.data ?? [];
 }
