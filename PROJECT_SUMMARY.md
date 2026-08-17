@@ -1,8 +1,11 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 (Tenant Data panel + multi-crop assumption years
-+ strict crop matching; earlier same day: lease price methods, timber
-stand map colors, multi-area draw fixes, pivot coverage circles)
+Last updated: 2026-08-17 (income projections straight from lease
+assumptions + deletable expected payments; Tenant Data panel with
+multi-crop assumption years, strict crop matching, and the cents-per-lb
+fill boundary; pivot circles drawable from the Add menu; earlier same
+day: lease price methods, timber stand map colors, multi-area draw
+fixes, pivot coverage circle editor)
 
 ## What this product is
 
@@ -28,9 +31,11 @@ and Postgres row level security guarantees each org sees only its own data.
   @turf/intersect, difference, union, buffer, simplify for Timber Scan
   clipping and the split tools; geotiff + proj4 for CDL raster decode
   and EPSG:5070 <-> 4326 reprojection
-- Vitest (dev only) for unit tests: npm test runs lib/ownerNames.test.ts
-  (owner-name normalization and clustering) and lib/geo/spatialRef.test.ts
-  (Web Mercator detection and reprojection)
+- Vitest (dev only) for unit tests: npm test runs every *.test.ts under
+  lib/ (owner names, spatial reference, property matching, GIS where
+  clauses, lease land matching, timber scan raster pipeline, price
+  expressions, RMA parsing, lease pricing, crop matching, tenant data
+  aggregation, lease logic, income projections, pivot geometry)
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -467,10 +472,11 @@ Functions and views:
     are never crowded out by basemap or parcel/road labels. Six
     toggleable layers:
     properties (white outline), parcels (dashed light line), fields (kelly
-    green), timber stands (dark green fill, light mint dashed outline),
+    green), timber stands (per-type fills, see TIMBER STANDS below),
     roads (white line over dark green casing, labels along the line), and
     assets (dark green circle markers with a per-type letter, dashed light
-    blue lines for pipe/fence, faint outline for footprints). Click
+    blue lines for pipe/fence, faint outline for footprints, light blue
+    pivot coverage circles). Click
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
     mobile). The Add menu offers: Boundary (polygon draw; save as field,
@@ -480,8 +486,8 @@ Functions and views:
     pivot (crosshair places the center, then the parametric circle
     editor opens directly; Save asks for name + property, suggested
     from the center's location, and inserts the pivot with its
-    parameters and derived polygon in one step). All three save
-    dialogs preselect the property whose boundary contains the drawn
+    parameters and derived polygon in one step). Every save
+    dialog preselects the property whose boundary contains the drawn
     geometry (same lib/geo/propertyMatch.ts logic as the file import)
     with a "Suggested from location" chip that clears if the user picks
     a different property. Geometry edits
@@ -839,3 +845,13 @@ Functions and views:
   entities unified with owner matching, properties.entity_id,
   restructuring tools for moving children between properties, entity
   views across properties/income/taxes/dashboard/map). Described above.
+- Post-Phase 6c (DONE, 2026-08-17): lease price methods (migration 0012:
+  tenant average, RMA benchmark, custom recipes); map drawing polish
+  (timber stand per-type colors + legend, multi-area save-form
+  persistence, two-level draw cancel); parametric pivot coverage
+  circles (panel editor + Add menu entry); the Tenant Data panel with
+  strict crop matching, multi-crop assumption years, no-silent-
+  overwrite fills, provenance tags, and the cents-per-lb fill
+  boundary; income projections computed straight from lease
+  assumptions (no Generate step needed, projection note, deletable
+  expected payments). Described above.
