@@ -116,8 +116,8 @@ export default function MappingClient({
           Field mapping: {connection.label}
         </h1>
         <p className="mt-0.5 text-sm text-gray-600">
-          Match your farmer{"'"}s fields to yours (or to a whole property if
-          you have not drawn fields). {confirmed} confirmed
+          Match your farmer{"'"}s fields to your ag fields (or to a whole
+          property if you have not drawn them). {confirmed} confirmed
           {needsReview > 0 ? `, ${needsReview} awaiting review` : ""}.
         </p>
       </div>
@@ -151,7 +151,7 @@ export default function MappingClient({
                 className="min-w-52 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">Not mapped</option>
-                <optgroup label="Your fields">
+                <optgroup label="Your ag fields">
                   {fields.map((f) => (
                     <option key={f.id} value={`field:${f.id}`}>
                       {f.name} ({formatAcres(f.acres)} ac) · {propertyName.get(f.property_id) ?? ""}

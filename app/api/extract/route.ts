@@ -209,6 +209,88 @@ const TAX_TOOL: Anthropic.Tool = {
   },
 };
 
+const PAYMENT_TOOL: Anthropic.Tool = {
+  name: "record_payment_extraction",
+  description:
+    "Record what this rent payment document shows: a check image (often a phone photo) or a crop share / timber settlement sheet. Use null for anything not shown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      document_kind: {
+        type: "string",
+        enum: ["check", "settlement", "timber_settlement", "other"],
+        description:
+          "check for a bank check image; settlement for a crop share / grain settlement sheet; timber_settlement when it reads as a timber harvest settlement (tons by product at stumpage rates); other when unclear",
+      },
+      payer_name: {
+        type: ["string", "null"],
+        description: "Who the payment is from (the check writer / settling party), exactly as printed",
+      },
+      date: { type: ["string", "null"], description: "Check or settlement date, YYYY-MM-DD" },
+      total_amount: { type: ["number", "null"], description: "Total dollars paid to the landowner" },
+      check_number: { type: ["string", "null"], description: "Check number if shown" },
+      memo: { type: ["string", "null"], description: "Check memo line or settlement reference, verbatim" },
+      lines: {
+        type: "array",
+        description:
+          "Settlement sheets only: the line detail when present (crop, quantity, price, share math). Empty for plain checks.",
+        items: {
+          type: "object",
+          properties: {
+            crop: { type: ["string", "null"] },
+            units: { type: ["number", "null"], description: "Bushels/lbs/units on the line" },
+            unit: { type: ["string", "null"], description: "bu, lbs, tons..." },
+            price_per_unit: { type: ["number", "null"] },
+            share_pct: { type: ["number", "null"], description: "Landowner share percent applied, when shown" },
+            amount: { type: ["number", "null"], description: "Line dollars to the landowner" },
+          },
+          required: [],
+          additionalProperties: false,
+        },
+      },
+      yields: {
+        type: "array",
+        description:
+          "When the settlement states yields (or acres + production allowing one), per crop. Empty otherwise.",
+        items: {
+          type: "object",
+          properties: {
+            crop: { type: "string" },
+            yield_per_acre: { type: ["number", "null"] },
+            acres: { type: ["number", "null"] },
+            price_per_unit: { type: ["number", "null"] },
+          },
+          required: ["crop"],
+          additionalProperties: false,
+        },
+      },
+      timber_lines: {
+        type: "array",
+        description:
+          "Timber settlements only: tons by product at price per ton. Empty otherwise.",
+        items: {
+          type: "object",
+          properties: {
+            product: { type: "string", description: "e.g. pine sawtimber, hardwood pulpwood" },
+            tons: { type: ["number", "null"] },
+            price_per_ton: { type: ["number", "null"] },
+            amount: { type: ["number", "null"] },
+          },
+          required: ["product"],
+          additionalProperties: false,
+        },
+      },
+      unsure_fields: {
+        type: "array",
+        items: { type: "string" },
+        description: "Field names you are not confident about (blurry, ambiguous, partially visible)",
+      },
+    },
+    required: ["document_kind", "lines", "yields", "timber_lines", "unsure_fields"],
+    additionalProperties: false,
+  },
+};
+
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 
 export async function POST(request: Request) {
@@ -236,14 +318,15 @@ export async function POST(request: Request) {
   }
   const isPdf = file.type === "application/pdf";
   const isImage = (IMAGE_TYPES as readonly string[]).includes(file.type);
-  // Tax statements are often phone photos; leases and timber contracts are PDFs.
-  if (kind === "tax" ? !isPdf && !isImage : !isPdf) {
+  // Tax statements and rent checks are often phone photos; leases and
+  // timber contracts are PDFs.
+  const allowsImages = kind === "tax" || kind === "payment";
+  if (allowsImages ? !isPdf && !isImage : !isPdf) {
     return NextResponse.json(
       {
-        error:
-          kind === "tax"
-            ? "Upload a PDF or a photo (JPEG, PNG, or WebP). iPhone HEIC photos need to be shared as JPEG."
-            : "Only PDF documents can be extracted. Use manual entry for other formats.",
+        error: allowsImages
+          ? "Upload a PDF or a photo (JPEG, PNG, or WebP). iPhone HEIC photos need to be shared as JPEG."
+          : "Only PDF documents can be extracted. Use manual entry for other formats.",
       },
       { status: 400 }
     );
@@ -254,7 +337,13 @@ export async function POST(request: Request) {
 
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
   const tool =
-    kind === "timber" ? TIMBER_TOOL : kind === "tax" ? TAX_TOOL : LEASE_TOOL;
+    kind === "timber"
+      ? TIMBER_TOOL
+      : kind === "tax"
+        ? TAX_TOOL
+        : kind === "payment"
+          ? PAYMENT_TOOL
+          : LEASE_TOOL;
   const client = new Anthropic();
 
   const fileBlock: Anthropic.ContentBlockParam = isPdf
@@ -287,7 +376,9 @@ export async function POST(request: Request) {
               text:
                 kind === "timber"
                   ? "Extract the terms of this timber sale contract. Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. List every field you are unsure about in unsure_fields."
-                  : kind === "tax"
+                  : kind === "payment"
+                    ? "Extract what this rent payment document shows: a check image or a crop share / timber settlement sheet (it may be a phone photo; read carefully, several pages possible). Only record what is actually shown; use null for anything absent. Keep the payer name exactly as printed. Dates as YYYY-MM-DD, dollar amounts as plain numbers. Classify the document_kind honestly. List every field you are unsure about in unsure_fields."
+                    : kind === "tax"
                     ? "Extract the details from this property tax statement (it may be a photo; read carefully). Only record what is actually shown; use null for anything absent. Keep the parcel number and owner name exactly as printed. Dates as YYYY-MM-DD, dollar amounts as plain numbers. List every field you are unsure about in unsure_fields."
                     : "Extract the terms of this lease document (agricultural or hunting). Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. If rent is per acre, prefer the per-acre rate over a computed total. List every field you are unsure about in unsure_fields.",
             },

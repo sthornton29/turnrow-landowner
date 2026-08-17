@@ -28,9 +28,14 @@ export interface TenantPriceCell {
 
 // "not_shared": the farmer has not granted the scope that would supply
 // this cell (quiet, never an error). null: scope is on but there is no
-// number yet.
+// number yet. practice: set when the tenant's data carries the
+// irrigated/dryland breakout (one row per crop x practice); null is a
+// blended whole-crop row. Actual yields are NEVER split by practice
+// (the partner /production payload carries no breakout), so a crop
+// with actuals collapses back to one blended ACTUAL row.
 export interface TenantCropRow {
   crop: string; // tenant's name, verbatim (first seen)
+  practice: "irrigated" | "dryland" | null;
   matchedLeaseCrop: string | null; // lease assumption crop it matches
   plantedAcres: number;
   yieldCell: TenantYieldCell | "not_shared" | null;
@@ -94,56 +99,8 @@ export function buildTenantCropRows(args: {
       rows.reduce((s, r) => s + (r.planted_acres ?? 0), 0)
     );
 
-    // Yield: actual once harvested with shared production, else the
-    // tenant's projected yield (acre-weighted over this lease's fields).
-    let yieldCell: TenantCropRow["yieldCell"] = null;
-    const harvested = rows.filter(
-      (r) => r.production_units !== null && (r.harvested_acres ?? 0) > 0
-    );
-    if (harvested.length > 0) {
-      const units = harvested.reduce((s, r) => s + (r.production_units ?? 0), 0);
-      const acres = harvested.reduce((s, r) => s + (r.harvested_acres ?? 0), 0);
-      if (acres > 0 && units > 0) {
-        yieldCell = {
-          value: round1(units / acres),
-          unitLabel: yieldUnitLabelOf(harvested[0].production_unit),
-          basis: "actual",
-        };
-      }
-    }
-    if (!yieldCell) {
-      const projected = projectedYields.filter(
-        (r) =>
-          r.crop_year === year &&
-          r.basis === "expected" &&
-          r.yield_per_acre !== null &&
-          sameCrop(r.crop, crop) &&
-          projectedYieldScope.has(r.farm_connection_id) &&
-          relevantKeys.has(`${r.farm_connection_id}|${r.remote_field_id}`)
-      );
-      if (projected.length > 0) {
-        let acres = 0;
-        let weighted = 0;
-        for (const r of projected) {
-          const a = r.planted_acres ?? 0;
-          acres += a;
-          weighted += (r.yield_per_acre ?? 0) * a;
-        }
-        const value =
-          acres > 0
-            ? weighted / acres
-            : projected.reduce((s, r) => s + (r.yield_per_acre ?? 0), 0) /
-              projected.length;
-        yieldCell = {
-          value: round1(value),
-          unitLabel: yieldUnitLabelOf(projected[0].unit),
-          basis: "projected",
-        };
-      }
-    }
-    if (!yieldCell && !anyYieldScope) yieldCell = "not_shared";
-
     // Price: strictly this crop, prefer final then freshest as-of.
+    // Practice rows of the same crop share it (prices are per crop).
     let priceCell: TenantCropRow["priceCell"] = null;
     if (!anyPriceScope) {
       priceCell = "not_shared";
@@ -176,10 +133,115 @@ export function buildTenantCropRows(args: {
         };
       }
     }
+    const matchedLeaseCrop = matchCrop(crop, leaseCrops);
 
+    // Actual yield once harvested with shared production. Actuals carry
+    // no practice breakout on the partner API, so this is always ONE
+    // blended row; we never fabricate a split.
+    const harvested = rows.filter(
+      (r) => r.production_units !== null && (r.harvested_acres ?? 0) > 0
+    );
+    if (harvested.length > 0) {
+      const units = harvested.reduce((s, r) => s + (r.production_units ?? 0), 0);
+      const acres = harvested.reduce((s, r) => s + (r.harvested_acres ?? 0), 0);
+      if (acres > 0 && units > 0) {
+        result.push({
+          crop,
+          practice: null,
+          matchedLeaseCrop,
+          plantedAcres,
+          yieldCell: {
+            value: round1(units / acres),
+            unitLabel: yieldUnitLabelOf(harvested[0].production_unit),
+            basis: "actual",
+          },
+          priceCell,
+        });
+        continue;
+      }
+    }
+
+    // Pre-harvest: the tenant's projected yields, split by practice
+    // when the farm data carries the breakout.
+    const projected = projectedYields.filter(
+      (r) =>
+        r.crop_year === year &&
+        r.basis === "expected" &&
+        r.yield_per_acre !== null &&
+        sameCrop(r.crop, crop) &&
+        projectedYieldScope.has(r.farm_connection_id) &&
+        relevantKeys.has(`${r.farm_connection_id}|${r.remote_field_id}`)
+    );
+    const withPractices = projected.filter(
+      (r) => r.practices && r.practices.length > 0
+    );
+
+    if (withPractices.length > 0) {
+      // One row per practice: acres from the plantings' split when
+      // present (else the yield rows' practice acres), yield
+      // acre-weighted per practice across the lease's fields.
+      for (const practice of ["irrigated", "dryland"] as const) {
+        let yieldAcres = 0;
+        let weighted = 0;
+        for (const r of withPractices) {
+          const entry = r.practices!.find((p) => p.practice === practice);
+          if (!entry || entry.yield_per_acre == null) continue;
+          const a = entry.acres ?? 0;
+          yieldAcres += a;
+          weighted += entry.yield_per_acre * a;
+        }
+        const plantingAcres = rows.reduce(
+          (s, r) =>
+            s + ((practice === "irrigated" ? r.irrigated_acres : r.dryland_acres) ?? 0),
+          0
+        );
+        const acresForRow = plantingAcres > 0 ? plantingAcres : yieldAcres;
+        if (acresForRow <= 0 && yieldAcres <= 0) continue;
+        result.push({
+          crop,
+          practice,
+          matchedLeaseCrop,
+          plantedAcres: round1(acresForRow),
+          yieldCell:
+            yieldAcres > 0
+              ? {
+                  value: round1(weighted / yieldAcres),
+                  unitLabel: yieldUnitLabelOf(withPractices[0].unit),
+                  basis: "projected",
+                }
+              : null,
+          priceCell,
+        });
+      }
+      continue;
+    }
+
+    // Blended: no practice breakout for this crop.
+    let yieldCell: TenantCropRow["yieldCell"] = null;
+    if (projected.length > 0) {
+      let acres = 0;
+      let weighted = 0;
+      for (const r of projected) {
+        const a = r.planted_acres ?? 0;
+        acres += a;
+        weighted += (r.yield_per_acre ?? 0) * a;
+      }
+      const value =
+        acres > 0
+          ? weighted / acres
+          : projected.reduce((s, r) => s + (r.yield_per_acre ?? 0), 0) /
+            projected.length;
+      yieldCell = {
+        value: round1(value),
+        unitLabel: yieldUnitLabelOf(projected[0].unit),
+        basis: "projected",
+      };
+    }
+    if (!yieldCell && !anyYieldScope) yieldCell = "not_shared";
     result.push({
       crop,
-      matchedLeaseCrop: matchCrop(crop, leaseCrops),
+      practice: null,
+      matchedLeaseCrop,
       plantedAcres,
       yieldCell,
       priceCell,

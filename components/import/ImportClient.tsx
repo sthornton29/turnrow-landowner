@@ -36,6 +36,7 @@ const TABLE: Record<string, string> = {
   property: "properties",
   parcel: "parcels",
   field: "fields",
+  pasture: "pastures",
   timber_stand: "timber_stands",
   road: "roads",
   asset: "assets",
@@ -44,7 +45,8 @@ const TABLE: Record<string, string> = {
 const POLYGON_OPTIONS: Array<[EntityType, string]> = [
   ["property", "Property"],
   ["parcel", "Parcel"],
-  ["field", "Field"],
+  ["field", "Ag field"],
+  ["pasture", "Pasture"],
   ["timber_stand", "Timber stand"],
 ];
 
@@ -149,7 +151,7 @@ export default function ImportClient({
         r.entityType !== "asset" &&
         !r.propertyRef
       ) {
-        return "Parcels, fields, timber stands, and roads must be assigned to a property.";
+        return "Parcels, ag fields, pastures, timber stands, and roads must be assigned to a property.";
       }
     }
     return null;

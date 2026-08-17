@@ -5,7 +5,7 @@ import { formatAcres } from "@/lib/format";
 import { STAND_TYPE_LABELS } from "@/lib/assetTypes";
 import type { EntityType, PropertyGeo, StandType } from "@/types/db";
 
-type BoundaryType = "field" | "parcel" | "property" | "timber_stand";
+type BoundaryType = "field" | "pasture" | "parcel" | "property" | "timber_stand";
 
 export interface NewBoundaryPayload {
   entityType: EntityType;
@@ -22,7 +22,8 @@ export interface NewBoundaryPayload {
 }
 
 const TYPE_LABEL: Record<BoundaryType, string> = {
-  field: "Field",
+  field: "Ag field",
+  pasture: "Pasture",
   parcel: "Parcel",
   property: "Property",
   timber_stand: "Timber",
@@ -142,7 +143,7 @@ export default function NewBoundaryDialog({
       <form action={handleSubmit} className="mt-3 space-y-3">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">This is a</label>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             {(Object.keys(TYPE_LABEL) as BoundaryType[]).map((t) => (
               <button
                 key={t}

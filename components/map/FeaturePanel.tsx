@@ -17,6 +17,7 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   property: "properties",
   parcel: "parcels",
   field: "fields",
+  pasture: "pastures",
   timber_stand: "timber_stands",
   road: "roads",
   asset: "assets",
@@ -25,7 +26,8 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
 const TYPE_LABEL: Record<EntityType, string> = {
   property: "Property",
   parcel: "Parcel",
-  field: "Field",
+  field: "Ag field",
+  pasture: "Pasture",
   timber_stand: "Timber stand",
   road: "Road",
   asset: "Asset",
@@ -55,6 +57,10 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   field: [
+    { key: "name", label: "Name", input: "text", required: true },
+    { key: "notes", label: "Notes", input: "textarea" },
+  ],
+  pasture: [
     { key: "name", label: "Name", input: "text", required: true },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
@@ -101,6 +107,20 @@ export function fieldDisplayValue(f: EditField, value: unknown): string {
   return String(value ?? "");
 }
 
+// Route of the full summary page for each thing on the map.
+export function detailPagePath(entityType: EntityType, id: string): string {
+  const base: Record<EntityType, string> = {
+    property: "/properties",
+    parcel: "/parcels",
+    field: "/fields",
+    pasture: "/pastures",
+    timber_stand: "/timber",
+    road: "/roads",
+    asset: "/assets",
+  };
+  return `${base[entityType]}/${id}`;
+}
+
 function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, string]> {
   const r = row as unknown as Record<string, unknown>;
   const rows: Array<[string, string]> = [];
@@ -109,6 +129,17 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     rows.push([label, map ? (map[String(v)] ?? String(v)) : String(v)]);
   };
 
+  if (entityType === "field") {
+    // GIS-derived irrigation split (pivot/lateral coverage intersect).
+    const irrigated = r.irrigated_acres as number | null;
+    const acres = r.acres as number | null;
+    if (irrigated != null && acres != null && irrigated > 0.05) {
+      rows.push([
+        "Irrigation",
+        `${formatAcres(irrigated)} irrigated / ${formatAcres(Math.max(acres - irrigated, 0))} dryland`,
+      ]);
+    }
+  }
   if (entityType === "timber_stand") {
     push("Stand type", r.stand_type, STAND_TYPE_LABELS);
     push("Species", r.species);
@@ -309,6 +340,12 @@ export default function FeaturePanel({
               : TYPE_LABEL[entityType]}
           </p>
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          <Link
+            href={detailPagePath(entityType, row.id)}
+            className="mt-0.5 inline-block text-sm font-medium text-kelly-700 hover:underline"
+          >
+            View full page &rarr;
+          </Link>
         </div>
         <button
           onClick={onClose}

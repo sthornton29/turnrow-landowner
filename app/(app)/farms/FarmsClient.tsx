@@ -103,10 +103,15 @@ export default function FarmsClient({
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 md:p-6">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Farm data</h1>
+        <h1 className="text-xl font-semibold text-gray-900">Farm connections</h1>
         <p className="mt-0.5 text-sm text-gray-600">
           Connect the farm software your tenant uses and see plantings,
-          harvest status, and yields (when shared) on your own fields.
+          harvest status, and yields (when shared) on your own ag fields. The
+          data itself lives on the{" "}
+          <Link href="/farm-activity" className="font-medium text-kelly-700 hover:underline">
+            Farm Data page
+          </Link>
+          .
         </p>
       </div>
 

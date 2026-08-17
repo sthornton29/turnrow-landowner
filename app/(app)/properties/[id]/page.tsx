@@ -11,6 +11,7 @@ import { formatDollars } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import type { AssetType } from "@/types/db";
 import RowEditor from "@/components/lists/RowEditor";
+import { MapThumb } from "@/components/summary/Summary";
 import EntityPicker from "@/components/entities/EntityPicker";
 import MoveChildren from "@/components/properties/MoveChildren";
 import DeletePropertyButton from "@/components/properties/DeletePropertyButton";
@@ -26,8 +27,10 @@ export default async function PropertyDetailPage({
   const { supabase, profile } = await requireOrg();
 
   const { data: property } = await supabase
-    .from("properties")
-    .select("id, name, county, state, notes, acres, entity_id, fsa_numbers")
+    .from("properties_geo")
+    .select(
+      "id, name, county, state, notes, acres, entity_id, fsa_numbers, boundary_geojson"
+    )
     .eq("id", id)
     .single();
   if (!property) notFound();
@@ -35,6 +38,7 @@ export default async function PropertyDetailPage({
   const [
     { data: parcels },
     { data: fields },
+    { data: pastures },
     { data: stands },
     { data: roads },
     { data: assets },
@@ -46,6 +50,11 @@ export default async function PropertyDetailPage({
       .order("parcel_number"),
     supabase
       .from("fields")
+      .select("id, name, notes, acres, irrigated_acres")
+      .eq("property_id", id)
+      .order("name"),
+    supabase
+      .from("pastures")
       .select("id, name, notes, acres")
       .eq("property_id", id)
       .order("name"),
@@ -100,6 +109,11 @@ export default async function PropertyDetailPage({
 
   const parcelAcres = (parcels ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
+  const irrigatedAcres = (fields ?? []).reduce(
+    (s, f) => s + (f.irrigated_acres ?? 0),
+    0
+  );
+  const pastureAcres = (pastures ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const timberAcres = (stands ?? []).reduce((s, t) => s + (t.acres ?? 0), 0);
   const roadMiles = (roads ?? []).reduce((s, r) => s + (r.miles ?? 0), 0);
 
@@ -153,7 +167,7 @@ export default async function PropertyDetailPage({
               Timber Scan
             </Link>
             <Link
-              href="/map"
+              href={`/map?focus=property:${property.id}`}
               className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
             >
               View on map
@@ -164,6 +178,11 @@ export default async function PropertyDetailPage({
           <RowEditor entityType="property" row={property} />
         </div>
       </div>
+
+      <MapThumb
+        geometry={property.boundary_geojson}
+        focus={`property:${property.id}`}
+      />
 
       <section>
         <h2 className="mb-2 text-lg font-semibold text-gray-900">
@@ -181,9 +200,12 @@ export default async function PropertyDetailPage({
             {(parcels ?? []).map((p) => (
               <li key={p.id} className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium text-gray-900">
+                  <Link
+                    href={`/parcels/${p.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
                     Parcel {p.parcel_number}
-                  </span>
+                  </Link>
                   <span className="text-sm text-pine-900">
                     {formatAcres(p.acres)} ac
                     {p.deeded_acres !== null
@@ -220,22 +242,35 @@ export default async function PropertyDetailPage({
 
       <section>
         <h2 className="mb-2 text-lg font-semibold text-gray-900">
-          Fields{" "}
+          Ag fields{" "}
           <span className="text-sm font-normal text-gray-500">
             {formatNumber((fields ?? []).length)} · {formatAcres(fieldAcres)} ac
+            {irrigatedAcres > 0.05
+              ? ` (${formatAcres(irrigatedAcres)} irrigated / ${formatAcres(Math.max(fieldAcres - irrigatedAcres, 0))} dryland)`
+              : ""}
           </span>
         </h2>
         {(fields ?? []).length === 0 ? (
           <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-            No fields yet. Add them from the map or import page.
+            No ag fields yet. Add them from the map or import page.
           </p>
         ) : (
           <ul className="space-y-2">
             {(fields ?? []).map((f) => (
               <li key={f.id} className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium text-gray-900">{f.name}</span>
-                  <span className="text-sm text-pine-900">{formatAcres(f.acres)} ac</span>
+                  <Link
+                    href={`/fields/${f.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {f.name}
+                  </Link>
+                  <span className="text-sm text-pine-900">
+                    {formatAcres(f.acres)} ac
+                    {f.irrigated_acres != null && f.irrigated_acres > 0.05
+                      ? ` (${formatAcres(f.irrigated_acres)} irr.)`
+                      : ""}
+                  </span>
                 </div>
                 {f.notes ? <p className="mt-1 text-sm text-gray-600">{f.notes}</p> : null}
                 <RowEditor entityType="field" row={f} />
@@ -246,7 +281,7 @@ export default async function PropertyDetailPage({
         <div className="mt-2">
           <MoveChildren
             table="fields"
-            itemLabel="field"
+            itemLabel="ag field"
             items={(fields ?? []).map((f) => ({
               id: f.id,
               label: `${f.name} (${formatAcres(f.acres)} ac)`,
@@ -256,6 +291,46 @@ export default async function PropertyDetailPage({
           />
         </div>
       </section>
+
+      {(pastures ?? []).length > 0 ? (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-gray-900">
+            Pastures{" "}
+            <span className="text-sm font-normal text-gray-500">
+              {formatNumber((pastures ?? []).length)} · {formatAcres(pastureAcres)} ac
+            </span>
+          </h2>
+          <ul className="space-y-2">
+            {(pastures ?? []).map((p) => (
+              <li key={p.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Link
+                    href={`/pastures/${p.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {p.name}
+                  </Link>
+                  <span className="text-sm text-pine-900">{formatAcres(p.acres)} ac</span>
+                </div>
+                {p.notes ? <p className="mt-1 text-sm text-gray-600">{p.notes}</p> : null}
+                <RowEditor entityType="pasture" row={p} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2">
+            <MoveChildren
+              table="pastures"
+              itemLabel="pasture"
+              items={(pastures ?? []).map((p) => ({
+                id: p.id,
+                label: `${p.name} (${formatAcres(p.acres)} ac)`,
+              }))}
+              properties={moveTargets}
+              currentPropertyId={property.id}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <h2 className="mb-2 text-lg font-semibold text-gray-900">
@@ -273,7 +348,12 @@ export default async function PropertyDetailPage({
             {(stands ?? []).map((s) => (
               <li key={s.id} className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium text-gray-900">{s.name}</span>
+                  <Link
+                    href={`/timber/${s.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {s.name}
+                  </Link>
                   <span className="text-sm text-pine-900">{formatAcres(s.acres)} ac</span>
                 </div>
                 <p className="text-sm text-gray-500">
@@ -320,7 +400,12 @@ export default async function PropertyDetailPage({
             {(roads ?? []).map((r) => (
               <li key={r.id} className="rounded-lg border border-gray-200 bg-white p-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium text-gray-900">{r.name}</span>
+                  <Link
+                    href={`/roads/${r.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {r.name}
+                  </Link>
                   <span className="text-sm text-pine-900">
                     {(r.miles ?? 0).toFixed(2)} mi
                   </span>
@@ -455,7 +540,8 @@ export default async function PropertyDetailPage({
           propertyName={property.name}
           cascadeSummary={[
             [(parcels ?? []).length, "parcel"],
-            [(fields ?? []).length, "field"],
+            [(fields ?? []).length, "ag field"],
+            [(pastures ?? []).length, "pasture"],
             [(stands ?? []).length, "timber stand"],
             [(roads ?? []).length, "road"],
             [(assets ?? []).length, "asset"],
@@ -469,8 +555,9 @@ export default async function PropertyDetailPage({
           redirectTo="/properties"
         />
         <p className="mt-1 text-xs text-gray-500">
-          Deletes this property and everything on it (parcels, fields, timber
-          stands, roads, assets) and removes any lease land links. Leases,
+          Deletes this property and everything on it (parcels, ag fields,
+          pastures, timber stands, roads, assets) and removes any lease land
+          links. Leases,
           payments, and tax records are kept; tax statements on deleted
           parcels become unmatched. Move anything you want to keep to another
           property first.

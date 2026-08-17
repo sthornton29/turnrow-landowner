@@ -9,6 +9,8 @@ const planting = (over: Partial<FarmFieldDataRow>): FarmFieldDataRow => ({
   crop_year: 2026,
   crop: "Wheat",
   planted_acres: 100,
+  irrigated_acres: null,
+  dryland_acres: null,
   planting_date: null,
   varieties: [],
   harvested_acres: null,
@@ -18,6 +20,20 @@ const planting = (over: Partial<FarmFieldDataRow>): FarmFieldDataRow => ({
   synced_at: "2026-08-01T00:00:00Z",
   ...over,
 });
+
+const projYield = (over: Record<string, unknown>) => ({
+  farm_connection_id: "conn1",
+  remote_field_id: "f1",
+  crop_year: 2026,
+  crop: "Wheat",
+  planted_acres: 100,
+  yield_per_acre: 62,
+  basis: "expected",
+  unit: "bu_per_ac",
+  practices: null,
+  ...over,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}) as any;
 
 const base = {
   relevantKeys: new Set(["conn1|f1", "conn1|f2"]),
@@ -52,9 +68,7 @@ describe("buildTenantCropRows", () => {
     const rows = buildTenantCropRows({
       ...base,
       farmData: [planting({ crop: "Wheat" }), planting({ remote_field_id: "f2", crop: "Canola" })],
-      projectedYields: [
-        { farm_connection_id: "conn1", remote_field_id: "f1", crop_year: 2026, crop: "wheat", planted_acres: 100, yield_per_acre: 62, basis: "expected", unit: "bu_per_ac" },
-      ],
+      projectedYields: [projYield({ crop: "wheat" })],
       prices: [
         { farm_connection_id: "conn1", crop_year: 2026, crop: "Canola", projected_avg_price: 11.25, unit: "usd_per_bu", is_final: true, as_of: "2026-08-01" },
       ],
@@ -103,9 +117,7 @@ describe("buildTenantCropRows", () => {
       farmData: [
         planting({ harvested_acres: 100, production_units: 5900, production_unit: "bu" }),
       ],
-      projectedYields: [
-        { farm_connection_id: "conn1", remote_field_id: "f1", crop_year: 2026, crop: "Wheat", planted_acres: 100, yield_per_acre: 70, basis: "expected", unit: "bu_per_ac" },
-      ],
+      projectedYields: [projYield({ yield_per_acre: 70 })],
       prices: [],
     });
     expect(rows[0].yieldCell).toMatchObject({ value: 59, basis: "actual" });
@@ -119,12 +131,71 @@ describe("buildTenantCropRows", () => {
         planting({ remote_field_id: "f2", planted_acres: 40 }),
       ],
       projectedYields: [
-        { farm_connection_id: "conn1", remote_field_id: "f1", crop_year: 2026, crop: "Wheat", planted_acres: 60, yield_per_acre: 220, basis: "expected", unit: "bu_per_ac" },
-        { farm_connection_id: "conn1", remote_field_id: "f2", crop_year: 2026, crop: "Wheat", planted_acres: 40, yield_per_acre: 130, basis: "expected", unit: "bu_per_ac" },
+        projYield({ remote_field_id: "f1", planted_acres: 60, yield_per_acre: 220 }),
+        projYield({ remote_field_id: "f2", planted_acres: 40, yield_per_acre: 130 }),
       ],
       prices: [],
     });
     expect(rows[0].yieldCell).toMatchObject({ value: 184 });
+  });
+
+  it("splits crop rows by practice when the tenant reports the breakout", () => {
+    const rows = buildTenantCropRows({
+      ...base,
+      leaseCrops: ["Corn"],
+      farmData: [
+        planting({ crop: "Corn", planted_acres: 100, irrigated_acres: 60, dryland_acres: 40 }),
+      ],
+      projectedYields: [
+        projYield({
+          crop: "Corn",
+          yield_per_acre: 184,
+          practices: [
+            { practice: "irrigated", acres: 60, yield_per_acre: 220 },
+            { practice: "dryland", acres: 40, yield_per_acre: 130 },
+          ],
+        }),
+      ],
+      prices: [
+        { farm_connection_id: "conn1", crop_year: 2026, crop: "Corn", projected_avg_price: 4.63, unit: "usd_per_bu", is_final: false, as_of: "2026-08-01" },
+      ],
+    });
+    const irrigated = rows.find((r) => r.practice === "irrigated")!;
+    const dryland = rows.find((r) => r.practice === "dryland")!;
+    expect(irrigated.plantedAcres).toBe(60);
+    expect(irrigated.yieldCell).toMatchObject({ value: 220, basis: "projected" });
+    expect(dryland.plantedAcres).toBe(40);
+    expect(dryland.yieldCell).toMatchObject({ value: 130 });
+    // Both practice rows carry the crop's one price.
+    expect(irrigated.priceCell).toMatchObject({ value: 4.63 });
+    expect(dryland.priceCell).toMatchObject({ value: 4.63 });
+  });
+
+  it("never fabricates a practice split for actual yields", () => {
+    const rows = buildTenantCropRows({
+      ...base,
+      leaseCrops: ["Corn"],
+      farmData: [
+        planting({
+          crop: "Corn", planted_acres: 100, irrigated_acres: 60, dryland_acres: 40,
+          harvested_acres: 100, production_units: 18400, production_unit: "bu",
+        }),
+      ],
+      projectedYields: [
+        projYield({
+          crop: "Corn",
+          practices: [
+            { practice: "irrigated", acres: 60, yield_per_acre: 220 },
+            { practice: "dryland", acres: 40, yield_per_acre: 130 },
+          ],
+        }),
+      ],
+      prices: [],
+    });
+    // One blended ACTUAL row, not practice rows.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].practice).toBeNull();
+    expect(rows[0].yieldCell).toMatchObject({ value: 184, basis: "actual" });
   });
 
   it("renders scope-off cells as not_shared while acres still work", () => {

@@ -88,6 +88,13 @@ export interface ProjectedYieldRow {
   yield_per_acre: number | null;
   basis: string | null;
   unit: string | null;
+  // Irrigated/dryland breakout where the planting carries both
+  // practices (null for single-practice fields and most actual rows).
+  practices: Array<{
+    practice: string;
+    acres: number | null;
+    yield_per_acre: number | null;
+  }> | null;
 }
 
 // ---------------------------------------------------------------------

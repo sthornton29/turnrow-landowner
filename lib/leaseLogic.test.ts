@@ -56,6 +56,17 @@ describe("annualRent crop share", () => {
     expect(rent).toBe(14625);
   });
 
+  it("sums practice-split entries of the same crop", () => {
+    // Corn irrigated and Corn dryland as separate entries.
+    const rent = annualRent(cropShareLease(), 500, {
+      crops: [
+        { crop: "Corn", practice: "irrigated", acres: 60, expected_yield: 220, expected_price: 4.5 },
+        { crop: "Corn", practice: "dryland", acres: 40, expected_yield: 130, expected_price: 4.5 },
+      ],
+    });
+    expect(rent).toBe((60 * 220 * 4.5 + 40 * 130 * 4.5) * 0.25);
+  });
+
   it("subtracts shared expenses per entry when the lease shares them", () => {
     const lease = cropShareLease({
       terms: { landowner_share_pct: 50, shares_expenses: true },

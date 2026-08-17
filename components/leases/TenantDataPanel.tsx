@@ -15,8 +15,11 @@ import type { TenantCropRow } from "@/lib/tenantData";
 
 // One crop's fill, targeted at the lease crop it matched (or introduced
 // under the tenant's own crop name when the lease has no crops yet).
+// practice targets the matching practice entry (practice-split fills
+// create Corn irrigated and Corn dryland entries).
 export interface PanelFill {
   crop: string;
+  practice: "irrigated" | "dryland" | null;
   values: Partial<Pick<CropAssumption, "acres" | "expected_yield" | "expected_price">>;
   sources: NonNullable<CropAssumption["sources"]>;
 }
@@ -26,7 +29,12 @@ function fillFor(
   parts: { acres?: boolean; yield?: boolean; price?: boolean },
   syncedAt: string | null
 ): PanelFill {
-  const fill: PanelFill = { crop: row.matchedLeaseCrop ?? row.crop, values: {}, sources: {} };
+  const fill: PanelFill = {
+    crop: row.matchedLeaseCrop ?? row.crop,
+    practice: row.practice,
+    values: {},
+    sources: {},
+  };
   if (parts.acres && row.plantedAcres > 0) {
     fill.values.acres = row.plantedAcres;
     fill.sources.acres = { kind: "tenant_actual", as_of: syncedAt };
@@ -130,7 +138,13 @@ export default function TenantDataPanel({
           const syncedAt = lastSyncedAt;
           const savedFor = (row: TenantCropRow): CropAssumption | null => {
             const match = matchCrop(row.crop, savedCrops);
-            return saved.find((e) => e.crop === match) ?? null;
+            return (
+              saved.find(
+                (e) =>
+                  e.crop === match &&
+                  (e.practice ?? "blended") === (row.practice ?? "blended")
+              ) ?? null
+            );
           };
           // Use all fills matched crops (or every crop when the year is
           // still empty) and never touches saved values (force=false).
@@ -181,9 +195,17 @@ export default function TenantDataPanel({
                       const use = (parts: { acres?: boolean; yield?: boolean; price?: boolean }) =>
                         onFill(year, [fillFor(row, parts, syncedAt)], true);
                       return (
-                        <tr key={row.crop} className="border-t border-kelly-100 align-top">
+                        <tr
+                          key={`${row.crop}|${row.practice ?? "blended"}`}
+                          className="border-t border-kelly-100 align-top"
+                        >
                           <td className="py-1.5 pr-2">
                             <span className="font-medium text-gray-900">{row.crop}</span>
+                            {row.practice ? (
+                              <span className="ml-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                                {row.practice}
+                              </span>
+                            ) : null}
                             {row.matchedLeaseCrop === null && yearHasCrops ? (
                               <span
                                 className="ml-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600"

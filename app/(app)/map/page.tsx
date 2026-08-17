@@ -9,6 +9,7 @@ const ENTITY_TYPES: EntityType[] = [
   "property",
   "parcel",
   "field",
+  "pasture",
   "timber_stand",
   "road",
   "asset",

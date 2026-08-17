@@ -10,6 +10,7 @@ import {
   type IncomeType,
   type PropertyTotals,
 } from "@/lib/income";
+import RentUpload from "@/components/payments/RentUpload";
 
 export const metadata = { title: "Income" };
 
@@ -24,7 +25,7 @@ export default async function IncomePage({
 }: {
   searchParams: Promise<{ year?: string; entity?: string }>;
 }) {
-  const { supabase } = await requireOrg();
+  const { supabase, profile } = await requireOrg();
   const { year: yearParam, entity: entityParam } = await searchParams;
 
   const [inputs, { data: properties }, { data: entities }] = await Promise.all([
@@ -127,6 +128,7 @@ export default async function IncomePage({
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold text-gray-900">Income</h1>
+        <RentUpload orgId={profile.organization_id!} />
         <div className="ml-auto flex gap-1">
           {years.map((y) => (
             <Link

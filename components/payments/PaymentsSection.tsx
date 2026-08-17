@@ -9,6 +9,7 @@ import {
   paymentStatus,
   type GeneratedPayment,
 } from "@/lib/leaseLogic";
+import RentUpload from "@/components/payments/RentUpload";
 
 interface ExpectedRow {
   id: string;
@@ -216,7 +217,7 @@ export default function PaymentsSection({
         <span className="text-sm text-gray-500">
           {formatDollars(totalReceived)} received of {formatDollars(totalExpected)} expected
         </span>
-        <span className="ml-auto flex gap-2">
+        <span className="ml-auto flex flex-wrap justify-end gap-2">
           {computeExpected ? (
             <button
               onClick={sync}
@@ -232,6 +233,7 @@ export default function PaymentsSection({
           >
             Record unscheduled payment
           </button>
+          {leaseId ? <RentUpload orgId={orgId} defaultLeaseId={leaseId} /> : null}
         </span>
       </div>
 

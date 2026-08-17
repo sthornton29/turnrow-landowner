@@ -58,6 +58,7 @@ import type {
   EntityType,
   FieldGeo,
   ParcelGeo,
+  PastureGeo,
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
@@ -72,8 +73,13 @@ import type { AnyGeoRow, LayerVisibility, MapMode, SelectedFeature } from "./typ
 const KELLY = "#39b54a";
 const PINE = "#14532d";
 const MINT = "#a7f3d0";
+// Pastures: warm tan, distinct from kelly (ag fields), canola light
+// green, wheat amber, the timber palette, and pivot blue.
+const PASTURE_TAN = "#d2b48c";
 
-const POLYGON_TYPES: EntityType[] = ["property", "parcel", "field", "timber_stand"];
+const POLYGON_TYPES: EntityType[] = [
+  "property", "parcel", "field", "pasture", "timber_stand",
+];
 
 function geomOf(row: AnyGeoRow): Geometry | null {
   if ("boundary_geojson" in row) return row.boundary_geojson;
@@ -171,6 +177,7 @@ export default function MapView({
   const [properties, setProperties] = useState<PropertyGeo[]>([]);
   const [parcels, setParcels] = useState<ParcelGeo[]>([]);
   const [fields, setFields] = useState<FieldGeo[]>([]);
+  const [pastures, setPastures] = useState<PastureGeo[]>([]);
   const [timber, setTimber] = useState<TimberStandGeo[]>([]);
   const [roads, setRoads] = useState<RoadGeo[]>([]);
   const [assets, setAssets] = useState<AssetGeo[]>([]);
@@ -193,6 +200,7 @@ export default function MapView({
     property: true,
     parcel: true,
     field: true,
+    pasture: true,
     timber_stand: true,
     road: true,
     asset: true,
@@ -269,10 +277,11 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, t, r, a, mappings, farmData, connections, ents] = await Promise.all([
+    const [p, pa, f, pas, t, r, a, mappings, farmData, connections, ents] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
+      supabase.from("pastures_geo").select("*").order("name"),
       supabase.from("timber_stands_geo").select("*").order("name"),
       supabase.from("roads_geo").select("*").order("name"),
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
@@ -285,6 +294,7 @@ export default function MapView({
     setProperties((p.data as PropertyGeo[]) ?? []);
     setParcels((pa.data as ParcelGeo[]) ?? []);
     setFields((f.data as FieldGeo[]) ?? []);
+    setPastures((pas.data as PastureGeo[]) ?? []);
     setTimber((t.data as TimberStandGeo[]) ?? []);
     setRoads((r.data as RoadGeo[]) ?? []);
     setAssets((a.data as AssetGeo[]) ?? []);
@@ -342,11 +352,12 @@ export default function MapView({
       property: properties,
       parcel: parcels,
       field: fields,
+      pasture: pastures,
       timber_stand: timber,
       road: roads,
       asset: assets,
     }),
-    [properties, parcels, fields, timber, roads, assets]
+    [properties, parcels, fields, pastures, timber, roads, assets]
   );
 
   const selectedRow: AnyGeoRow | null = useMemo(() => {
@@ -375,11 +386,13 @@ export default function MapView({
   clickRef.current = (e) => {
     const map = mapRef.current;
     if (!map || modeRef.current !== "view") return;
-    // Priority: assets, then roads, then fields > timber > parcels > properties
+    // Priority: assets, then roads, then ag fields > pastures > timber >
+    // parcels > properties
     const groups: string[][] = [
       ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
       ["roads-hit"],
       ["fields-fill"],
+      ["pastures-fill"],
       ["timber-fill"],
       ["parcels-fill"],
       ["properties-fill"],
@@ -421,8 +434,9 @@ export default function MapView({
     map.on("load", () => {
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
-        "properties", "parcels", "fields", "timber", "roads", "assets",
-        "property-labels", "parcel-labels", "field-labels", "timber-labels",
+        "properties", "parcels", "fields", "pastures", "timber", "roads", "assets",
+        "property-labels", "parcel-labels", "field-labels", "pasture-labels",
+        "timber-labels",
       ]) {
         map.addSource(id, { type: "geojson", data: empty });
       }
@@ -454,7 +468,13 @@ export default function MapView({
       map.addLayer({ id: "timber-line", type: "line", source: "timber",
         paint: { "line-color": timberColor, "line-width": 2 } });
 
-      // Fields: kelly green
+      // Pastures: warm tan (present but not emphasized)
+      map.addLayer({ id: "pastures-fill", type: "fill", source: "pastures",
+        paint: { "fill-color": PASTURE_TAN, "fill-opacity": 0.25 } });
+      map.addLayer({ id: "pastures-line", type: "line", source: "pastures",
+        paint: { "line-color": PASTURE_TAN, "line-width": 2 } });
+
+      // Ag fields: kelly green
       map.addLayer({ id: "fields-fill", type: "fill", source: "fields",
         paint: { "fill-color": KELLY, "fill-opacity": 0.18 } });
       map.addLayer({ id: "fields-line", type: "line", source: "fields",
@@ -495,7 +515,7 @@ export default function MapView({
         paint: { "line-color": "#bae6fd", "line-width": 2, "line-dasharray": [2, 2] } });
 
       // Selection highlights
-      for (const src of ["properties", "parcels", "fields", "timber"]) {
+      for (const src of ["properties", "parcels", "fields", "pastures", "timber"]) {
         map.addLayer({ id: `${src}-selected`, type: "line", source: src,
           paint: { "line-color": "#ffffff", "line-width": 4.5 },
           filter: ["==", ["get", "id"], ""] });
@@ -521,6 +541,10 @@ export default function MapView({
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#eafcee", "text-halo-color": PINE, "text-halo-width": 1.2 } });
+      map.addLayer({ id: "pasture-labels", type: "symbol", source: "pasture-labels",
+        layout: { "text-field": ["get", "name"], "text-size": 11.5,
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#f5ead7", "text-halo-color": "#57431f", "text-halo-width": 1.2 } });
       map.addLayer({ id: "timber-labels", type: "symbol", source: "timber-labels",
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
@@ -602,8 +626,8 @@ export default function MapView({
 
     map.on("click", (e) => clickRef.current(e));
     for (const layer of [
-      "properties-fill", "parcels-fill", "fields-fill", "timber-fill",
-      "roads-hit", "assets-circle", "assets-line", "assets-fill",
+      "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
+      "timber-fill", "roads-hit", "assets-circle", "assets-line", "assets-fill",
     ]) {
       map.on("mouseenter", layer, () => {
         if (modeRef.current === "view") map.getCanvas().style.cursor = "pointer";
@@ -688,25 +712,28 @@ export default function MapView({
       }
     }
     setData("fields", fieldsFC);
+    setData("pastures", rowsToFC(pastures, "pasture"));
     setData("timber", rowsToFC(timber, "timber_stand"));
     setData("roads", rowsToFC(roads, "road"));
     setData("assets", rowsToFC(assets, "asset"));
     setData("property-labels", rowsToLabelFC(properties, "property"));
     setData("parcel-labels", rowsToLabelFC(parcels, "parcel"));
     setData("field-labels", rowsToLabelFC(fields, "field"));
+    setData("pasture-labels", rowsToLabelFC(pastures, "pasture"));
     setData("timber-labels", rowsToLabelFC(timber, "timber_stand"));
 
     if (!didFitRef.current) {
       const box = bboxOf([
         ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
-        ...timber.map(geomOf), ...roads.map(geomOf), ...assets.map(geomOf),
+        ...pastures.map(geomOf), ...timber.map(geomOf), ...roads.map(geomOf),
+        ...assets.map(geomOf),
       ]);
       if (box) {
         map.fitBounds(box, { padding: 60, duration: 0 });
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, timber, roads, assets, farmActivity, entities]);
+  }, [mapLoaded, properties, parcels, fields, pastures, timber, roads, assets, farmActivity, entities]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -788,6 +815,7 @@ export default function MapView({
       ["property", ["properties-fill", "properties-line", "property-labels"]],
       ["parcel", ["parcels-fill", "parcels-line", "parcel-labels"]],
       ["field", ["fields-fill", "fields-line", "field-labels"]],
+      ["pasture", ["pastures-fill", "pastures-line", "pasture-labels"]],
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
       ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
@@ -806,16 +834,18 @@ export default function MapView({
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     const bySource: Record<string, string> = {
-      properties: "", parcels: "", fields: "", timber: "", roads: "", assets: "",
+      properties: "", parcels: "", fields: "", pastures: "", timber: "",
+      roads: "", assets: "",
     };
     if (selected) {
       const srcName: Record<EntityType, string> = {
         property: "properties", parcel: "parcels", field: "fields",
-        timber_stand: "timber", road: "roads", asset: "assets",
+        pasture: "pastures", timber_stand: "timber", road: "roads",
+        asset: "assets",
       };
       bySource[srcName[selected.entityType]] = selected.id;
     }
-    for (const src of ["properties", "parcels", "fields", "timber"]) {
+    for (const src of ["properties", "parcels", "fields", "pastures", "timber"]) {
       if (map.getLayer(`${src}-selected`)) {
         map.setFilter(`${src}-selected`, ["==", ["get", "id"], bySource[src]]);
       }

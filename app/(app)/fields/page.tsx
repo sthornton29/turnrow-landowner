@@ -3,7 +3,7 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatNumber } from "@/lib/format";
 import RowEditor from "@/components/lists/RowEditor";
 
-export const metadata = { title: "Fields" };
+export const metadata = { title: "Ag Fields" };
 
 export default async function FieldsPage() {
   const { supabase } = await requireOrg();
@@ -21,15 +21,15 @@ export default async function FieldsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Fields</h1>
+        <h1 className="text-xl font-semibold text-gray-900">Ag Fields</h1>
         <p className="mt-0.5 text-sm text-gray-600">
-          {formatNumber((fields ?? []).length)} fields, {formatAcres(totalAcres)} total acres
+          {formatNumber((fields ?? []).length)} ag fields, {formatAcres(totalAcres)} total acres
         </p>
       </div>
 
       {(fields ?? []).length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-          No fields yet. Draw them on the{" "}
+          No ag fields yet. Draw them on the{" "}
           <Link href="/map" className="font-medium text-kelly-700 hover:underline">
             map
           </Link>{" "}
@@ -54,14 +54,19 @@ export default async function FieldsPage() {
                     {p.name}
                   </Link>{" "}
                   <span className="text-sm font-normal text-gray-500">
-                    {formatNumber(propertyFields.length)} fields · {formatAcres(acres)} ac
+                    {formatNumber(propertyFields.length)} ag fields · {formatAcres(acres)} ac
                   </span>
                 </h2>
                 <ul className="space-y-2">
                   {propertyFields.map((f) => (
                     <li key={f.id} className="rounded-xl border border-gray-200 bg-white p-3">
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-medium text-gray-900">{f.name}</span>
+                        <Link
+                          href={`/fields/${f.id}`}
+                          className="font-medium text-gray-900 hover:underline"
+                        >
+                          {f.name}
+                        </Link>
                         <span className="text-sm text-pine-900">
                           {formatAcres(f.acres)} ac
                         </span>

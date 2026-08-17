@@ -78,6 +78,8 @@ export interface RemotePlanting {
   crop: string | null;
   crop_year: number;
   planted_acres: number;
+  irrigated_acres: number | null;
+  dryland_acres: number | null;
   planting_date: string | null;
   varieties: Array<{ variety: string; acres: number }>;
 }

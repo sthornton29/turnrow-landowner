@@ -83,7 +83,12 @@ export default async function TimberPage() {
                   {propertyStands.map((s) => (
                     <li key={s.id} className="rounded-xl border border-gray-200 bg-white p-3">
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-medium text-gray-900">{s.name}</span>
+                        <Link
+                          href={`/timber/${s.id}`}
+                          className="font-medium text-gray-900 hover:underline"
+                        >
+                          {s.name}
+                        </Link>
                         <span className="text-sm text-pine-900">{formatAcres(s.acres)} ac</span>
                       </div>
                       <p className="text-sm text-gray-500">

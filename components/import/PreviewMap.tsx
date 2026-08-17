@@ -18,6 +18,7 @@ const COLOR: Record<EntityType, string> = {
   property: "#ffffff",
   parcel: "#fbd38d",
   field: "#39b54a",
+  pasture: "#d2b48c",
   timber_stand: "#a7f3d0",
   road: "#e5e7eb",
   asset: "#bae6fd",

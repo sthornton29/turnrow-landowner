@@ -99,11 +99,24 @@ export const VALUE_SOURCE_LABELS: Record<ValueSourceKind, string> = {
   tenant_actual: "tenant actual",
 };
 
+// Irrigated vs dryland practice on a crop entry. Blended (the default,
+// and how legacy rows read) means no split: one set of numbers for the
+// whole crop. A crop share year can hold Corn irrigated and Corn
+// dryland entries with their own acres/yield/price.
+export type CropPractice = "irrigated" | "dryland" | "blended";
+
+export const CROP_PRACTICE_LABELS: Record<CropPractice, string> = {
+  blended: "Blended",
+  irrigated: "Irrigated",
+  dryland: "Dryland",
+};
+
 // One crop's projection inputs within a lease year. A crop share year
 // holds one or more of these (wheat and canola on the same leased ground
 // in the same year); projected rent sums them.
 export interface CropAssumption {
   crop?: string | null;
+  practice?: CropPractice | null; // null reads as blended
   acres?: number | null;
   expected_yield?: number | null;
   expected_price?: number | null;

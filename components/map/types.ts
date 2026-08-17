@@ -3,6 +3,7 @@ import type {
   EntityType,
   FieldGeo,
   ParcelGeo,
+  PastureGeo,
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
@@ -19,6 +20,7 @@ export type AnyGeoRow =
   | PropertyGeo
   | ParcelGeo
   | FieldGeo
+  | PastureGeo
   | TimberStandGeo
   | RoadGeo
   | AssetGeo;
@@ -27,6 +29,7 @@ export interface LayerVisibility {
   property: boolean;
   parcel: boolean;
   field: boolean;
+  pasture: boolean;
   timber_stand: boolean;
   road: boolean;
   asset: boolean;

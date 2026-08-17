@@ -92,6 +92,19 @@ export interface FieldGeo {
   name: string;
   notes: string | null;
   acres: number | null;
+  irrigated_acres: number | null; // derived in PostGIS from irrigation coverage
+  boundary_geojson: MultiPolygon | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PastureGeo {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  name: string;
+  notes: string | null;
+  acres: number | null;
   boundary_geojson: MultiPolygon | null;
   created_at: string;
   updated_at: string;
@@ -200,6 +213,7 @@ export type EntityType =
   | "property"
   | "parcel"
   | "field"
+  | "pasture"
   | "timber_stand"
   | "road"
   | "asset";

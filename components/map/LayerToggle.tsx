@@ -5,7 +5,8 @@ import type { LayerVisibility } from "./types";
 const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
   { key: "property", label: "Properties" },
   { key: "parcel", label: "Parcels" },
-  { key: "field", label: "Fields" },
+  { key: "field", label: "Ag Fields" },
+  { key: "pasture", label: "Pastures" },
   { key: "timber_stand", label: "Timber" },
   { key: "road", label: "Roads" },
   { key: "asset", label: "Assets" },

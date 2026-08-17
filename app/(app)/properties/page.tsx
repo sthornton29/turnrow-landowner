@@ -109,7 +109,7 @@ export default async function PropertiesPage({
           {" · "}
           {formatNumber(parcelCount.get(p.id) ?? 0)} parcels
           {" · "}
-          {formatNumber(fieldCount.get(p.id) ?? 0)} fields (
+          {formatNumber(fieldCount.get(p.id) ?? 0)} ag fields (
           {formatAcres(fieldAcres.get(p.id) ?? 0)} ac)
           {(p.fsa_numbers ?? []).length > 0
             ? ` · FSA ${(p.fsa_numbers as string[]).join(", ")}`

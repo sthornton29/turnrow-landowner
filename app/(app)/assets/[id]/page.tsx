@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import type { AssetGeo } from "@/types/db";
 import AssetDetail from "./AssetDetail";
+import { MapThumb } from "@/components/summary/Summary";
 
 export const metadata = { title: "Asset" };
 
@@ -27,11 +28,19 @@ export default async function AssetDetailPage({
   if (!asset) notFound();
 
   return (
-    <AssetDetail
-      asset={asset as AssetGeo}
-      properties={properties ?? []}
-      wells={(wells ?? []).filter((w) => w.id !== id)}
-      orgId={profile.organization_id!}
-    />
+    <>
+      <div className="mx-auto max-w-4xl px-4 pt-4 md:px-6 md:pt-6">
+        <MapThumb
+          geometry={(asset as AssetGeo).geom_geojson}
+          focus={`asset:${id}`}
+        />
+      </div>
+      <AssetDetail
+        asset={asset as AssetGeo}
+        properties={properties ?? []}
+        wells={(wells ?? []).filter((w) => w.id !== id)}
+        orgId={profile.organization_id!}
+      />
+    </>
   );
 }

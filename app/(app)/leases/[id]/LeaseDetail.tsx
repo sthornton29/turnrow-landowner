@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatDollars } from "@/lib/format";
 import {
+  CROP_PRACTICE_LABELS,
   LEASE_STATUS_LABELS,
   VALUE_SOURCE_LABELS,
   annualRent,
@@ -480,7 +481,7 @@ export default function LeaseDetail({
         </h2>
         {lands.length === 0 ? (
           <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-            No land linked yet. Link the properties (or specific fields) this
+            No land linked yet. Link the properties (or specific ag fields) this
             lease covers; contract acres prefill from your mapped acres and can
             be edited to match the contract.
           </p>
@@ -496,7 +497,7 @@ export default function LeaseDetail({
                 </span>
                 {l.field_id ? (
                   <span className="text-sm text-gray-500">
-                    field: {fieldById.get(l.field_id)?.name ?? ""}
+                    ag field: {fieldById.get(l.field_id)?.name ?? ""}
                   </span>
                 ) : (
                   <span className="text-sm text-gray-500">whole property</span>
@@ -544,7 +545,7 @@ export default function LeaseDetail({
             <option value="">Whole property</option>
             {availableFields.map((f) => (
               <option key={f.id} value={f.id}>
-                Field: {f.name} ({formatAcres(f.acres)} ac)
+                Ag field: {f.name} ({formatAcres(f.acres)} ac)
               </option>
             ))}
           </select>
@@ -779,15 +780,19 @@ function AssumptionRowEditor({
     const next = entries.map(cloneEntry);
     const newAmber: string[] = [];
     for (const fill of fillSignal.fills) {
-      let i = next.findIndex((e) => matchCrop(fill.crop, [e.crop]) !== null);
+      const fillPractice = fill.practice ?? "blended";
+      const practiceMatches = (e: CropAssumption) =>
+        matchCrop(fill.crop, [e.crop]) !== null &&
+        (e.practice ?? "blended") === fillPractice;
+      let i = next.findIndex(practiceMatches);
       if (i === -1) i = next.findIndex((e) => !entryHasContent(e));
       if (i === -1) {
         next.push({});
         i = next.length - 1;
       }
       if (!next[i].crop) next[i] = { ...next[i], crop: fill.crop };
-      const savedMatch =
-        savedEntries.find((e) => matchCrop(fill.crop, [e.crop]) !== null) ?? null;
+      if (fill.practice) next[i] = { ...next[i], practice: fill.practice };
+      const savedMatch = savedEntries.find(practiceMatches) ?? null;
       for (const field of VALUE_FIELDS) {
         const v = fill.values[field];
         if (v === undefined || v === null) continue;
@@ -857,6 +862,7 @@ function AssumptionRowEditor({
         }
         return {
           crop: e.crop ?? null,
+          practice: e.practice ?? null,
           acres: e.acres ?? null,
           expected_yield: e.expected_yield ?? null,
           expected_price: e.expected_price ?? null,
@@ -955,6 +961,24 @@ function AssumptionRowEditor({
                   placeholder="Crop"
                   className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-sm"
                 />
+                <select
+                  value={e.practice ?? "blended"}
+                  onChange={(ev) =>
+                    setEntry(
+                      i,
+                      "practice",
+                      ev.target.value === "blended" ? null : ev.target.value
+                    )
+                  }
+                  title="Irrigated vs dryland practice; blended is one set of numbers for the whole crop"
+                  className="rounded-lg border border-gray-300 px-1.5 py-1 text-xs text-gray-700"
+                >
+                  {Object.entries(CROP_PRACTICE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="number"
                   step="0.1"

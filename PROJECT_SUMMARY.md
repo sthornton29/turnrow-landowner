@@ -1,10 +1,10 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 (composite pivot shapes: extensions, skips,
-cutouts, towables, laterals, migration 0013; timber details inline in
-the boundary save dialog; planted pine to deep teal; draggable
-crosshair; earlier same day: income projections from lease assumptions,
-Tenant Data panel, pivot circles, lease price methods)
+Last updated: 2026-08-17 ("Ag Fields" rename, pastures (migration
+0014), rich summary pages for every record, AI rent upload on /income,
+irrigated/dryland acres end to end, Farm Data page restructure; earlier
+same day: composite pivot shapes (migration 0013), income projections
+from lease assumptions, Tenant Data panel, lease price methods)
 
 ## What this product is
 
@@ -79,6 +79,26 @@ Tables:
   Composite FK (property_id, organization_id) -> properties (id,
   organization_id) makes cross-tenant references impossible.
 - fields: property_id, name, notes, boundary, acres. Same composite FK.
+  ALWAYS LABELED "Ag Fields" in UI text (nav, layers, dialogs, lists,
+  tiles); tables, columns, and code identifiers stay `fields`.
+  Migration 0014 adds irrigated_acres: DERIVED in PostGIS as the field
+  boundary intersected with the UNION of active irrigation coverage
+  polygons (pivot plantable shapes + laterals; union means overlapping
+  pivots count once), recomputed by row triggers on irrigation asset
+  geometry changes (org-wide) and field boundary changes (that field),
+  never on read; dryland = acres - irrigated, computed in the app.
+  lib/geo/irrigation.ts mirrors the same rule for unit tests (fully
+  inside, partial overlap, overlapping pivots counted once). Shown on
+  the ag field summary page, map click panel, property rollup, and a
+  dashboard Irrigated acres tile.
+- pastures (migration 0014): a land type mirroring fields (property_id
+  required, name, notes, MultiPolygon boundary, generated acres, RLS,
+  composite FK, pastures_geo view, set_geometry + documents entity_type
+  gain 'pasture'). Present but not emphasized: appears in the boundary
+  save dialog, imports, map layer (warm tan #d2b48c + labels + legend
+  toggle), property detail section, dashboard acres tile, and a
+  /pastures/[id] summary page. FUTURE AREA: no grazing management
+  features yet (deliberate).
 - documents: generic attachments via entity_type + entity_id
   (entity_type check now covers property, parcel, field, timber_stand,
   road, asset; Phase 3+ adds lease, timber_sale, tax_statement). Files live
@@ -216,7 +236,9 @@ farm API shares no boundaries, matching is by name + acres):
   best-guess suggestion (name similarity + acres within 10%) but NEVER
   changes a status; only the user confirms or ignores.
 - farm_field_data: synced plantings/harvest per (connection,
-  remote_field_id, crop_year, crop): planted_acres, planting_date,
+  remote_field_id, crop_year, crop): planted_acres, irrigated_acres +
+  dryland_acres (migration 0014; the partner /plantings payload carries
+  the practice split), planting_date,
   varieties jsonb, harvested_acres, production_units (null when the farmer
   did not share yields), production_unit, yield_shared, raw payload jsonb.
   Upserted on every sync; the app always renders from this table so farm
@@ -317,7 +339,17 @@ right source, always reviewed (amber until saved) and never auto-saved:
   crops" chip when unmatched), planted acres on leased ground, yield
   labeled PROJECTED (tenant projected, acre-weighted) or ACTUAL (once
   harvested; actuals win), avg price with PROJECTED/FINAL badge and
-  as-of date. Scope not granted renders a quiet "Not shared" (tooltip:
+  as-of date. PRACTICE SPLIT: when the farm data carries the
+  irrigated/dryland breakout (plantings acres + projected-yields
+  practices arrays), the panel shows one row per crop x practice and
+  "Use all" creates practice-split assumption entries
+  (CropAssumption.practice: irrigated | dryland | blended, default and
+  legacy = blended; the year row has a practice select per entry and
+  projected rent sums entries as before, unit-tested). ACTUAL yields
+  are NEVER practice-split: the partner /production payload carries no
+  breakout, so a harvested crop collapses to one blended ACTUAL row
+  (never fabricated; a farm-side API addition is the path to split
+  actuals). Scope not granted renders a quiet "Not shared" (tooltip:
   the farmer controls sharing); crop/acres always work. Reads the local
   sync cache, shows last-synced, Refresh reuses /api/farm/sync. Fills:
   "Use all" fills matched crops (or every crop when the year is empty),
@@ -654,6 +686,43 @@ Functions and views:
     payments engine, or pay-as-cut settlements entry (tons by product at
     contract rates, computed amounts, running totals by product),
     documents.
+  - RICH SUMMARY PAGES: one consistent template
+    (components/summary/Summary.tsx: breadcrumbed header with type
+    badge and key figure, static satellite thumbnail with the geometry
+    overlaid via lib/staticMap.ts (simplified GeoJSON overlay, tap
+    opens /map?focus=<type>:<id>; points show a pin), Details card of
+    every populated field, related sections rendering only with
+    content, documents/photos, and the type's actions) across
+    /fields/[id] (irrigated/dryland split, GIS acres beside the
+    tenant's planted-by-practice acres labeled by source, covering
+    leases with current-year projected rent, farm activity history,
+    documents), /pastures/[id], /parcels/[id] (tax statements),
+    /timber/[id] (linked timber sales), /roads/[id], plus upgraded
+    property (thumbnail, pasture section, irrigated rollup, child rows
+    linking to their pages) and asset pages (thumbnail). Map click
+    panels carry a prominent "View full page" link
+    (detailPagePath in FeaturePanel); /map?focus= accepts every entity
+    type.
+  - AI RENT UPLOAD (components/payments/RentUpload.tsx on /income and
+    every lease's Payments section): check photos and settlement PDFs
+    -> /api/extract kind=payment (claude-sonnet-4-6 forced tool:
+    document kind, payer, date, total, check number, settlement line
+    detail, yields, timber lines, unsure_fields amber). Payer matches
+    to tenants via the owner-name normalizer (suggested, never
+    assumed), then that tenant's leases, then a proposed allocation
+    against OPEN expected payments (lib/paymentMatch.ts, unit-tested:
+    exact-amount match first even when another is due sooner, else
+    due-date-proximity fill supporting one check split across several
+    and partials; overflow becomes an unscheduled remainder). Review
+    before save, always: confirming inserts the payment row(s) with
+    provenance in the memo ("Uploaded check ..., extracted date",
+    check # in method), attaches the source file to the lease's
+    documents, and refreshes. A document reading as a timber
+    settlement offers routing to a pay-as-cut settlement on a chosen
+    timber sale (lines prefilled). Settlement yields/prices show as an
+    OPTIONAL cross-check against that lease-year's assumptions,
+    changing nothing unless the user acts. No match falls back to
+    manual tenant/lease pick or unscheduled, same review screen.
   - /income: PROJECTIONS WITHOUT GENERATION: a lease-year with no
     generated expected payments shows its projected rent computed
     straight from terms + leased acres + that year's assumptions (the
@@ -800,7 +869,15 @@ Functions and views:
     flow (paste layer URL, auto-read fields with guessed mappings,
     dropdown mapping, one-record test query, save as active/untested),
     edit, deactivate, delete.
-  - /farms (Farm Data nav item): enter a farmer's one-time share code to
+  - FARM DATA IS DATA FIRST: the Farm Data nav item lands on
+    /farm-activity; with no connections yet it redirects to /farms so
+    the share-code entry stays front and center. The activity page
+    carries a connection-health strip (status dot, label, last synced,
+    a gear "Manage connections" link), loud error banners when a
+    connection is not active, and a Tenant prices card (per-crop price
+    with PROJECTED/FINAL badge) when the scope is shared.
+  - /farms ("Farm connections", the management area): enter a farmer's
+    one-time share code to
     connect; connections list with status chips (active / error with the
     plain-language last_error / Ended by farmer), last synced time,
     Refresh now, links to field mapping and farm activity, Disconnect.
@@ -839,6 +916,8 @@ Functions and views:
   pine-700/800/900. Logo files in public/brand/ are used as-is, never
   recolored.
 - No em dashes anywhere in UI text or generated documents.
+- The fields land type is ALWAYS "Ag Fields" / "ag field" in UI text;
+  database identifiers stay fields. Pastures are a separate land type.
 - Numbers with commas; acres to 1 decimal (lib/format.ts formatAcres);
   dollars with commas and 2 decimals (formatDollars).
 - Every future AI extraction must be shown for user review before saving.
@@ -892,3 +971,14 @@ Functions and views:
   timber stand details inline in the boundary save dialog; planted
   pine recolored deep teal; draggable crosshair placement. Described
   above.
+- Post-Phase 6e (DONE, 2026-08-17, migration 0014): "Ag Fields" rename
+  everywhere in UI; pastures as a minimal land type; rich summary
+  pages for property/parcel/ag field/pasture/timber stand/road/asset
+  with static map thumbnails and View-full-page links from the map;
+  AI rent upload (checks and settlements to reviewed payment rows,
+  timber settlement routing, assumption cross-checks);
+  irrigated/dryland acres end to end (PostGIS derivation + practice-
+  split tenant data and assumptions; ACTUAL yields stay blended until
+  the farm-side /production payload carries a practice breakout); Farm
+  Data page restructured data-first with connections tucked into a
+  management area. Described above.

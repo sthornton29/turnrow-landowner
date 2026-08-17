@@ -36,6 +36,7 @@ export default async function DashboardPage({
     { data: properties },
     { data: parcels },
     { data: fields },
+    { data: pastures },
     { data: timber },
     { data: assets },
     { data: entities },
@@ -54,7 +55,8 @@ export default async function DashboardPage({
       .single(),
     supabase.from("properties_geo").select("id, acres, boundary_geojson, entity_id"),
     supabase.from("parcels").select("id, property_id"),
-    supabase.from("fields").select("id, acres, property_id"),
+    supabase.from("fields").select("id, acres, irrigated_acres, property_id"),
+    supabase.from("pastures").select("id, acres, property_id"),
     supabase.from("timber_stands").select("id, acres, property_id"),
     supabase
       .from("assets")
@@ -122,11 +124,17 @@ export default async function DashboardPage({
   const inScope = (row: { property_id: string | null }) =>
     !entityFilter || (row.property_id !== null && propertyIds.has(row.property_id));
   const scopedFields = (fields ?? []).filter(inScope);
+  const scopedPastures = (pastures ?? []).filter(inScope);
   const scopedTimber = (timber ?? []).filter(inScope);
   const scopedAssets = (assets ?? []).filter(inScope);
 
   const propertyAcres = filteredProperties.reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = scopedFields.reduce((s, f) => s + (f.acres ?? 0), 0);
+  const irrigatedAcres = scopedFields.reduce(
+    (s, f) => s + ((f as { irrigated_acres?: number | null }).irrigated_acres ?? 0),
+    0
+  );
+  const pastureAcres = scopedPastures.reduce((s, p) => s + (p.acres ?? 0), 0);
   const timberAcres = scopedTimber.reduce((s, t) => s + (t.acres ?? 0), 0);
   const box = bboxOf(
     (properties ?? []).map((p) => p.boundary_geojson as MultiPolygon | null)
@@ -189,10 +197,19 @@ export default async function DashboardPage({
   const stats = [
     { label: "Total acres", value: formatAcres(propertyAcres) },
     { label: "Properties", value: formatNumber(filteredProperties.length) },
-    { label: "Field acres", value: formatAcres(fieldAcres) },
+    { label: "Ag field acres", value: formatAcres(fieldAcres) },
+    ...(irrigatedAcres > 0.05
+      ? [{ label: "Irrigated acres", value: formatAcres(irrigatedAcres) }]
+      : []),
+    ...(pastureAcres > 0.05
+      ? [{ label: "Pasture acres", value: formatAcres(pastureAcres) }]
+      : []),
     { label: "Timber acres", value: formatAcres(timberAcres) },
     { label: "Wells", value: formatNumber(countOf("well")) },
-    { label: "Pivots", value: formatNumber(countOf("irrigation_pivot")) },
+    {
+      label: "Pivots",
+      value: formatNumber(countOf("irrigation_pivot", "irrigation_lateral")),
+    },
     { label: "Grain bins", value: formatNumber(countOf("grain_bin")) },
     {
       label: "Buildings",

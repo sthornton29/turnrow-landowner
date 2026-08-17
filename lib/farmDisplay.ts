@@ -9,6 +9,8 @@ export interface FarmFieldDataRow {
   crop_year: number;
   crop: string;
   planted_acres: number | null;
+  irrigated_acres: number | null;
+  dryland_acres: number | null;
   planting_date: string | null;
   varieties: Array<{ variety: string; acres: number }>;
   harvested_acres: number | null;

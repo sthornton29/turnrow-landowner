@@ -122,6 +122,8 @@ export async function syncConnection(
           crop_year: year,
           crop,
           planted_acres: planting.planted_acres ?? null,
+          irrigated_acres: planting.irrigated_acres ?? null,
+          dryland_acres: planting.dryland_acres ?? null,
           planting_date: planting.planting_date ?? null,
           varieties: planting.varieties ?? [],
           harvested_acres: prod?.harvested_acres ?? null,
