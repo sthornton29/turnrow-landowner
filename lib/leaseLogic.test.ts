@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   annualRent,
   cropAssumptions,
+  generateLeasePayments,
   type LeaseLike,
   type YearAssumptions,
 } from "./leaseLogic";
@@ -75,6 +76,30 @@ describe("annualRent crop share", () => {
       ],
     });
     expect(rent).toBeNull();
+  });
+
+  it("blank payment schedule rows never zero out generation", () => {
+    // The form can save empty schedule rows; they must be ignored and
+    // the default annual payment used, not silently generate nothing.
+    const lease = cropShareLease({
+      payment_schedule: [
+        { label: "", month: 0, day: 0, percent: null, amount: null },
+        { label: "", month: 0, day: 0, percent: null, amount: null },
+      ],
+    });
+    const rows = generateLeasePayments(
+      lease,
+      500,
+      new Map([
+        [2026, { crops: [{ crop: "Corn", acres: 100, expected_yield: 180, expected_price: 4.5 }] }],
+      ])
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      year: 2026,
+      label: "Annual payment",
+      expected_amount: 100 * 180 * 4.5 * 0.25,
+    });
   });
 
   it("still computes legacy single-crop rows", () => {

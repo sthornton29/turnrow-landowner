@@ -39,7 +39,9 @@ function fillFor(
     };
   }
   if (parts.price && typeof row.priceCell === "object" && row.priceCell) {
-    fill.values.expected_price = row.priceCell.value;
+    // Always the DOLLARS value (cents per lb pre-converted), so the
+    // projection math stays in dollars.
+    fill.values.expected_price = row.priceCell.fillValue;
     fill.sources.expected_price = {
       kind: row.priceCell.isFinal ? "tenant_final" : "tenant_projected",
       as_of: row.priceCell.asOf ?? syncedAt,
@@ -174,7 +176,7 @@ export default function TenantDataPanel({
                           ? row.priceCell
                           : null;
                       const priceConflict = priceValue
-                        ? conflict("expected_price", priceValue.value)
+                        ? conflict("expected_price", priceValue.fillValue)
                         : null;
                       const use = (parts: { acres?: boolean; yield?: boolean; price?: boolean }) =>
                         onFill(year, [fillFor(row, parts, syncedAt)], true);
@@ -230,7 +232,9 @@ export default function TenantDataPanel({
                             ) : priceValue ? (
                               <span className="inline-flex flex-wrap items-center gap-1">
                                 <span className="tabular-nums">
-                                  {formatDollars(priceValue.value)} {priceValue.unitLabel}
+                                  {priceValue.unitLabel === "c/lb"
+                                    ? `${formatNumber(priceValue.value)} c/lb (fills as ${formatDollars(priceValue.fillValue)}/lb)`
+                                    : `${formatDollars(priceValue.value)} ${priceValue.unitLabel}`}
                                 </span>
                                 <Badge kind={priceValue.isFinal ? "final" : "projected"} />
                                 {priceValue.asOf ? (

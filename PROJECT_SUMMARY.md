@@ -316,7 +316,13 @@ right source, always reviewed (amber until saved) and never auto-saved:
   plus per-row and per-cell Use buttons; every filled value lands amber
   and saves only when the row is saved. NO SILENT OVERWRITE: Use all
   never replaces a saved value; conflicting cells show "saved X" with
-  an explicit Use. Hand edits after a fill always win. PROVENANCE:
+  an explicit Use. Hand edits after a fill always win. UNIT BOUNDARY:
+  cents-per-lb prices (cotton) display as "82.90 c/lb (fills as
+  $0.83/lb)" and always FILL in dollars per the yield's native unit,
+  so acres x yield x price stays in dollars (a raw 82.90 once inflated
+  a projection 100x). Blank payment-schedule rows are ignored by
+  expected-payment generation (default annual payment fallback), never
+  silently generating nothing. PROVENANCE:
   tenant-filled values save a source tag (tenant projected / tenant
   final / tenant actual, with as-of date) shown subtly under the crop
   sub-row; hand-editing a value clears its tag.

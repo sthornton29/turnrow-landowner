@@ -236,9 +236,13 @@ export function generateLeasePayments(
   const endYear = Number(lease.end_date.slice(0, 4));
   if (!startYear || !endYear || endYear < startYear || endYear - startYear > 50) return [];
 
+  // Blank schedule rows (no percent and no fixed amount; the form can
+  // save empty ones) must not silently zero out generation: ignore
+  // them, and with nothing real left fall back to one annual payment.
+  const realSchedule = lease.payment_schedule.filter((p) => p.percent || p.amount);
   const schedule =
-    lease.payment_schedule.length > 0
-      ? lease.payment_schedule
+    realSchedule.length > 0
+      ? realSchedule
       : [{ label: "Annual payment", month: 1, day: 1, percent: 100 }];
 
   const rows: GeneratedPayment[] = [];

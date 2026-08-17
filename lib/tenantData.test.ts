@@ -67,6 +67,36 @@ describe("buildTenantCropRows", () => {
     expect(canola.yieldCell).toBeNull();
   });
 
+  it("converts cents-per-lb prices to dollars for filling (cotton)", () => {
+    // The $12M bug: 82.90 c/lb must fill as $0.829/lb, never 82.90.
+    const rows = buildTenantCropRows({
+      ...base,
+      leaseCrops: ["Cotton"],
+      farmData: [planting({ crop: "Cotton" })],
+      projectedYields: [],
+      prices: [
+        { farm_connection_id: "conn1", crop_year: 2026, crop: "Cotton", projected_avg_price: 82.9, unit: "cents_per_lb", is_final: false, as_of: "2026-08-17" },
+      ],
+    });
+    expect(rows[0].priceCell).toMatchObject({
+      value: 82.9,
+      unitLabel: "c/lb",
+      fillValue: 0.829,
+    });
+  });
+
+  it("keeps dollars-per-bushel prices unconverted", () => {
+    const rows = buildTenantCropRows({
+      ...base,
+      farmData: [planting({})],
+      projectedYields: [],
+      prices: [
+        { farm_connection_id: "conn1", crop_year: 2026, crop: "Wheat", projected_avg_price: 5.96, unit: "usd_per_bu", is_final: true, as_of: "2026-08-17" },
+      ],
+    });
+    expect(rows[0].priceCell).toMatchObject({ value: 5.96, fillValue: 5.96 });
+  });
+
   it("prefers actual yield over projected once harvested", () => {
     const rows = buildTenantCropRows({
       ...base,

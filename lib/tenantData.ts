@@ -15,8 +15,13 @@ export interface TenantYieldCell {
 }
 
 export interface TenantPriceCell {
-  value: number;
+  value: number; // as the tenant tracks it (dollars per bu, or CENTS per lb)
   unitLabel: string; // "$/bu" | "c/lb"
+  // What Use fills into the assumption price input: always DOLLARS per
+  // the yield's native unit (cents per lb converts to $/lb), so
+  // acres x yield x price stays in dollars. A cotton price of 82.90
+  // c/lb fills as 0.829, never 82.90.
+  fillValue: number;
   isFinal: boolean;
   asOf: string | null;
 }
@@ -159,9 +164,13 @@ export function buildTenantCropRows(args: {
               (b.as_of ?? "").localeCompare(a.as_of ?? "")
           )[0] ?? null;
       if (row && row.projected_avg_price !== null) {
+        const cents = row.unit === "cents_per_lb";
         priceCell = {
           value: row.projected_avg_price,
-          unitLabel: row.unit === "cents_per_lb" ? "c/lb" : "$/bu",
+          unitLabel: cents ? "c/lb" : "$/bu",
+          fillValue: cents
+            ? Math.round((row.projected_avg_price / 100) * 10000) / 10000
+            : row.projected_avg_price,
           isFinal: row.is_final,
           asOf: row.as_of,
         };
