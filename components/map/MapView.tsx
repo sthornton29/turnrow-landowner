@@ -219,12 +219,18 @@ export default function MapView({
 
   // Parametric pivot coverage circle editor: the polygon is always
   // derived from (center, radius, sweep); never vertex-edited.
+  // assetId null = a NEW pivot from the Add menu (crosshair placed the
+  // center); Save then asks for name/property before inserting.
   const [pivotEdit, setPivotEdit] = useState<{
-    assetId: string;
+    assetId: string | null;
     params: PivotParams;
   } | null>(null);
   const pivotEditRef = useRef(pivotEdit);
   pivotEditRef.current = pivotEdit;
+  // Crosshair placement is for a new pivot's center (Add menu), not an
+  // asset pin.
+  const placeForPivotRef = useRef(false);
+  const [pendingPivotSave, setPendingPivotSave] = useState(false);
   const didFitRef = useRef(false);
   const didFocusRef = useRef(false);
 
@@ -810,6 +816,7 @@ export default function MapView({
     setEditTargetType(null);
     setDrawingShape(false);
     completedDrawIdsRef.current = new Set();
+    placeForPivotRef.current = false;
   }
 
   // Session-level cancel: when completed areas exist, a mis-tap must not
@@ -1072,19 +1079,18 @@ export default function MapView({
 
   function cancelPivotEditor() {
     setPivotEdit(null);
+    setPendingPivotSave(false);
     setMode("view");
     setSaveError(null);
   }
 
-  async function savePivot() {
-    const edit = pivotEditRef.current;
-    if (!edit) return;
-    const p = edit.params;
-    const polygon = pivotPolygon(p);
-    const acres = approxAcres(toMultiPolygon(polygon)!);
-    const asset = assets.find((a) => a.id === edit.assetId);
-    const details: Record<string, string | number | boolean | null> = {
-      ...((asset?.details ?? {}) as Record<string, string | number | boolean | null>),
+  function pivotDetails(
+    p: PivotParams,
+    existing: Record<string, unknown> = {}
+  ): Record<string, string | number | boolean | null> {
+    const acres = approxAcres(toMultiPolygon(pivotPolygon(p))!);
+    return {
+      ...(existing as Record<string, string | number | boolean | null>),
       center_lon: Math.round(p.center[0] * 1e6) / 1e6,
       center_lat: Math.round(p.center[1] * 1e6) / 1e6,
       wetted_length_ft: Math.round(p.radiusFt),
@@ -1093,6 +1099,48 @@ export default function MapView({
       end_bearing_deg: p.fullCircle ? null : p.endBearingDeg,
       acres_covered: Math.round(acres * 10) / 10,
     };
+  }
+
+  // Save from the Add-menu flow: the circle is drawn, now name it and
+  // pick a property (suggested from the center's location), then insert
+  // the asset with its parameters and derived polygon.
+  async function saveNewPivot(payload: NewAssetPayload) {
+    const edit = pivotEditRef.current;
+    if (!edit) return;
+    setSaving(true);
+    setSaveError(null);
+    const sel = await insertAndSetGeometry(
+      "assets",
+      {
+        organization_id: orgId,
+        property_id: payload.propertyId,
+        name: payload.name,
+        asset_type: "irrigation_pivot",
+        details: pivotDetails(edit.params),
+      },
+      "asset",
+      pivotPolygon(edit.params)
+    );
+    setSaving(false);
+    if (sel) {
+      cancelPivotEditor();
+      await loadData();
+      setSelected(sel);
+    }
+  }
+
+  async function savePivot() {
+    const edit = pivotEditRef.current;
+    if (!edit) return;
+    if (edit.assetId === null) {
+      // New pivot: collect name and property first.
+      setPendingPivotSave(true);
+      return;
+    }
+    const p = edit.params;
+    const polygon = pivotPolygon(p);
+    const asset = assets.find((a) => a.id === edit.assetId);
+    const details = pivotDetails(p, (asset?.details ?? {}) as Record<string, unknown>);
     setSaving(true);
     const { error: dErr } = await supabase
       .from("assets")
@@ -1227,16 +1275,21 @@ export default function MapView({
     setSelected(sel);
   };
 
-  function startAdd(kind: "boundary" | "line" | "asset_point") {
+  function startAdd(kind: "boundary" | "line" | "asset_point" | "pivot") {
     const draw = drawRef.current;
     if (!draw) return;
     setAddMenuOpen(false);
     setSelected(null);
     setSaveError(null);
     editTargetRef.current = null;
-    if (kind === "asset_point") {
+    if (kind === "asset_point" || kind === "pivot") {
+      placeForPivotRef.current = kind === "pivot";
       setMode("place");
-      setEditHint("Pan the map to line up the crosshair, then press Place here.");
+      setEditHint(
+        kind === "pivot"
+          ? "Pan so the crosshair sits on the pivot point, then press Place here."
+          : "Pan the map to line up the crosshair, then press Place here."
+      );
       return;
     }
     drawKindRef.current = kind;
@@ -1356,6 +1409,23 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     const center = map.getCenter();
+    if (placeForPivotRef.current) {
+      // The crosshair placed a NEW pivot's center: straight into the
+      // circle editor (Save asks for name and property).
+      placeForPivotRef.current = false;
+      setMode("pivot");
+      setPivotEdit({
+        assetId: null,
+        params: {
+          center: [center.lng, center.lat],
+          radiusFt: 1300,
+          fullCircle: true,
+          startBearingDeg: null,
+          endBearingDeg: null,
+        },
+      });
+      return;
+    }
     const target = editTargetRef.current;
     if (target) {
       // Moving an existing asset pin
@@ -1640,7 +1710,8 @@ export default function MapView({
                     ["boundary", "Boundary (field, timber...)"],
                     ["line", "Road, pipe, or fence"],
                     ["asset_point", "Asset pin (well, bin...)"],
-                  ] as Array<["boundary" | "line" | "asset_point", string]>
+                    ["pivot", "Irrigation pivot (circle)"],
+                  ] as Array<["boundary" | "line" | "asset_point" | "pivot", string]>
                 ).map(([kind, label]) => (
                   <button
                     key={kind}
@@ -1671,8 +1742,9 @@ export default function MapView({
         </div>
       </div>
 
-      {/* Pivot coverage circle toolbar */}
-      {mode === "pivot" && pivotEdit ? (
+      {/* Pivot coverage circle toolbar (hidden while the new-pivot save
+          dialog is up so the two never overlap) */}
+      {mode === "pivot" && pivotEdit && !pendingPivotSave ? (
         <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[94%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
           <p className="text-xs">
             Drag the white handle to move the center, the blue handle for the
@@ -1876,6 +1948,20 @@ export default function MapView({
           error={saveError}
           onSave={saveNewAsset}
           onCancel={resetDrawState}
+        />
+      ) : null}
+      {pendingPivotSave && mode === "pivot" && pivotEdit ? (
+        <NewAssetDialog
+          properties={properties}
+          suggestedPropertyId={suggestPropertyId(
+            { type: "Point", coordinates: pivotEdit.params.center },
+            matchableProperties
+          )}
+          fixedType="irrigation_pivot"
+          saving={saving}
+          error={saveError}
+          onSave={saveNewPivot}
+          onCancel={() => setPendingPivotSave(false)}
         />
       ) : null}
 

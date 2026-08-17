@@ -464,9 +464,13 @@ Functions and views:
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
     mobile). The Add menu offers: Boundary (polygon draw; save as field,
-    parcel, property, or timber stand), Road/pipe/fence (line draw), and
+    parcel, property, or timber stand), Road/pipe/fence (line draw),
     Asset pin (crosshair placement mode: pan to line up, Place here, or My
-    location via GPS; moving a pin reuses the same mode). All three save
+    location via GPS; moving a pin reuses the same mode), and Irrigation
+    pivot (crosshair places the center, then the parametric circle
+    editor opens directly; Save asks for name + property, suggested
+    from the center's location, and inserts the pivot with its
+    parameters and derived polygon in one step). All three save
     dialogs preselect the property whose boundary contains the drawn
     geometry (same lib/geo/propertyMatch.ts logic as the file import)
     with a "Suggested from location" chip that clears if the user picks

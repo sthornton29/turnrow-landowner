@@ -15,6 +15,7 @@ export interface NewAssetPayload {
 export default function NewAssetDialog({
   properties,
   suggestedPropertyId = null,
+  fixedType = null,
   saving,
   error,
   onSave,
@@ -22,6 +23,9 @@ export default function NewAssetDialog({
 }: {
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
+  // Locks the type (the Add menu's pivot flow already knows it) and
+  // hides the type selector.
+  fixedType?: AssetType | null;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewAssetPayload) => void;
@@ -31,7 +35,7 @@ export default function NewAssetDialog({
   const pointTypes = ASSET_TYPE_ORDER.filter(
     (t) => ASSET_TYPES[t].defaultGeometry === "point"
   );
-  const [assetType, setAssetType] = useState<AssetType>("well");
+  const [assetType, setAssetType] = useState<AssetType>(fixedType ?? "well");
   const [propertyId, setPropertyId] = useState(suggestedPropertyId ?? "");
 
   function handleSubmit(formData: FormData) {
@@ -51,20 +55,26 @@ export default function NewAssetDialog({
       </p>
 
       <form action={handleSubmit} className="mt-3 space-y-3">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Type</label>
-          <select
-            value={assetType}
-            onChange={(e) => setAssetType(e.target.value as AssetType)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
-          >
-            {pointTypes.map((t) => (
-              <option key={t} value={t}>
-                {ASSET_TYPES[t].label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {fixedType ? (
+          <p className="text-sm text-gray-700">
+            Type: <span className="font-medium">{ASSET_TYPES[fixedType].label}</span>
+          </p>
+        ) : (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Type</label>
+            <select
+              value={assetType}
+              onChange={(e) => setAssetType(e.target.value as AssetType)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+            >
+              {pointTypes.map((t) => (
+                <option key={t} value={t}>
+                  {ASSET_TYPES[t].label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>
@@ -119,7 +129,7 @@ export default function NewAssetDialog({
             onClick={onCancel}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Discard
+            {fixedType ? "Back" : "Discard"}
           </button>
         </div>
       </form>
