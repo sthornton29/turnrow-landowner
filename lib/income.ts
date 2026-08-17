@@ -1,11 +1,27 @@
 // Income rollups shared by the Income page, property pages, and dashboard.
 // Amounts allocate to properties by leased acres (leases) or by linked
 // stand acres (timber sales); anything unallocable lands in "Unassigned".
+//
+// PROJECTIONS: a lease-year with no generated expected payments still
+// shows its projected rent, computed straight from terms + leased acres
+// + that year's assumptions (the tenant's prices and yields). Landowners
+// never have to press Generate to see expected rent; generating a
+// payment schedule REPLACES the projection for that lease-year with the
+// schedule's rows. Views label projection-sourced totals as estimates
+// that will change.
+
+import { annualRent, type LeaseLike, type YearAssumptions } from "@/lib/leaseLogic";
 
 export type IncomeType = "agricultural" | "hunting" | "timber";
 
+export interface IncomeLease extends LeaseLike {
+  id: string;
+  status: string;
+}
+
 export interface IncomeInputs {
-  leases: Array<{ id: string; lease_type: "agricultural" | "hunting" }>;
+  leases: IncomeLease[];
+  assumptions: Array<{ lease_id: string; year: number; data: YearAssumptions }>;
   leaseLands: Array<{ lease_id: string; property_id: string; leased_acres: number | null }>;
   expected: Array<{
     id: string;
@@ -42,6 +58,9 @@ export interface YearTotals {
   received: Record<IncomeType, number>;
   taxesDue: number; // expected expense: statements for this tax year
   taxesPaid: number; // actual expense: tax payments dated in this year
+  // True when any of the expected total is a computed projection (no
+  // generated payment schedule yet); views show the "will change" note.
+  hasProjection: boolean;
 }
 
 function emptyTotals(): YearTotals {
@@ -50,6 +69,7 @@ function emptyTotals(): YearTotals {
     received: { agricultural: 0, hunting: 0, timber: 0 },
     taxesDue: 0,
     taxesPaid: 0,
+    hasProjection: false,
   };
 }
 
@@ -63,6 +83,88 @@ function typeOf(
   return lease?.lease_type === "hunting" ? "hunting" : "agricultural";
 }
 
+// Projected rent per (lease, year) from terms + leased acres + that
+// year's assumptions. Draft and active leases project; expired and
+// terminated ones stop.
+export function projectedLeaseYears(inputs: IncomeInputs): Map<string, Map<number, number>> {
+  const acresByLease = new Map<string, number>();
+  for (const l of inputs.leaseLands) {
+    acresByLease.set(l.lease_id, (acresByLease.get(l.lease_id) ?? 0) + (l.leased_acres ?? 0));
+  }
+  const assumptionsByLease = new Map<string, Map<number, YearAssumptions>>();
+  for (const a of inputs.assumptions) {
+    if (!assumptionsByLease.has(a.lease_id)) assumptionsByLease.set(a.lease_id, new Map());
+    assumptionsByLease.get(a.lease_id)!.set(a.year, a.data ?? {});
+  }
+  const result = new Map<string, Map<number, number>>();
+  for (const lease of inputs.leases) {
+    if (lease.status === "expired" || lease.status === "terminated") continue;
+    if (!lease.start_date || !lease.end_date) continue;
+    const startYear = Number(lease.start_date.slice(0, 4));
+    const endYear = Number(lease.end_date.slice(0, 4));
+    if (!startYear || !endYear || endYear < startYear || endYear - startYear > 50) continue;
+    const byYear = new Map<number, number>();
+    for (let year = startYear; year <= endYear; year++) {
+      const rent = annualRent(
+        lease,
+        acresByLease.get(lease.id) ?? 0,
+        assumptionsByLease.get(lease.id)?.get(year)
+      );
+      if (rent !== null && rent !== 0) byYear.set(year, rent);
+    }
+    if (byYear.size > 0) result.set(lease.id, byYear);
+  }
+  return result;
+}
+
+interface EffectiveExpected {
+  leaseId: string | null;
+  timberSaleId: string | null;
+  year: number;
+  amount: number;
+  projection: boolean; // computed from assumptions, no generated rows yet
+}
+
+// One expected amount per source-year: generated expected_payments win
+// for a (lease, year) once any exist (they carry the user's schedule
+// and adjustments); otherwise the computed projection fills in. Timber
+// sales only ever have generated rows.
+function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
+  const entries: EffectiveExpected[] = [];
+  const generated = new Map<string, number>();
+  for (const e of inputs.expected) {
+    if (e.timber_sale_id) {
+      entries.push({
+        leaseId: null,
+        timberSaleId: e.timber_sale_id,
+        year: e.year,
+        amount: e.expected_amount,
+        projection: false,
+      });
+    } else if (e.lease_id) {
+      const key = `${e.lease_id}|${e.year}`;
+      generated.set(key, (generated.get(key) ?? 0) + e.expected_amount);
+    }
+  }
+  for (const [key, amount] of generated) {
+    const [leaseId, year] = key.split("|");
+    entries.push({
+      leaseId,
+      timberSaleId: null,
+      year: Number(year),
+      amount,
+      projection: false,
+    });
+  }
+  for (const [leaseId, byYear] of projectedLeaseYears(inputs)) {
+    for (const [year, amount] of byYear) {
+      if (generated.has(`${leaseId}|${year}`)) continue;
+      entries.push({ leaseId, timberSaleId: null, year, amount, projection: true });
+    }
+  }
+  return entries;
+}
+
 // Expected vs received by year and income type.
 export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
   const map = new Map<number, YearTotals>();
@@ -71,9 +173,10 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
     return map.get(year)!;
   };
 
-  for (const e of inputs.expected) {
-    get(e.year).expected[typeOf(inputs, e.lease_id, e.timber_sale_id)] +=
-      e.expected_amount;
+  for (const e of effectiveExpectedEntries(inputs)) {
+    const totals = get(e.year);
+    totals.expected[typeOf(inputs, e.leaseId, e.timberSaleId)] += e.amount;
+    if (e.projection) totals.hasProjection = true;
   }
   for (const p of inputs.payments) {
     const year = Number(p.received_date.slice(0, 4));
@@ -175,9 +278,9 @@ export function allocateToProperties(
     }
   };
 
-  for (const e of inputs.expected) {
+  for (const e of effectiveExpectedEntries(inputs)) {
     if (e.year !== year) continue;
-    spread(e.lease_id, e.timber_sale_id, "expected", e.expected_amount);
+    spread(e.leaseId, e.timberSaleId, "expected", e.amount);
   }
   for (const p of inputs.payments) {
     if (Number(p.received_date.slice(0, 4)) !== year) continue;
@@ -211,6 +314,7 @@ export function allocateToProperties(
 export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
   const [
     leases,
+    assumptions,
     leaseLands,
     expected,
     payments,
@@ -221,7 +325,12 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     taxPayments,
     parcels,
   ] = await Promise.all([
-    supabase.from("leases").select("id, lease_type"),
+    supabase
+      .from("leases")
+      .select(
+        "id, lease_type, rent_structure, status, terms, payment_schedule, start_date, end_date"
+      ),
+    supabase.from("lease_year_assumptions").select("lease_id, year, data"),
     supabase.from("lease_lands").select("lease_id, property_id, leased_acres"),
     supabase
       .from("expected_payments")
@@ -240,6 +349,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
   ]);
   return {
     leases: leases.data ?? [],
+    assumptions: assumptions.data ?? [],
     leaseLands: leaseLands.data ?? [],
     expected: expected.data ?? [],
     payments: payments.data ?? [],

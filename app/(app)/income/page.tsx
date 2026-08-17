@@ -43,6 +43,7 @@ export default async function IncomePage({
     received: { agricultural: 0, hunting: 0, timber: 0 },
     taxesDue: 0,
     taxesPaid: 0,
+    hasProjection: false,
   };
   const totalExpected =
     totals.expected.agricultural + totals.expected.hunting + totals.expected.timber;
@@ -236,6 +237,15 @@ export default async function IncomePage({
         <h2 className="border-b border-gray-200 px-4 py-3 text-base font-semibold text-gray-900">
           {selectedYear} by income type
         </h2>
+        {totals.hasProjection ? (
+          <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+            Expected includes PROJECTED rent, computed from lease terms and
+            each year{"'"}s assumptions (your tenant{"'"}s prices and yields).
+            Projections change as those numbers update. Generating a lease
+            {"'"}s expected payments replaces its projection with the payment
+            schedule.
+          </p>
+        ) : null}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

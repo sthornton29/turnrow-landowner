@@ -152,6 +152,19 @@ export default function PaymentsSection({
     load();
   }
 
+  // Deleting an expected row never deletes money received: the payments
+  // FK sets null, so recorded payments stay as unscheduled.
+  async function deleteExpected(e: ExpectedRow) {
+    const received = receivedByExpected.get(e.id) ?? 0;
+    const message =
+      received > 0
+        ? `Delete the expected "${e.label}" (${e.year})? Payments recorded against it stay as unscheduled payments.`
+        : `Delete the expected "${e.label}" (${e.year})?`;
+    if (!window.confirm(message)) return;
+    await supabase.from("expected_payments").delete().eq("id", e.id);
+    load();
+  }
+
   const today = new Date();
 
   function paymentForm(expectedId: string | null, defaultAmount?: number) {
@@ -228,7 +241,9 @@ export default function PaymentsSection({
       {expected.length === 0 ? (
         <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
           {emptyHint ??
-            "No expected payments yet. Complete the terms and press Generate expected payments."}
+            (leaseId
+              ? "No payment schedule yet, and none is needed for projections: the Income page already projects this lease from its terms and assumptions. Generate expected payments when you want dated installments to track and record payments against."
+              : "No expected payments yet. Complete the terms and press Generate expected payments.")}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -271,12 +286,21 @@ export default function PaymentsSection({
                       {recordingFor === e.id ? (
                         paymentForm(e.id, Math.max(e.expected_amount - received, 0))
                       ) : (
-                        <button
-                          onClick={() => setRecordingFor(e.id)}
-                          className="text-sm font-medium text-kelly-700 hover:underline"
-                        >
-                          Record payment
-                        </button>
+                        <span className="flex items-center gap-2">
+                          <button
+                            onClick={() => setRecordingFor(e.id)}
+                            className="text-sm font-medium text-kelly-700 hover:underline"
+                          >
+                            Record payment
+                          </button>
+                          <button
+                            onClick={() => deleteExpected(e)}
+                            className="text-xs font-medium text-red-600 hover:underline"
+                            title="Remove this expected payment; recorded payments stay"
+                          >
+                            Delete
+                          </button>
+                        </span>
                       )}
                     </td>
                   </tr>
