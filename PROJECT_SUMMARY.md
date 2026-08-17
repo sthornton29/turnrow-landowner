@@ -1,7 +1,8 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 (lease price methods; 2026-08-16: Timber Scan,
-entity level, five new Alabama counties, FSA numbers, county import loop)
+Last updated: 2026-08-17 (Tenant Data panel + multi-crop assumption years
++ strict crop matching; earlier same day: lease price methods, timber
+stand map colors, multi-area draw fixes, pivot coverage circles)
 
 ## What this product is
 
@@ -122,7 +123,11 @@ Phase 3 tables (migration 0003; all with org RLS + composite FKs):
   leased_acres (prefilled from GIS acres; contract acres often differ).
   Total leased acres rolls up from these links.
 - lease_year_assumptions: per (lease, year) jsonb for projections (flex
-  bonus estimate; crop share crop/acres/yield/price/shared expenses).
+  bonus estimate; crop share holds a crops ARRAY, one entry per crop
+  grown that year with crop/acres/yield/price/shared expenses plus
+  per-value provenance tags; rows saved in the pre-multi-crop
+  single-crop shape still read via lib/leaseLogic.ts cropAssumptions()
+  and projected rent sums the entries).
 - timber_sales: sale_name, buyer_name (free text) + optional
   buyer_tenant_id, sale_type (lump_sum | pay_as_cut), status, contract
   date, harvest_deadline, performance_deposit, sale_acres, lump_sum_price,
@@ -273,12 +278,48 @@ right source, always reviewed (amber until saved) and never auto-saved:
   farm_marketing_prices (one aggregate number per crop by design:
   price, unit, is_final, as_of) and farm_projected_yields (per shared
   field x crop, basis expected|actual) alongside the normal cron +
-  manual refresh; /farms cards show scope chips. The year row's card
-  labels PROJECTED vs "Tenant's final average price" (settlement
-  nudge), and a "Use tenant's projected yield" helper sits beside the
-  existing post-harvest "Use actual" (actuals win). Scope off / no
+  manual refresh; /farms cards show scope chips. Scope off / no
   connection is a quiet explanatory line, never an error, never an
-  in-app request.
+  in-app request. Served on the lease page by the TENANT DATA PANEL
+  (below), which superseded the old single-crop price card.
+- STRICT CROP MATCHING (lib/crops.ts, unit-tested): tenant crop names
+  and lease assumption crops are entered independently, so every
+  tenant-data lookup keys through canonicalCrop/sameCrop/matchCrop
+  (case-insensitive, trim, singular/plural tolerant, small synonym map:
+  beans=soybeans, maize=corn, winter/spring wheat=wheat, rape/rapeseed=
+  canola, milo/grain sorghum=sorghum, upland cotton=cotton). A card can
+  never render a price whose crop does not match its row (the old card
+  fell back to "any priced crop" and once showed a canola price on a
+  wheat row); rmaConfigForCrop is equally strict once a crop is typed.
+  Unmatchable tenant crops show under their own tenant-named row.
+- MULTI-CROP ASSUMPTION YEARS: a crop share year holds one or more
+  CropAssumption entries (wheat and canola on the same leased ground);
+  the year row renders one sub-row per crop with + Add crop / Remove,
+  and projected rent sums the entries (any started-but-incomplete entry
+  keeps the year Incomplete). Legacy single-crop rows read untouched
+  via cropAssumptions(); saving rewrites in the crops-array shape. No
+  SQL migration (jsonb only). RMA and custom-recipe price cards render
+  per crop entry, keyed to that entry's crop.
+- TENANT DATA PANEL (components/leases/TenantDataPanel.tsx, aggregation
+  in lib/tenantData.ts, unit-tested): sits above the assumption rows on
+  crop share and flex leases with a mapped connection. One row per crop
+  the tenant planted that crop year on this lease's ground (lease_lands
+  resolved through confirmed field_mappings; property-level links cover
+  all mapped fields on the property): crop (with a "not in this year's
+  crops" chip when unmatched), planted acres on leased ground, yield
+  labeled PROJECTED (tenant projected, acre-weighted) or ACTUAL (once
+  harvested; actuals win), avg price with PROJECTED/FINAL badge and
+  as-of date. Scope not granted renders a quiet "Not shared" (tooltip:
+  the farmer controls sharing); crop/acres always work. Reads the local
+  sync cache, shows last-synced, Refresh reuses /api/farm/sync. Fills:
+  "Use all" fills matched crops (or every crop when the year is empty),
+  plus per-row and per-cell Use buttons; every filled value lands amber
+  and saves only when the row is saved. NO SILENT OVERWRITE: Use all
+  never replaces a saved value; conflicting cells show "saved X" with
+  an explicit Use. Hand edits after a fill always win. PROVENANCE:
+  tenant-filled values save a source tag (tenant projected / tenant
+  final / tenant actual, with as-of date) shown subtly under the crop
+  sub-row; hand-editing a value clears its tag.
 - rma_benchmark: lib/rma.ts implements grain-tracker/docs/RMA_PRICING.md
   and was live-verified 2026-08-17 (Alabama corn 2026: projected $4.42
   Released in the Jan 15-Feb 14 window, harvest In Discovery Aug 1-31
@@ -310,8 +351,12 @@ right source, always reviewed (amber until saved) and never auto-saved:
 - Unit tests: priceExpression (precedence, malformed, division by
   zero), rma (fixture parse, shadowing, conversions, staleness,
   formula resolution with mixed statuses), leasePricing (tenant card
-  states projected/final/scope-off, acre-weighted projected yields,
-  config resolution).
+  states, strict no-cross-crop rule, final-then-freshest preference,
+  config resolution), crops (normalization, synonyms, no-confident-
+  match), tenantData (leased-ground acres aggregation, strict crop
+  keying, actual-over-projected, acre weighting, scope-off cells,
+  unmatched crops), leaseLogic (multi-crop rent summing, legacy
+  single-crop reads, incomplete-entry rule).
 
 Timber Scan (migration 0011 + /api/timber-scan + /timber-scan/[id]):
 
@@ -721,11 +766,11 @@ Functions and views:
     status, yield when shared.
   - Dashboard: harvest progress card during harvest (acres harvested of
     acres planted with a progress bar, linking to /farm-activity).
-  - /leases/[id]: crop share assumption rows show a one-click "Use
-    actual" button when connected farm data has a harvested yield for
-    that year on the leased land (weighted average over the dominant
-    crop), clearly labeled as coming from farm data; the user still
-    reviews and saves.
+  - /leases/[id]: the Tenant Data panel (described under lease price
+    methods above) shows per-crop planted acres, yields (PROJECTED or
+    ACTUAL), and prices (PROJECTED or FINAL) from connected farm data
+    for the leased land, with Use buttons that fill the assumption
+    rows amber; the user still reviews and saves.
 
 ## Conventions
 

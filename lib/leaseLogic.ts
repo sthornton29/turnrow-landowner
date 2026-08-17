@@ -85,16 +85,75 @@ export interface SchedulePayment {
   amount?: number | null;
 }
 
-// Per-year user-entered projection assumptions (lease_year_assumptions.data)
-export interface YearAssumptions {
-  // flex
-  bonus_estimate?: number | null;
-  // crop_share
+// Where an assumption value came from, when it was filled from tenant
+// data (the Tenant Data panel). Hand-entered values carry no source.
+export type ValueSourceKind = "tenant_projected" | "tenant_final" | "tenant_actual";
+export interface ValueSource {
+  kind: ValueSourceKind;
+  as_of: string | null; // ISO date/timestamp the tenant number was as of
+}
+
+export const VALUE_SOURCE_LABELS: Record<ValueSourceKind, string> = {
+  tenant_projected: "tenant projected",
+  tenant_final: "tenant final",
+  tenant_actual: "tenant actual",
+};
+
+// One crop's projection inputs within a lease year. A crop share year
+// holds one or more of these (wheat and canola on the same leased ground
+// in the same year); projected rent sums them.
+export interface CropAssumption {
   crop?: string | null;
   acres?: number | null;
   expected_yield?: number | null;
   expected_price?: number | null;
   expected_shared_expenses?: number | null; // landowner's share, dollars
+  sources?: {
+    acres?: ValueSource | null;
+    expected_yield?: ValueSource | null;
+    expected_price?: ValueSource | null;
+  } | null;
+}
+
+// Per-year user-entered projection assumptions (lease_year_assumptions.data)
+export interface YearAssumptions {
+  // flex
+  bonus_estimate?: number | null;
+  // crop_share, multi-crop shape. Rows saved before this existed carry
+  // the single-crop fields below instead; cropAssumptions() reads both.
+  crops?: CropAssumption[] | null;
+  // legacy single-crop fields (still readable, no longer written)
+  crop?: string | null;
+  acres?: number | null;
+  expected_yield?: number | null;
+  expected_price?: number | null;
+  expected_shared_expenses?: number | null;
+}
+
+// The year's crop entries, whichever shape the row was saved in.
+export function cropAssumptions(
+  a: YearAssumptions | null | undefined
+): CropAssumption[] {
+  if (!a) return [];
+  if (a.crops && a.crops.length > 0) return a.crops;
+  if (
+    a.crop ||
+    a.acres != null ||
+    a.expected_yield != null ||
+    a.expected_price != null ||
+    a.expected_shared_expenses != null
+  ) {
+    return [
+      {
+        crop: a.crop ?? null,
+        acres: a.acres ?? null,
+        expected_yield: a.expected_yield ?? null,
+        expected_price: a.expected_price ?? null,
+        expected_shared_expenses: a.expected_shared_expenses ?? null,
+      },
+    ];
+  }
+  return [];
 }
 
 export interface LeaseLike {
@@ -131,13 +190,19 @@ export function annualRent(
       return t.base_rate_per_acre * totalLeasedAcres + (assumptions?.bonus_estimate ?? 0);
     }
     case "crop_share": {
-      const a = assumptions ?? {};
-      if (!a.acres || !a.expected_yield || !a.expected_price || !t.landowner_share_pct) {
-        return null;
+      // Sum over the year's crop entries; any started-but-incomplete
+      // entry keeps the whole year Incomplete (never understate).
+      const entries = cropAssumptions(assumptions);
+      if (entries.length === 0 || !t.landowner_share_pct) return null;
+      let total = 0;
+      for (const e of entries) {
+        if (!e.acres || !e.expected_yield || !e.expected_price) return null;
+        const gross =
+          e.acres * e.expected_yield * e.expected_price * (t.landowner_share_pct / 100);
+        const expenses = t.shares_expenses ? (e.expected_shared_expenses ?? 0) : 0;
+        total += gross - expenses;
       }
-      const gross = a.acres * a.expected_yield * a.expected_price * (t.landowner_share_pct / 100);
-      const expenses = t.shares_expenses ? (a.expected_shared_expenses ?? 0) : 0;
-      return gross - expenses;
+      return total;
     }
     default:
       return null;

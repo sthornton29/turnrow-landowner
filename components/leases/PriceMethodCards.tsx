@@ -44,10 +44,17 @@ export function TenantPriceCardView({
       </p>
     );
   }
+  if (card.state === "no_crop") {
+    return (
+      <p className="text-xs text-gray-500">
+        Enter the crop first; prices are matched strictly by crop.
+      </p>
+    );
+  }
   if (card.state === "no_price") {
     return (
       <p className="text-xs text-gray-500">
-        Your farmer has not set a projected price for this crop year yet.
+        Your farmer has not set a projected price for this crop yet.
       </p>
     );
   }

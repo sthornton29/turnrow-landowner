@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { formatAcres, formatDollars } from "@/lib/format";
 import {
   LEASE_STATUS_LABELS,
+  VALUE_SOURCE_LABELS,
   annualRent,
+  cropAssumptions,
   generateLeasePayments,
   insuranceProblem,
+  type CropAssumption,
   type LeaseStatus,
   type LeaseTerms,
   type LeaseType,
@@ -20,35 +23,23 @@ import {
 import LeaseForm from "@/components/leases/LeaseForm";
 import PaymentsSection from "@/components/payments/PaymentsSection";
 import EntityDocuments from "@/components/documents/EntityDocuments";
+import type { FarmFieldDataRow, FieldMappingRow } from "@/lib/farmDisplay";
 import {
-  yieldUnitLabel,
-  type FarmFieldDataRow,
-  type FieldMappingRow,
-} from "@/lib/farmDisplay";
-import {
-  projectedYieldForYear,
   rmaConfigForCrop,
   tenantPriceCard,
   type ProjectedYieldRow,
   type TenantPriceCard,
   type TenantPriceRow,
 } from "@/lib/leasePricing";
+import { matchCrop } from "@/lib/crops";
+import { buildTenantCropRows, type TenantCropRow } from "@/lib/tenantData";
+import TenantDataPanel, { type PanelFill } from "@/components/leases/TenantDataPanel";
 import {
   RecipeComputeCard,
   RecipeEditor,
   RmaBenchmarkCard,
-  TenantPriceCardView,
 } from "@/components/leases/PriceMethodCards";
 import type { PriceMethod, PriceRecipe, RmaBenchmarkConfig } from "@/lib/leaseLogic";
-
-// Actual yield from a farm connection, offered as a one-click prefill for
-// crop share projection assumptions (user still reviews and saves).
-export interface FarmActual {
-  crop: string;
-  yieldPerAcre: number;
-  unitLabel: string;
-  source: string;
-}
 
 interface LeaseRow {
   id: string;
@@ -108,7 +99,12 @@ export default function LeaseDetail({
   const [farmMappings, setFarmMappings] = useState<FieldMappingRow[]>([]);
   const [farmData, setFarmData] = useState<FarmFieldDataRow[]>([]);
   const [farmConnections, setFarmConnections] = useState<
-    Array<{ id: string; label: string; scopes: Record<string, boolean> | null }>
+    Array<{
+      id: string;
+      label: string;
+      scopes: Record<string, boolean> | null;
+      last_synced_at: string | null;
+    }>
   >([]);
   const [marketingPrices, setMarketingPrices] = useState<TenantPriceRow[]>([]);
   const [projectedYields, setProjectedYields] = useState<ProjectedYieldRow[]>([]);
@@ -127,7 +123,7 @@ export default function LeaseDetail({
         ? supabase.from("farm_field_data").select("*")
         : Promise.resolve({ data: [] }),
       wantsFarm
-        ? supabase.from("farm_connections").select("id, label, scopes")
+        ? supabase.from("farm_connections").select("id, label, scopes, last_synced_at")
         : Promise.resolve({ data: [] }),
       wantsFarm
         ? supabase.from("farm_marketing_prices").select("*")
@@ -141,8 +137,12 @@ export default function LeaseDetail({
     setFarmMappings((fm.data as FieldMappingRow[]) ?? []);
     setFarmData((fd.data as FarmFieldDataRow[]) ?? []);
     setFarmConnections(
-      (fc.data as Array<{ id: string; label: string; scopes: Record<string, boolean> | null }>) ??
-        []
+      (fc.data as Array<{
+        id: string;
+        label: string;
+        scopes: Record<string, boolean> | null;
+        last_synced_at: string | null;
+      }>) ?? []
     );
     setMarketingPrices((mp.data as TenantPriceRow[]) ?? []);
     setProjectedYields((py.data as ProjectedYieldRow[]) ?? []);
@@ -219,65 +219,102 @@ export default function LeaseDetail({
       ),
     [farmConnections]
   );
-  const yieldScopedKeys = useMemo(() => {
-    const scoped = new Set(
-      farmConnections.filter((c) => c.scopes?.projected_yields).map((c) => c.id)
-    );
-    return new Set(
-      Array.from(relevantFarm.keys).filter((k) => scoped.has(k.split("|")[0]))
-    );
-  }, [farmConnections, relevantFarm]);
+  const yieldsScope = useMemo(
+    () => new Set(farmConnections.filter((c) => c.scopes?.yields).map((c) => c.id)),
+    [farmConnections]
+  );
+  const projectedYieldScope = useMemo(
+    () =>
+      new Set(
+        farmConnections.filter((c) => c.scopes?.projected_yields).map((c) => c.id)
+      ),
+    [farmConnections]
+  );
 
-  // Actual harvested yields from farm connections, per year, restricted to the
-  // land this lease covers. Weighted average over the dominant crop's fields.
-  const farmActualByYear = useMemo(() => {
-    const result = new Map<number, FarmActual>();
-    if (lands.length === 0 || farmMappings.length === 0 || farmData.length === 0) {
-      return result;
+  // Last-saved crop entries per year (the overwrite guard compares
+  // tenant values against these, never against unsaved edits).
+  const savedEntriesByYear = useMemo(
+    () =>
+      new Map(years.map((y) => [y, cropAssumptions(assumptionsByYear.get(y))])),
+    [years, assumptionsByYear]
+  );
+
+  // Tenant Data panel rows: per year, one row per crop the tenant
+  // planted on this lease's mapped ground. Strictly crop-keyed.
+  const tenantRowsByYear = useMemo(() => {
+    const map = new Map<number, TenantCropRow[]>();
+    if (relevantFarm.connectionIds.length === 0) return map;
+    for (const year of years) {
+      map.set(
+        year,
+        buildTenantCropRows({
+          farmData,
+          projectedYields,
+          prices: marketingPrices,
+          relevantKeys: relevantFarm.keys,
+          relevantConnectionIds: relevantFarm.connectionIds,
+          yieldsScope,
+          projectedYieldScope,
+          priceScope: priceScopedConnections,
+          year,
+          leaseCrops: (savedEntriesByYear.get(year) ?? []).map((e) => e.crop ?? null),
+        })
+      );
     }
-    const leasedFieldIds = new Set(lands.map((l) => l.field_id).filter(Boolean));
-    const wholePropertyIds = new Set(
-      lands.filter((l) => !l.field_id).map((l) => l.property_id)
-    );
-    const relevant = new Set<string>();
-    for (const m of farmMappings) {
-      const mappedField = m.local_field_id ? fieldById.get(m.local_field_id) : null;
-      const onLease =
-        (m.local_field_id && leasedFieldIds.has(m.local_field_id)) ||
-        (mappedField && wholePropertyIds.has(mappedField.property_id)) ||
-        (m.local_property_id && wholePropertyIds.has(m.local_property_id));
-      if (onLease) relevant.add(`${m.farm_connection_id}|${m.remote_field_id}`);
+    return map;
+  }, [
+    years,
+    relevantFarm,
+    farmData,
+    projectedYields,
+    marketingPrices,
+    yieldsScope,
+    projectedYieldScope,
+    priceScopedConnections,
+    savedEntriesByYear,
+  ]);
+
+  // Panel Use actions push fills into the matching year's row editor;
+  // values land amber for review there and save with the row as usual.
+  const fillNonceRef = useRef(0);
+  const [fillSignal, setFillSignal] = useState<{
+    year: number;
+    fills: PanelFill[];
+    force: boolean;
+    nonce: number;
+  } | null>(null);
+  function handlePanelFill(year: number, fills: PanelFill[], force: boolean) {
+    fillNonceRef.current += 1;
+    setFillSignal({ year, fills, force, nonce: fillNonceRef.current });
+  }
+
+  const [refreshingFarm, setRefreshingFarm] = useState(false);
+  async function refreshFarm() {
+    setRefreshingFarm(true);
+    try {
+      await Promise.all(
+        relevantFarm.connectionIds.map((id) =>
+          fetch("/api/farm/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ connection_id: id }),
+          })
+        )
+      );
+    } finally {
+      setRefreshingFarm(false);
+      load();
     }
-    const connectionLabel = new Map(farmConnections.map((c) => [c.id, c.label]));
-    const byYear = new Map<number, FarmFieldDataRow[]>();
-    for (const d of farmData) {
-      if (!relevant.has(`${d.farm_connection_id}|${d.remote_field_id}`)) continue;
-      if (d.production_units === null || !d.harvested_acres) continue;
-      byYear.set(d.crop_year, [...(byYear.get(d.crop_year) ?? []), d]);
-    }
-    for (const [year, rows] of byYear) {
-      // Pick the crop covering the most harvested acres, then average its yield
-      const acresByCrop = new Map<string, number>();
-      for (const r of rows) {
-        const crop = r.crop || "Unknown";
-        acresByCrop.set(crop, (acresByCrop.get(crop) ?? 0) + (r.harvested_acres ?? 0));
-      }
-      const topCrop = Array.from(acresByCrop.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
-      if (!topCrop) continue;
-      const cropRows = rows.filter((r) => (r.crop || "Unknown") === topCrop);
-      const units = cropRows.reduce((s, r) => s + (r.production_units ?? 0), 0);
-      const acres = cropRows.reduce((s, r) => s + (r.harvested_acres ?? 0), 0);
-      if (!acres || !units) continue;
-      result.set(year, {
-        crop: topCrop,
-        yieldPerAcre: Math.round((units / acres) * 10) / 10,
-        unitLabel: yieldUnitLabel(cropRows[0].production_unit),
-        source:
-          connectionLabel.get(cropRows[0].farm_connection_id) ?? "your farm connection",
-      });
-    }
-    return result;
-  }, [lands, farmMappings, farmData, farmConnections, fieldById]);
+  }
+
+  const relevantConnections = farmConnections.filter((c) =>
+    relevantFarm.connectionIds.includes(c.id)
+  );
+  const farmLastSynced = relevantConnections
+    .map((c) => c.last_synced_at)
+    .filter(Boolean)
+    .sort()
+    .pop() ?? null;
 
   // ------------------------------------------------------------- land links
 
@@ -569,6 +606,24 @@ export default function LeaseDetail({
               ) : null}
             </div>
           ) : null}
+          {relevantFarm.connectionIds.length > 0 ? (
+            <TenantDataPanel
+              yearBlocks={years.map((year) => ({
+                year,
+                rows: tenantRowsByYear.get(year) ?? [],
+              }))}
+              connectionLabel={
+                relevantConnections.map((c) => c.label).join(", ") ||
+                "your farm connection"
+              }
+              lastSyncedAt={farmLastSynced}
+              canUse={lease.rent_structure === "crop_share"}
+              savedEntriesByYear={savedEntriesByYear}
+              onFill={handlePanelFill}
+              onRefresh={refreshFarm}
+              refreshing={refreshingFarm}
+            />
+          ) : null}
           <div className="space-y-2">
             {years.map((year) => {
               const a = assumptionsByYear.get(year) ?? {};
@@ -580,22 +635,23 @@ export default function LeaseDetail({
                   structure={lease.rent_structure!}
                   value={a}
                   projected={projected}
-                  farmActual={farmActualByYear.get(year) ?? null}
                   priceMethod={priceMethod}
-                  tenantCard={tenantPriceCard(
-                    relevantFarm.connectionIds,
-                    priceScopedConnections,
-                    marketingPrices,
-                    year,
-                    a.crop ?? null
-                  )}
-                  projectedYield={projectedYieldForYear(
-                    projectedYields,
-                    yieldScopedKeys,
-                    year
-                  )}
-                  rmaConfig={rmaConfigForCrop(lease.terms?.rma_config, a.crop ?? null)}
+                  tenantCardFor={(crop) =>
+                    tenantPriceCard(
+                      relevantFarm.connectionIds,
+                      priceScopedConnections,
+                      marketingPrices,
+                      year,
+                      crop
+                    )
+                  }
+                  rmaConfigFor={(crop) =>
+                    rmaConfigForCrop(lease.terms?.rma_config, crop)
+                  }
                   recipe={lease.terms?.custom_recipe ?? null}
+                  fillSignal={
+                    fillSignal && fillSignal.year === year ? fillSignal : null
+                  }
                   onSave={(data) => saveAssumption(year, data)}
                 />
               );
@@ -629,205 +685,366 @@ export default function LeaseDetail({
   );
 }
 
+const VALUE_FIELDS = ["acres", "expected_yield", "expected_price"] as const;
+type ValueField = (typeof VALUE_FIELDS)[number];
+
+function cloneEntry(e: CropAssumption): CropAssumption {
+  return { ...e, sources: e.sources ? { ...e.sources } : undefined };
+}
+
+function entryHasContent(e: CropAssumption): boolean {
+  return Boolean(
+    e.crop ||
+      e.acres != null ||
+      e.expected_yield != null ||
+      e.expected_price != null ||
+      e.expected_shared_expenses != null
+  );
+}
+
+// Subtle provenance line for tenant-filled values: which cells came from
+// tenant data, projected vs final vs actual, and as of when.
+function sourceTagLine(e: CropAssumption): string | null {
+  const names: Record<ValueField, string> = {
+    acres: "acres",
+    expected_yield: "yield",
+    expected_price: "price",
+  };
+  const parts: string[] = [];
+  for (const field of VALUE_FIELDS) {
+    const s = e.sources?.[field];
+    if (s && e[field] != null) {
+      parts.push(
+        `${names[field]}: ${VALUE_SOURCE_LABELS[s.kind]}` +
+          (s.as_of ? ` as of ${new Date(s.as_of).toLocaleDateString()}` : "")
+      );
+    }
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function AssumptionRowEditor({
   year,
   structure,
   value,
   projected,
-  farmActual = null,
   priceMethod = "manual",
-  tenantCard,
-  projectedYield = null,
-  rmaConfig = null,
+  tenantCardFor,
+  rmaConfigFor,
   recipe = null,
+  fillSignal = null,
   onSave,
 }: {
   year: number;
   structure: "flex" | "crop_share" | "cash";
   value: YearAssumptions;
   projected: number | null;
-  farmActual?: FarmActual | null;
   priceMethod?: PriceMethod;
-  tenantCard: TenantPriceCard;
-  projectedYield?: { crop: string; yieldPerAcre: number; unit: string | null } | null;
-  rmaConfig?: RmaBenchmarkConfig | null;
+  tenantCardFor: (crop: string | null) => TenantPriceCard;
+  rmaConfigFor: (crop: string | null) => RmaBenchmarkConfig | null;
   recipe?: PriceRecipe | null;
+  fillSignal?: { fills: PanelFill[]; force: boolean; nonce: number } | null;
   onSave: (data: YearAssumptions) => void;
 }) {
-  const [data, setData] = useState<YearAssumptions>(value);
+  const [bonus, setBonus] = useState<number | null>(value.bonus_estimate ?? null);
+  const [entries, setEntries] = useState<CropAssumption[]>(() => {
+    const list = cropAssumptions(value).map(cloneEntry);
+    return list.length > 0 ? list : [{}];
+  });
   const [dirty, setDirty] = useState(false);
   // Inputs filled by a helper stay amber until saved (or hand-edited).
+  // Keys are `${entryIndex}:${field}`.
   const [amberKeys, setAmberKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setData(value);
+    setBonus(value.bonus_estimate ?? null);
+    const list = cropAssumptions(value).map(cloneEntry);
+    setEntries(list.length > 0 ? list : [{}]);
     setDirty(false);
     setAmberKeys(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(value)]);
 
-  function set<K extends keyof YearAssumptions>(key: K, v: YearAssumptions[K]) {
-    setData((d) => ({ ...d, [key]: v }));
+  // Apply fills pushed from the Tenant Data panel: find (or create) the
+  // entry for each fill's crop, fill the values amber, and record their
+  // provenance. Without force, a value the user already SAVED is never
+  // replaced (the panel shows the saved-vs-tenant chip for those).
+  const savedEntries = useMemo(
+    () => cropAssumptions(value),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(value)]
+  );
+  useEffect(() => {
+    if (!fillSignal) return;
+    const next = entries.map(cloneEntry);
+    const newAmber: string[] = [];
+    for (const fill of fillSignal.fills) {
+      let i = next.findIndex((e) => matchCrop(fill.crop, [e.crop]) !== null);
+      if (i === -1) i = next.findIndex((e) => !entryHasContent(e));
+      if (i === -1) {
+        next.push({});
+        i = next.length - 1;
+      }
+      if (!next[i].crop) next[i] = { ...next[i], crop: fill.crop };
+      const savedMatch =
+        savedEntries.find((e) => matchCrop(fill.crop, [e.crop]) !== null) ?? null;
+      for (const field of VALUE_FIELDS) {
+        const v = fill.values[field];
+        if (v === undefined || v === null) continue;
+        const savedVal = savedMatch?.[field];
+        if (!fillSignal.force && savedVal != null && savedVal !== v) continue;
+        next[i] = {
+          ...next[i],
+          [field]: v,
+          sources: { ...(next[i].sources ?? {}), [field]: fill.sources[field] ?? null },
+        };
+        newAmber.push(`${i}:${field}`);
+      }
+    }
+    if (newAmber.length > 0) {
+      setEntries(next);
+      setAmberKeys((keys) => new Set([...keys, ...newAmber]));
+      setDirty(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fillSignal?.nonce]);
+
+  function setEntry(i: number, field: keyof CropAssumption, v: unknown) {
+    setEntries((es) =>
+      es.map((e, j) => {
+        if (j !== i) return e;
+        const next = { ...e, [field]: v } as CropAssumption;
+        // A hand edit keeps the edit and drops the tenant provenance.
+        if (field !== "crop" && next.sources) {
+          next.sources = { ...next.sources, [field as ValueField]: null };
+        }
+        return next;
+      })
+    );
     setDirty(true);
     setAmberKeys((keys) => {
       const next = new Set(keys);
-      next.delete(key as string);
+      next.delete(`${i}:${String(field)}`);
       return next;
     });
   }
-  function fillFromHelper(patch: Partial<YearAssumptions>) {
-    setData((d) => ({ ...d, ...patch }));
+
+  function fillPrice(i: number, price: number) {
+    setEntries((es) =>
+      es.map((e, j) =>
+        j === i
+          ? {
+              ...e,
+              expected_price: price,
+              sources: { ...(e.sources ?? {}), expected_price: null },
+            }
+          : e
+      )
+    );
     setDirty(true);
-    setAmberKeys((keys) => new Set([...keys, ...Object.keys(patch)]));
+    setAmberKeys((keys) => new Set([...keys, `${i}:expected_price`]));
   }
+
+  function save() {
+    if (structure === "flex") {
+      onSave({ bonus_estimate: bonus });
+    } else {
+      const crops = entries.filter(entryHasContent).map((e) => {
+        const sources: NonNullable<CropAssumption["sources"]> = {};
+        for (const field of VALUE_FIELDS) {
+          const s = e.sources?.[field];
+          if (s && e[field] != null) sources[field] = s;
+        }
+        return {
+          crop: e.crop ?? null,
+          acres: e.acres ?? null,
+          expected_yield: e.expected_yield ?? null,
+          expected_price: e.expected_price ?? null,
+          expected_shared_expenses: e.expected_shared_expenses ?? null,
+          ...(Object.keys(sources).length > 0 ? { sources } : {}),
+        };
+      });
+      onSave({ crops });
+    }
+    setDirty(false);
+  }
+
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
   const amber = (key: string) =>
     amberKeys.has(key) ? " border-amber-400 bg-amber-50" : " border-gray-300";
 
-  // The price helper card for this year, driven by the lease's method.
-  // Crop share rows get a Use button targeting expected_price; flex rows
-  // show the card as a reference beside the bonus estimate.
-  const usePrice =
-    structure === "crop_share"
-      ? (price: number) => fillFromHelper({ expected_price: price })
-      : undefined;
-  const priceHelper =
-    priceMethod === "tenant_average" ? (
-      <TenantPriceCardView card={tenantCard} onUse={usePrice} />
-    ) : priceMethod === "rma_benchmark" ? (
-      rmaConfig ? (
-        <RmaBenchmarkCard config={rmaConfig} year={year} onUse={usePrice} />
+  // Price helper per crop entry, driven by the lease's method. The
+  // tenant_average method is served by the Tenant Data panel above, so
+  // rows carry no card for it.
+  const helperFor = (i: number) => {
+    const e = entries[i];
+    const usePrice =
+      structure === "crop_share" ? (price: number) => fillPrice(i, price) : undefined;
+    if (priceMethod === "rma_benchmark") {
+      const config = rmaConfigFor(e.crop ?? null);
+      return config ? (
+        <RmaBenchmarkCard config={config} year={year} onUse={usePrice} />
       ) : (
         <p className="text-xs text-gray-500">
-          Add a crop benchmark (state and formula) in the lease terms first.
+          {e.crop
+            ? `Add a ${e.crop} benchmark (state and formula) in the lease terms first.`
+            : "Add a crop benchmark (state and formula) in the lease terms first."}
         </p>
-      )
-    ) : priceMethod === "custom" ? (
-      recipe ? (
+      );
+    }
+    if (priceMethod === "custom") {
+      return recipe ? (
         <RecipeComputeCard
           recipe={recipe}
           year={year}
-          crop={data.crop ?? null}
-          rmaState={rmaConfig?.state ?? "AL"}
-          tenantCard={tenantCard}
+          crop={e.crop ?? null}
+          rmaState={rmaConfigFor(e.crop ?? null)?.state ?? "AL"}
+          tenantCard={tenantCardFor(e.crop ?? null)}
           onUse={usePrice}
         />
       ) : (
         <p className="text-xs text-gray-500">Set up the pricing recipe above first.</p>
-      )
-    ) : null;
+      );
+    }
+    return null;
+  };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
-      <span className="w-12 font-medium text-gray-900">{year}</span>
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
       {structure === "flex" ? (
-        <>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-12 font-medium text-gray-900">{year}</span>
           <label className="flex items-center gap-1 text-sm text-gray-600">
             Bonus estimate $
             <input
               type="number"
               step="0.01"
-              value={data.bonus_estimate ?? ""}
-              onChange={(e) => set("bonus_estimate", num(e.target.value))}
+              value={bonus ?? ""}
+              onChange={(e) => {
+                setBonus(num(e.target.value));
+                setDirty(true);
+              }}
               className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm"
             />
           </label>
-          {priceHelper ? (
-            <div className="w-full basis-full">{priceHelper}</div>
+          {helperFor(0) ? <div className="w-full basis-full">{helperFor(0)}</div> : null}
+          <span className="ml-auto text-sm text-gray-500">
+            {projected !== null ? `Projected: ${formatDollars(projected)}` : "Incomplete"}
+          </span>
+          {dirty ? (
+            <button
+              onClick={save}
+              className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+            >
+              Save
+            </button>
           ) : null}
-        </>
+        </div>
       ) : (
-        <>
-          <input
-            value={data.crop ?? ""}
-            onChange={(e) => set("crop", e.target.value || null)}
-            placeholder="Crop"
-            className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-sm"
-          />
-          <input
-            type="number"
-            step="0.1"
-            value={data.acres ?? ""}
-            onChange={(e) => set("acres", num(e.target.value))}
-            placeholder="Acres"
-            className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm"
-          />
-          <input
-            type="number"
-            step="0.1"
-            value={data.expected_yield ?? ""}
-            onChange={(e) => set("expected_yield", num(e.target.value))}
-            placeholder="Yield/ac"
-            className={"w-20 rounded-lg border px-2 py-1 text-sm" + amber("expected_yield")}
-          />
-          <input
-            type="number"
-            step="0.01"
-            value={data.expected_price ?? ""}
-            onChange={(e) => set("expected_price", num(e.target.value))}
-            placeholder="Price"
-            className={"w-20 rounded-lg border px-2 py-1 text-sm" + amber("expected_price")}
-          />
-          <input
-            type="number"
-            step="0.01"
-            value={data.expected_shared_expenses ?? ""}
-            onChange={(e) => set("expected_shared_expenses", num(e.target.value))}
-            placeholder="Shared exp $"
-            className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm"
-          />
-          {farmActual && data.expected_yield !== farmActual.yieldPerAcre ? (
+        <div className="space-y-1.5">
+          {entries.map((e, i) => {
+            const tagLine = sourceTagLine(e);
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <span className="w-12 font-medium text-gray-900">
+                  {i === 0 ? year : ""}
+                </span>
+                <input
+                  value={e.crop ?? ""}
+                  onChange={(ev) => setEntry(i, "crop", ev.target.value || null)}
+                  placeholder="Crop"
+                  className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-sm"
+                />
+                <input
+                  type="number"
+                  step="0.1"
+                  value={e.acres ?? ""}
+                  onChange={(ev) => setEntry(i, "acres", num(ev.target.value))}
+                  placeholder="Acres"
+                  className={"w-20 rounded-lg border px-2 py-1 text-sm" + amber(`${i}:acres`)}
+                />
+                <input
+                  type="number"
+                  step="0.1"
+                  value={e.expected_yield ?? ""}
+                  onChange={(ev) => setEntry(i, "expected_yield", num(ev.target.value))}
+                  placeholder="Yield/ac"
+                  className={
+                    "w-20 rounded-lg border px-2 py-1 text-sm" + amber(`${i}:expected_yield`)
+                  }
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={e.expected_price ?? ""}
+                  onChange={(ev) => setEntry(i, "expected_price", num(ev.target.value))}
+                  placeholder="Price"
+                  className={
+                    "w-20 rounded-lg border px-2 py-1 text-sm" + amber(`${i}:expected_price`)
+                  }
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={e.expected_shared_expenses ?? ""}
+                  onChange={(ev) =>
+                    setEntry(i, "expected_shared_expenses", num(ev.target.value))
+                  }
+                  placeholder="Shared exp $"
+                  className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm"
+                />
+                {entries.length > 1 || entryHasContent(e) ? (
+                  <button
+                    onClick={() => {
+                      setEntries((es) =>
+                        es.length > 1 ? es.filter((_, j) => j !== i) : [{}]
+                      );
+                      setDirty(true);
+                      setAmberKeys(new Set());
+                    }}
+                    className="text-xs font-medium text-red-600 hover:underline"
+                    title="Remove this crop from the year"
+                  >
+                    Remove
+                  </button>
+                ) : null}
+                {tagLine ? (
+                  <span className="w-full basis-full pl-14 text-[11px] text-gray-500">
+                    {tagLine}
+                  </span>
+                ) : null}
+                {helperFor(i) ? (
+                  <div className="w-full basis-full pl-14">{helperFor(i)}</div>
+                ) : null}
+              </div>
+            );
+          })}
+          <div className="flex flex-wrap items-center gap-2 pl-14">
             <button
-              onClick={() =>
-                fillFromHelper({
-                  crop: data.crop || farmActual.crop,
-                  expected_yield: farmActual.yieldPerAcre,
-                })
-              }
-              title={`Actual yield from ${farmActual.source}`}
-              className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-50"
+              onClick={() => {
+                setEntries((es) => [...es, {}]);
+                setDirty(true);
+              }}
+              className="text-xs font-medium text-kelly-700 hover:underline"
             >
-              Use actual: {formatNumber(farmActual.yieldPerAcre)} {farmActual.unitLabel} (
-              {farmActual.crop}, from farm data)
+              + Add crop
             </button>
-          ) : null}
-          {!farmActual &&
-          projectedYield &&
-          data.expected_yield !== projectedYield.yieldPerAcre ? (
-            // Pre-harvest only; the post-harvest Use actual wins above.
-            <button
-              onClick={() =>
-                fillFromHelper({
-                  crop: data.crop || projectedYield.crop,
-                  expected_yield: projectedYield.yieldPerAcre,
-                })
-              }
-              title="Your tenant's projected yield for this land"
-              className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-50"
-            >
-              Use tenant{"'"}s projected yield:{" "}
-              {formatNumber(projectedYield.yieldPerAcre)} ({projectedYield.crop})
-            </button>
-          ) : null}
-          {priceHelper ? (
-            <div className="w-full basis-full">{priceHelper}</div>
-          ) : null}
-        </>
+            <span className="ml-auto text-sm text-gray-500">
+              {projected !== null
+                ? `Projected: ${formatDollars(projected)}`
+                : "Incomplete"}
+            </span>
+            {dirty ? (
+              <button
+                onClick={save}
+                className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+              >
+                Save
+              </button>
+            ) : null}
+          </div>
+        </div>
       )}
-      <span className="ml-auto text-sm text-gray-500">
-        {projected !== null ? `Projected: ${formatDollars(projected)}` : "Incomplete"}
-      </span>
-      {dirty ? (
-        <button
-          onClick={() => {
-            onSave(data);
-            setDirty(false);
-          }}
-          className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
-        >
-          Save
-        </button>
-      ) : null}
     </div>
   );
 }
