@@ -126,8 +126,21 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     if (a.estimated_value !== null) {
       rows.push(["Est. value", formatDollars(a.estimated_value)]);
     }
+    // Coverage circle summary for pivots (the raw parameters are
+    // map-managed and skipped below).
+    if (a.asset_type === "irrigation_pivot" && a.details?.center_lon != null) {
+      const full = a.details.full_circle !== false;
+      const start = Number(a.details.start_bearing_deg);
+      const end = Number(a.details.end_bearing_deg);
+      const sweep =
+        !full && Number.isFinite(start) && Number.isFinite(end)
+          ? Math.round((((end - start) % 360) + 360) % 360) || 360
+          : null;
+      rows.push(["Coverage", full ? "Full circle" : `${sweep}° sweep`]);
+    }
     // Type-specific details, labeled from the config
     for (const f of ASSET_TYPES[a.asset_type]?.fields ?? []) {
+      if (f.mapManaged) continue;
       const v = a.details?.[f.key];
       if (v === null || v === undefined || v === "") continue;
       let text: string;
@@ -181,6 +194,7 @@ export default function FeaturePanel({
   onClose,
   onEditGeometry,
   onSplit,
+  onPivotCircle,
   onChanged,
 }: {
   entityType: EntityType;
@@ -191,6 +205,7 @@ export default function FeaturePanel({
   onClose: () => void;
   onEditGeometry: () => void;
   onSplit?: () => void; // timber stands: split with a drawn line
+  onPivotCircle?: () => void; // irrigation pivots: parametric coverage circle
   onChanged: () => void;
 }) {
   const supabase = createClient();
@@ -370,12 +385,36 @@ export default function FeaturePanel({
                 Edit details
               </button>
             )}
-            <button
-              onClick={onEditGeometry}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              {geometryButtonLabel}
-            </button>
+            {(() => {
+              const isPivot =
+                entityType === "asset" &&
+                (row as AssetGeo).asset_type === "irrigation_pivot";
+              const hasCircle =
+                isPivot && (row as AssetGeo).details?.center_lon != null;
+              return (
+                <>
+                  {/* Pivot circles are parametric: a 64-vertex circle is
+                      uneditable by hand, so circled pivots get the
+                      editor instead of raw geometry editing. */}
+                  {!hasCircle ? (
+                    <button
+                      onClick={onEditGeometry}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      {geometryButtonLabel}
+                    </button>
+                  ) : null}
+                  {isPivot && onPivotCircle ? (
+                    <button
+                      onClick={onPivotCircle}
+                      className="rounded-lg border border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 hover:bg-sky-50"
+                    >
+                      {hasCircle ? "Edit coverage circle" : "Add coverage circle"}
+                    </button>
+                  ) : null}
+                </>
+              );
+            })()}
             {entityType === "timber_stand" && onSplit ? (
               <button
                 onClick={onSplit}

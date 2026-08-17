@@ -33,6 +33,7 @@ export default function NewBoundaryDialog({
   onCancel,
   onAddArea,
   onCutArea,
+  hidden = false,
 }: {
   approxAcres: number | null;
   properties: PropertyGeo[];
@@ -43,6 +44,12 @@ export default function NewBoundaryDialog({
   onCancel: () => void;
   onAddArea?: () => void; // draw another polygon and merge it in
   onCutArea?: () => void; // draw a polygon and cut it out
+  // Hidden (NOT unmounted) while an extra area is being drawn: the form
+  // state (type, name, property) must survive the whole multi-area
+  // session. Manual regression test: pick Timber, type a name, + Add
+  // area, draw, finish; the dialog returns with Timber and the name
+  // intact.
+  hidden?: boolean;
 }) {
   const [entityType, setEntityType] = useState<BoundaryType>(
     properties.length > 0 ? "field" : "property"
@@ -65,7 +72,12 @@ export default function NewBoundaryDialog({
   }
 
   return (
-    <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:w-80 md:rounded-xl md:border">
+    <div
+      className={
+        "pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:w-80 md:rounded-xl md:border" +
+        (hidden ? " hidden" : "")
+      }
+    >
       <h2 className="text-lg font-semibold text-gray-900">Save boundary</h2>
       {approxAcres !== null ? (
         <p className="mt-0.5 text-sm text-gray-500">

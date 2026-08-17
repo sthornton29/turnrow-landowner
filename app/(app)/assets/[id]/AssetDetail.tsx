@@ -61,7 +61,11 @@ export default function AssetDetail({
         estimated_value: num("estimated_value"),
         parent_asset_id: def.canLinkToWell ? text("parent_asset_id") : null,
         notes: text("notes"),
-        details: cleanDetails(assetType, raw as Record<string, FormDataEntryValue>),
+        details: cleanDetails(
+          assetType,
+          raw as Record<string, FormDataEntryValue>,
+          asset.details ?? {}
+        ),
       })
       .eq("id", asset.id);
 
@@ -223,8 +227,18 @@ export default function AssetDetail({
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
               {def.label} details
             </h2>
+            {asset.asset_type === "irrigation_pivot" &&
+            asset.details?.center_lon != null ? (
+              <p className="mb-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+                This pivot has a coverage circle; its center, radius, and sweep
+                are edited on the map (open the pivot there and choose Edit
+                coverage circle).
+              </p>
+            ) : null}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {def.fields.map((f) => (
+              {def.fields
+                .filter((f) => !f.mapManaged)
+                .map((f) => (
                 <div key={f.key} className={f.input === "boolean" ? "flex items-end" : ""}>
                   {f.input === "boolean" ? (
                     <label className="flex items-center gap-2 pb-2 text-sm font-medium text-gray-700">

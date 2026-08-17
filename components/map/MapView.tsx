@@ -14,6 +14,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 
 import { createClient } from "@/lib/supabase/client";
+import { formatAcres } from "@/lib/format";
 import {
   approxAcres,
   bboxOf,
@@ -21,9 +22,19 @@ import {
   toMultiLineString,
   toMultiPolygon,
 } from "@/lib/geo/normalize";
-import { ASSET_TYPES } from "@/lib/assetTypes";
+import { ASSET_TYPES, STAND_TYPE_COLORS, STAND_TYPE_LABELS } from "@/lib/assetTypes";
 import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
+import {
+  bearingTo,
+  destination as pivotDestination,
+  distanceFt,
+  paramsFromDetails,
+  pivotPolygon,
+  snapEndBearing,
+  sweepDegrees,
+  type PivotParams,
+} from "@/lib/geo/pivot";
 import turfBuffer from "@turf/buffer";
 import turfDifference from "@turf/difference";
 import turfUnion from "@turf/union";
@@ -85,8 +96,35 @@ function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection 
     if (entityType === "asset") {
       const a = row as AssetGeo;
       props.letter = ASSET_TYPES[a.asset_type]?.letter ?? "A";
+      props.assetType = a.asset_type;
+    }
+    if (entityType === "timber_stand") {
+      props.standType = (row as TimberStandGeo).stand_type ?? "other";
     }
     features.push({ type: "Feature", geometry: g, properties: props });
+    // Pivot coverage circles keep their P marker at the center for
+    // low-zoom recognition (clickable like the polygon).
+    if (entityType === "asset") {
+      const a = row as AssetGeo;
+      if (a.asset_type === "irrigation_pivot" && g.type !== "Point") {
+        const lon = Number(a.details?.center_lon);
+        const lat = Number(a.details?.center_lat);
+        const mp = toMultiPolygon(g);
+        const center =
+          Number.isFinite(lon) && Number.isFinite(lat)
+            ? ([lon, lat] as [number, number])
+            : mp
+              ? labelPointOf(mp)
+              : null;
+        if (center) {
+          features.push({
+            type: "Feature",
+            geometry: { type: "Point", coordinates: center },
+            properties: { ...props },
+          });
+        }
+      }
+    }
   }
   return { type: "FeatureCollection", features };
 }
@@ -171,6 +209,22 @@ export default function MapView({
   const [pendingExtraDraw, setPendingExtraDraw] = useState(false);
   const pendingPolyRef = useRef<MultiPolygon | null>(null);
   pendingPolyRef.current = pendingPoly;
+  // Completed features currently on the draw canvas; anything else is
+  // the in-progress shape, which "Discard shape" (or Escape) removes
+  // WITHOUT touching completed areas or the save form.
+  const completedDrawIdsRef = useRef<Set<string>>(new Set());
+  const [drawingShape, setDrawingShape] = useState(false);
+  const drawingShapeRef = useRef(setDrawingShape);
+  drawingShapeRef.current = setDrawingShape;
+
+  // Parametric pivot coverage circle editor: the polygon is always
+  // derived from (center, radius, sweep); never vertex-edited.
+  const [pivotEdit, setPivotEdit] = useState<{
+    assetId: string;
+    params: PivotParams;
+  } | null>(null);
+  const pivotEditRef = useRef(pivotEdit);
+  pivotEditRef.current = pivotEdit;
   const didFitRef = useRef(false);
   const didFocusRef = useRef(false);
 
@@ -286,7 +340,7 @@ export default function MapView({
     if (!map || modeRef.current !== "view") return;
     // Priority: assets, then roads, then fields > timber > parcels > properties
     const groups: string[][] = [
-      ["assets-circle", "assets-line", "assets-fill"],
+      ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
       ["roads-hit"],
       ["fields-fill"],
       ["timber-fill"],
@@ -321,7 +375,9 @@ export default function MapView({
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
     map.addControl(new mapboxgl.GeolocateControl({ showUserLocation: true }), "bottom-right");
 
-    const draw = new MapboxDraw({ displayControlsDefault: false });
+    // keybindings off: Escape is handled by our discard-shape logic so
+    // it never kills a whole multi-area session.
+    const draw = new MapboxDraw({ displayControlsDefault: false, keybindings: false });
     map.addControl(draw);
     drawRef.current = draw;
 
@@ -346,12 +402,20 @@ export default function MapView({
       map.addLayer({ id: "parcels-line", type: "line", source: "parcels",
         paint: { "line-color": "#e5e7eb", "line-width": 1.4, "line-dasharray": [2, 2] } });
 
-      // Timber stands: darker green fill, light dashed outline (reads
-      // differently from the solid kelly ag fields)
+      // Timber stands: prominent per-type fills (field-like presence),
+      // solid same-color outline; palette in lib/assetTypes.ts.
+      const timberColor: mapboxgl.Expression = [
+        "match", ["get", "standType"],
+        "planted_pine", STAND_TYPE_COLORS.planted_pine,
+        "natural_pine", STAND_TYPE_COLORS.natural_pine,
+        "hardwood", STAND_TYPE_COLORS.hardwood,
+        "mixed", STAND_TYPE_COLORS.mixed,
+        STAND_TYPE_COLORS.other,
+      ];
       map.addLayer({ id: "timber-fill", type: "fill", source: "timber",
-        paint: { "fill-color": PINE, "fill-opacity": 0.35 } });
+        paint: { "fill-color": timberColor, "fill-opacity": 0.35 } });
       map.addLayer({ id: "timber-line", type: "line", source: "timber",
-        paint: { "line-color": MINT, "line-width": 1.8, "line-dasharray": [3, 2] } });
+        paint: { "line-color": timberColor, "line-width": 2 } });
 
       // Fields: kelly green
       map.addLayer({ id: "fields-fill", type: "fill", source: "fields",
@@ -370,13 +434,23 @@ export default function MapView({
         paint: { "line-color": "#ffffff", "line-width": 16, "line-opacity": 0.01 } });
 
       // Asset lines (pipe, fence): dashed light blue, distinct from roads.
-      // Asset polygons (footprints, pond surface): faint white.
+      // Asset polygons (footprints, pond surface): faint white. Pivot
+      // coverage circles get their own light blue look below.
+      const notPivot: mapboxgl.Expression = ["!=", ["get", "assetType"], "irrigation_pivot"];
       map.addLayer({ id: "assets-fill", type: "fill", source: "assets",
-        filter: ["==", ["geometry-type"], "Polygon"],
+        filter: ["all", ["==", ["geometry-type"], "Polygon"], notPivot],
         paint: { "fill-color": "#ffffff", "fill-opacity": 0.08 } });
       map.addLayer({ id: "assets-outline", type: "line", source: "assets",
-        filter: ["==", ["geometry-type"], "Polygon"],
+        filter: ["all", ["==", ["geometry-type"], "Polygon"], notPivot],
         paint: { "line-color": "#bae6fd", "line-width": 1.5 } });
+      map.addLayer({ id: "pivot-circles-fill", type: "fill", source: "assets",
+        filter: ["all", ["==", ["geometry-type"], "Polygon"],
+          ["==", ["get", "assetType"], "irrigation_pivot"]],
+        paint: { "fill-color": "#7dd3fc", "fill-opacity": 0.18 } });
+      map.addLayer({ id: "pivot-circles-line", type: "line", source: "assets",
+        filter: ["all", ["==", ["geometry-type"], "Polygon"],
+          ["==", ["get", "assetType"], "irrigation_pivot"]],
+        paint: { "line-color": "#38bdf8", "line-width": 2 } });
       map.addLayer({ id: "assets-line", type: "line", source: "assets",
         filter: ["==", ["geometry-type"], "LineString"],
         paint: { "line-color": "#bae6fd", "line-width": 2, "line-dasharray": [2, 2] } });
@@ -409,9 +483,9 @@ export default function MapView({
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#eafcee", "text-halo-color": PINE, "text-halo-width": 1.2 } });
       map.addLayer({ id: "timber-labels", type: "symbol", source: "timber-labels",
-        layout: { "text-field": ["get", "name"], "text-size": 11,
+        layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
-        paint: { "text-color": MINT, "text-halo-color": PINE, "text-halo-width": 1.2 } });
+        paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.3 } });
       map.addLayer({ id: "parcel-labels", type: "symbol", source: "parcel-labels",
         layout: { "text-field": ["get", "name"], "text-size": 10,
           "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
@@ -439,6 +513,48 @@ export default function MapView({
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
 
+      // Pivot coverage circle editor: live preview + drag handles.
+      map.addSource("pivot-preview", { type: "geojson", data: empty });
+      map.addSource("pivot-handles", { type: "geojson", data: empty });
+      map.addLayer({ id: "pivot-preview-fill", type: "fill", source: "pivot-preview",
+        paint: { "fill-color": "#38bdf8", "fill-opacity": 0.2 } });
+      map.addLayer({ id: "pivot-preview-line", type: "line", source: "pivot-preview",
+        paint: { "line-color": "#38bdf8", "line-width": 2.5 } });
+      map.addLayer({ id: "pivot-handles", type: "circle", source: "pivot-handles",
+        paint: {
+          "circle-radius": ["case", ["==", ["get", "role"], "center"], 9, 7],
+          "circle-color": ["match", ["get", "role"],
+            "center", "#ffffff", "radius", "#38bdf8", "start", "#4ade80", "#f87171"],
+          "circle-stroke-color": "#0c4a6e",
+          "circle-stroke-width": 2,
+        } });
+
+      const beginPivotDrag = (role: string) => {
+        map.dragPan.disable();
+        const onMove = (ev: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
+          applyPivotDragRef.current(role, [ev.lngLat.lng, ev.lngLat.lat]);
+        };
+        const end = () => {
+          map.off("mousemove", onMove);
+          map.off("touchmove", onMove);
+          map.dragPan.enable();
+        };
+        map.on("mousemove", onMove);
+        map.on("touchmove", onMove);
+        map.once("mouseup", end);
+        map.once("touchend", end);
+      };
+      map.on("mousedown", "pivot-handles", (e) => {
+        if (!pivotEditRef.current) return;
+        e.preventDefault();
+        beginPivotDrag(String(e.features?.[0]?.properties?.role ?? ""));
+      });
+      map.on("touchstart", "pivot-handles", (e) => {
+        if (!pivotEditRef.current) return;
+        e.preventDefault();
+        beginPivotDrag(String(e.features?.[0]?.properties?.role ?? ""));
+      });
+
       setMapLoaded(true);
     });
 
@@ -458,6 +574,7 @@ export default function MapView({
     map.on("draw.create", (e: { features: Feature[] }) => {
       const geometry = e.features[0]?.geometry;
       if (!geometry) return;
+      drawingShapeRef.current(false);
       if (splitTargetRef.current && geometry.type === "LineString") {
         applySplitRef.current(geometry);
         return;
@@ -470,6 +587,9 @@ export default function MapView({
         saveEditedRef.current();
         return;
       }
+      // First completed shape of a new-boundary session stays on the
+      // canvas; remember it so Discard shape never removes it.
+      completedDrawIdsRef.current.add(String(e.features[0].id ?? ""));
       if (drawKindRef.current === "line") {
         const ml = toMultiLineString(geometry);
         if (ml) setPendingLine(ml);
@@ -623,7 +743,7 @@ export default function MapView({
       ["field", ["fields-fill", "fields-line", "field-labels"]],
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
-      ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name"]],
+      ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
     ];
     for (const [key, layers] of groups) {
       for (const layer of layers) {
@@ -688,7 +808,76 @@ export default function MapView({
     boundaryOpRef.current = null;
     setPendingExtraDraw(false);
     setEditTargetType(null);
+    setDrawingShape(false);
+    completedDrawIdsRef.current = new Set();
   }
+
+  // Session-level cancel: when completed areas exist, a mis-tap must not
+  // destroy minutes of tracing.
+  function cancelBoundarySession() {
+    const parts = pendingPolyRef.current?.coordinates.length ?? 0;
+    if (
+      parts > 0 &&
+      !window.confirm(`Discard ${parts} drawn area${parts === 1 ? "" : "s"}?`)
+    ) {
+      return;
+    }
+    resetDrawState();
+  }
+
+  function handleToolbarCancel() {
+    if (pendingPolyRef.current && drawKindRef.current === "boundary") {
+      cancelBoundarySession();
+    } else {
+      resetDrawState();
+    }
+  }
+
+  // Shape-level discard (Escape or the Discard shape button): removes
+  // ONLY the in-progress polygon. Completed areas, the save form, and
+  // the session all stay.
+  const discardShapeRef = useRef<() => void>(() => {});
+  discardShapeRef.current = () => {
+    const draw = drawRef.current;
+    if (!draw) return;
+    const keep = completedDrawIdsRef.current;
+    for (const f of draw.getAll().features) {
+      if (!keep.has(String(f.id))) draw.delete(String(f.id));
+    }
+    if (boundaryOpRef.current) {
+      boundaryOpRef.current = null;
+      if (editTargetRef.current) {
+        const kept = draw.getAll().features[0];
+        if (kept) draw.changeMode("direct_select", { featureId: String(kept.id) });
+        setEditHint("Drag the points to adjust, add or cut more, then press Save.");
+        setDrawingShape(false);
+      } else {
+        // Back to the save dialog with completed areas intact.
+        setPendingExtraDraw(false);
+        setDrawingShape(false);
+      }
+    } else if (modeRef.current === "draw" && drawKindRef.current) {
+      // Still tracing the first shape: clear it and keep drawing.
+      if (drawKindRef.current === "line") draw.changeMode("draw_line_string");
+      else draw.changeMode("draw_polygon");
+      setDrawingShape(true);
+    } else {
+      setDrawingShape(false);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || modeRef.current === "view") return;
+      const drawMode = drawRef.current?.getMode() ?? "";
+      if (String(drawMode).startsWith("draw_")) {
+        e.preventDefault();
+        discardShapeRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // ---- Add/cut an area with a drawn polygon ----
 
@@ -697,6 +886,7 @@ export default function MapView({
     if (!draw) return;
     boundaryOpRef.current = op;
     if (!editTargetRef.current) setPendingExtraDraw(true);
+    setDrawingShape(true);
     setEditHint(
       op === "add"
         ? "Draw the area to add (it does not need to touch). Double tap the last point to finish."
@@ -754,6 +944,7 @@ export default function MapView({
       }
       draw.deleteAll();
       const ids = draw.add(asFeature(combined));
+      completedDrawIdsRef.current = new Set(ids.map(String));
       draw.changeMode("direct_select", { featureId: ids[0] });
       setSaveError(null);
       setEditHint("Drag the points to adjust, add or cut more, then press Save.");
@@ -768,12 +959,158 @@ export default function MapView({
         return;
       }
       draw.deleteAll();
-      draw.add(asFeature(combined));
+      const ids = draw.add(asFeature(combined));
+      completedDrawIdsRef.current = new Set(ids.map(String));
       setPendingPoly(combined);
       setSaveError(null);
       setPendingExtraDraw(false);
     }
   };
+
+  // ---- Pivot coverage circle editor ----
+
+  const applyPivotDragRef = useRef<(role: string, lngLat: [number, number]) => void>(
+    () => {}
+  );
+  applyPivotDragRef.current = (role, lngLat) => {
+    setPivotEdit((edit) => {
+      if (!edit) return edit;
+      const p = edit.params;
+      if (role === "center") {
+        return { ...edit, params: { ...p, center: lngLat } };
+      }
+      if (role === "radius") {
+        const radiusFt = Math.max(50, Math.round(distanceFt(p.center, lngLat)));
+        return { ...edit, params: { ...p, radiusFt } };
+      }
+      if (role === "start" && p.endBearingDeg !== null) {
+        // Snap so the SWEEP lands on 90/180/270 within ~3 degrees.
+        let bearing = bearingTo(p.center, lngLat);
+        for (const target of [90, 180, 270]) {
+          if (Math.abs(sweepDegrees(bearing, p.endBearingDeg) - target) <= 3) {
+            bearing = (p.endBearingDeg - target + 360) % 360;
+            break;
+          }
+        }
+        return { ...edit, params: { ...p, startBearingDeg: Math.round(bearing * 10) / 10 } };
+      }
+      if (role === "end" && p.startBearingDeg !== null) {
+        const bearing = snapEndBearing(p.startBearingDeg, bearingTo(p.center, lngLat));
+        return { ...edit, params: { ...p, endBearingDeg: Math.round(bearing * 10) / 10 } };
+      }
+      return edit;
+    });
+  };
+
+  // Preview + handle sync
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
+    const preview = map.getSource("pivot-preview") as GeoJSONSource | undefined;
+    const handles = map.getSource("pivot-handles") as GeoJSONSource | undefined;
+    if (!pivotEdit) {
+      preview?.setData(empty);
+      handles?.setData(empty);
+      return;
+    }
+    const p = pivotEdit.params;
+    const polygon = pivotPolygon(p);
+    preview?.setData({
+      type: "FeatureCollection",
+      features: [{ type: "Feature", properties: {}, geometry: polygon }],
+    });
+    const radiusM = p.radiusFt * 0.3048;
+    const midBearing = p.fullCircle
+      ? 90
+      : (p.startBearingDeg! + sweepDegrees(p.startBearingDeg!, p.endBearingDeg!) / 2) % 360;
+    const handleFeatures: Feature[] = [
+      { type: "Feature", properties: { role: "center" },
+        geometry: { type: "Point", coordinates: p.center } },
+      { type: "Feature", properties: { role: "radius" },
+        geometry: { type: "Point", coordinates: pivotDestination(p.center, radiusM, midBearing) } },
+    ];
+    if (!p.fullCircle && p.startBearingDeg !== null && p.endBearingDeg !== null) {
+      handleFeatures.push(
+        { type: "Feature", properties: { role: "start" },
+          geometry: { type: "Point", coordinates: pivotDestination(p.center, radiusM, p.startBearingDeg) } },
+        { type: "Feature", properties: { role: "end" },
+          geometry: { type: "Point", coordinates: pivotDestination(p.center, radiusM, p.endBearingDeg) } }
+      );
+    }
+    handles?.setData({ type: "FeatureCollection", features: handleFeatures });
+  }, [pivotEdit, mapLoaded]);
+
+  function startPivotEditor() {
+    const map = mapRef.current;
+    const row = selectedRow as AssetGeo | null;
+    if (!map || !row || !selected || selected.entityType !== "asset") return;
+    const details = (row.details ?? {}) as Record<string, unknown>;
+    let params = paramsFromDetails(details);
+    if (!params) {
+      const g = row.geom_geojson;
+      const center: [number, number] =
+        g?.type === "Point"
+          ? (g.coordinates as [number, number])
+          : [map.getCenter().lng, map.getCenter().lat];
+      const wetted = Number(details.wetted_length_ft);
+      params = {
+        center,
+        radiusFt: wetted > 0 ? wetted : 1300,
+        fullCircle: true,
+        startBearingDeg: null,
+        endBearingDeg: null,
+      };
+    }
+    setSelected(null);
+    setSaveError(null);
+    setMode("pivot");
+    setPivotEdit({ assetId: row.id, params });
+    const box = bboxOf([pivotPolygon(params)]);
+    if (box) map.fitBounds(box, { padding: 100, duration: 300 });
+  }
+
+  function cancelPivotEditor() {
+    setPivotEdit(null);
+    setMode("view");
+    setSaveError(null);
+  }
+
+  async function savePivot() {
+    const edit = pivotEditRef.current;
+    if (!edit) return;
+    const p = edit.params;
+    const polygon = pivotPolygon(p);
+    const acres = approxAcres(toMultiPolygon(polygon)!);
+    const asset = assets.find((a) => a.id === edit.assetId);
+    const details: Record<string, string | number | boolean | null> = {
+      ...((asset?.details ?? {}) as Record<string, string | number | boolean | null>),
+      center_lon: Math.round(p.center[0] * 1e6) / 1e6,
+      center_lat: Math.round(p.center[1] * 1e6) / 1e6,
+      wetted_length_ft: Math.round(p.radiusFt),
+      full_circle: p.fullCircle,
+      start_bearing_deg: p.fullCircle ? null : p.startBearingDeg,
+      end_bearing_deg: p.fullCircle ? null : p.endBearingDeg,
+      acres_covered: Math.round(acres * 10) / 10,
+    };
+    setSaving(true);
+    const { error: dErr } = await supabase
+      .from("assets")
+      .update({ details })
+      .eq("id", edit.assetId);
+    const gErr = dErr
+      ? null
+      : await applyGeometry({ entityType: "asset", id: edit.assetId }, polygon);
+    setSaving(false);
+    if (dErr || gErr) {
+      setSaveError("Could not save the circle. " + (dErr?.message ?? gErr?.message ?? ""));
+      return;
+    }
+    const sel: SelectedFeature = { entityType: "asset", id: edit.assetId };
+    cancelPivotEditor();
+    await loadData();
+    setSelected(sel);
+  }
 
   // ---- Split a saved timber stand with a drawn line ----
   const splitTargetRef = useRef<SelectedFeature | null>(null);
@@ -905,6 +1242,8 @@ export default function MapView({
     drawKindRef.current = kind;
     setMode("draw");
     draw.deleteAll();
+    completedDrawIdsRef.current = new Set();
+    setDrawingShape(true);
     if (kind === "boundary") {
       setEditHint("Tap the map to add points. Double tap the last point to finish.");
       draw.changeMode("draw_polygon");
@@ -942,15 +1281,19 @@ export default function MapView({
 
     setMode("edit");
     draw.deleteAll();
+    completedDrawIdsRef.current = new Set();
     if (g) {
       const ids = draw.add({ type: "Feature", geometry: g, properties: {} });
+      completedDrawIdsRef.current = new Set(ids.map(String));
       draw.changeMode("direct_select", { featureId: ids[0] });
       setEditHint("Drag the points to adjust, then press Save.");
     } else if (isLineTarget || selected.entityType === "road") {
       draw.changeMode("draw_line_string");
+      setDrawingShape(true);
       setEditHint("No line yet. Draw one; it saves when you finish.");
     } else {
       draw.changeMode("draw_polygon");
+      setDrawingShape(true);
       setEditHint("No boundary yet. Draw one; it saves when you finish.");
     }
   }
@@ -1200,6 +1543,28 @@ export default function MapView({
       {/* Left control column */}
       <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
+        {visibility.timber_stand && timber.length > 0 ? (
+          <div className="rounded-lg bg-white/95 p-2 shadow-md">
+            <p className="text-xs font-medium text-gray-800">Timber types</p>
+            <div className="mt-1 space-y-0.5">
+              {Object.keys(STAND_TYPE_LABELS)
+                .filter((type) =>
+                  timber.some(
+                    (t) => ((t as TimberStandGeo).stand_type ?? "other") === type
+                  )
+                )
+                .map((type) => (
+                  <p key={type} className="flex items-center gap-1.5 text-xs text-gray-700">
+                    <span
+                      className="h-3 w-3 rounded-[2px] border border-gray-300"
+                      style={{ background: STAND_TYPE_COLORS[type] }}
+                    />
+                    {STAND_TYPE_LABELS[type]}
+                  </p>
+                ))}
+            </div>
+          </div>
+        ) : null}
         {entities.length > 1 ? (
           <div className="rounded-lg bg-white/95 p-2 shadow-md">
             <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
@@ -1306,8 +1671,102 @@ export default function MapView({
         </div>
       </div>
 
+      {/* Pivot coverage circle toolbar */}
+      {mode === "pivot" && pivotEdit ? (
+        <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[94%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
+          <p className="text-xs">
+            Drag the white handle to move the center, the blue handle for the
+            radius{pivotEdit.params.fullCircle ? "" : ", green/red for the arc"}.
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center justify-center gap-2">
+            <label className="flex items-center gap-1 text-xs">
+              Radius
+              <input
+                type="number"
+                value={Math.round(pivotEdit.params.radiusFt)}
+                onChange={(e) =>
+                  setPivotEdit((edit) =>
+                    edit
+                      ? {
+                          ...edit,
+                          params: {
+                            ...edit.params,
+                            radiusFt: Math.max(50, Number(e.target.value) || 50),
+                          },
+                        }
+                      : edit
+                  )
+                }
+                className="w-20 rounded border-0 px-1.5 py-0.5 text-xs text-gray-900"
+                title="Wetted length in feet; drag slightly past it to include end gun throw"
+              />
+              ft
+            </label>
+            <span className="flex overflow-hidden rounded border border-white/30">
+              {[true, false].map((full) => (
+                <button
+                  key={String(full)}
+                  onClick={() =>
+                    setPivotEdit((edit) =>
+                      edit
+                        ? {
+                            ...edit,
+                            params: {
+                              ...edit.params,
+                              fullCircle: full,
+                              startBearingDeg: full
+                                ? null
+                                : (edit.params.startBearingDeg ?? 0),
+                              endBearingDeg: full
+                                ? null
+                                : (edit.params.endBearingDeg ?? 180),
+                            },
+                          }
+                        : edit
+                    )
+                  }
+                  className={
+                    "px-2 py-0.5 text-xs font-semibold " +
+                    (pivotEdit.params.fullCircle === full
+                      ? "bg-kelly-500"
+                      : "bg-transparent hover:bg-white/15")
+                  }
+                >
+                  {full ? "Full circle" : "Partial circle"}
+                </button>
+              ))}
+            </span>
+            <span className="text-xs tabular-nums">
+              {formatAcres(approxAcres(toMultiPolygon(pivotPolygon(pivotEdit.params))!))} ac
+              {pivotEdit.params.fullCircle
+                ? " · full"
+                : ` · ${Math.round(
+                    sweepDegrees(
+                      pivotEdit.params.startBearingDeg ?? 0,
+                      pivotEdit.params.endBearingDeg ?? 0
+                    )
+                  )}° sweep`}
+            </span>
+            <button
+              onClick={savePivot}
+              disabled={saving}
+              className="rounded bg-kelly-500 px-3 py-1 text-xs font-semibold hover:bg-kelly-600 disabled:opacity-60"
+            >
+              {saving ? "Saving..." : "Save circle"}
+            </button>
+            <button
+              onClick={cancelPivotEditor}
+              className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
+            >
+              Cancel
+            </button>
+          </div>
+          {saveError ? <p className="mt-1 text-xs text-red-300">{saveError}</p> : null}
+        </div>
+      ) : null}
+
       {/* Draw/edit/place toolbar */}
-      {mode !== "view" ? (
+      {mode !== "view" && mode !== "pivot" ? (
         <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[92%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
           <p className="text-xs">{editHint}</p>
           <div className="mt-1.5 flex justify-center gap-2">
@@ -1353,8 +1812,17 @@ export default function MapView({
                 </button>
               </>
             ) : null}
+            {drawingShape ? (
+              <button
+                onClick={() => discardShapeRef.current()}
+                title="Removes only the shape being drawn (Escape does the same); completed areas stay"
+                className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
+              >
+                Discard shape
+              </button>
+            ) : null}
             <button
-              onClick={resetDrawState}
+              onClick={handleToolbarCancel}
               className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
             >
               Cancel
@@ -1376,7 +1844,7 @@ export default function MapView({
       ) : null}
 
       {/* Save dialogs */}
-      {pendingPoly && mode === "draw" && !pendingExtraDraw ? (
+      {pendingPoly && mode === "draw" ? (
         <NewBoundaryDialog
           approxAcres={approxAcres(pendingPoly)}
           properties={properties}
@@ -1384,9 +1852,10 @@ export default function MapView({
           saving={saving}
           error={saveError}
           onSave={saveNewBoundary}
-          onCancel={resetDrawState}
+          onCancel={cancelBoundarySession}
           onAddArea={() => startBoundaryOp("add")}
           onCutArea={() => startBoundaryOp("subtract")}
+          hidden={pendingExtraDraw}
         />
       ) : null}
       {pendingLine && mode === "draw" ? (
@@ -1426,6 +1895,7 @@ export default function MapView({
           onClose={() => setSelected(null)}
           onEditGeometry={startEditGeometry}
           onSplit={startSplitStand}
+          onPivotCircle={startPivotEditor}
           onChanged={loadData}
         />
       ) : null}

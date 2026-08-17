@@ -11,6 +11,10 @@ export interface DetailField {
   options?: Array<{ value: string; label: string }>;
   unit?: string; // display suffix, e.g. "ft", "gpm", "bu"
   dollars?: boolean;
+  // Written by a map editor (pivot coverage circle parameters), never
+  // hand-edited in the asset form: cleanDetails carries the stored
+  // value through and the form shows it read-only at most.
+  mapManaged?: boolean;
 }
 
 export interface AssetTypeDef {
@@ -110,6 +114,14 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
       { key: "panel_type", label: "Panel type", input: "text" },
       { key: "supply_source", label: "Supply source", input: "text" },
       { key: "serial_number", label: "Serial number", input: "text" },
+      // Coverage circle parameters, managed by the map's pivot editor.
+      // The polygon is DERIVED from these and regenerated on every
+      // parametric edit; wetted_length_ft doubles as the radius.
+      { key: "center_lon", label: "Center longitude", input: "number", mapManaged: true },
+      { key: "center_lat", label: "Center latitude", input: "number", mapManaged: true },
+      { key: "full_circle", label: "Full circle", input: "boolean", mapManaged: true },
+      { key: "start_bearing_deg", label: "Start bearing", input: "number", mapManaged: true },
+      { key: "end_bearing_deg", label: "End bearing", input: "number", mapManaged: true },
     ],
   },
   underground_pipe: {
@@ -266,12 +278,26 @@ export function assetTypeLabel(t: AssetType): string {
 }
 
 // Pull only known, non-empty values out of a submitted form for a type.
+// Map-managed fields (pivot circle parameters) are never in the form;
+// their stored values carry through so a form save cannot wipe them.
 export function cleanDetails(
   assetType: AssetType,
-  raw: Record<string, FormDataEntryValue>
+  raw: Record<string, FormDataEntryValue>,
+  existing: Record<string, unknown> = {}
 ): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
   for (const field of ASSET_TYPES[assetType].fields) {
+    if (field.mapManaged) {
+      const kept = existing[field.key];
+      if (
+        typeof kept === "string" ||
+        typeof kept === "number" ||
+        typeof kept === "boolean"
+      ) {
+        out[field.key] = kept;
+      }
+      continue;
+    }
     const v = raw[field.key];
     if (field.input === "boolean") {
       if (v === "on" || v === "true") out[field.key] = true;
@@ -291,6 +317,20 @@ export const STAND_TYPE_LABELS: Record<string, string> = {
   hardwood: "Hardwood",
   mixed: "Mixed",
   other: "Other",
+};
+
+// Saved timber stand map colors, one per stand_type. Chosen to read over
+// satellite and stay distinct from kelly (fields), the crop palette
+// (corn #facc15, cotton white, soybeans kelly, wheat #d97706, canola
+// #a3e635, other light violet #a78bfa), the entity outline palette, and
+// the Timber Scan DRAFT palette (light amber/sky/violet/teal, dashed):
+// saved stands are solid and deep so drafts never look saved.
+export const STAND_TYPE_COLORS: Record<string, string> = {
+  planted_pine: "#166534", // deep forest green
+  natural_pine: "#6b8e23", // olive drab
+  hardwood: "#c2410c", // burnt orange
+  mixed: "#7c3aed", // deep violet
+  other: "#6b7280", // gray
 };
 
 export const ROAD_TYPE_LABELS: Record<string, string> = {

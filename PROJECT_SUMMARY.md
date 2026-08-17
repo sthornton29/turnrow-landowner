@@ -431,8 +431,39 @@ Functions and views:
     Add area and Cut area buttons let the user draw a polygon that is
     unioned into or differenced out of the shape (turf), and the
     new-boundary save dialog offers the same before saving; results may
-    be non-contiguous (MultiPolygon storage everywhere). Acres/miles
-    recompute server-side on every save. CSS-based fullscreen toggle (not the native Fullscreen
+    be non-contiguous (MultiPolygon storage everywhere). The save dialog
+    stays MOUNTED (css-hidden) through a whole multi-area session so
+    the chosen type, name, and property never reset when another area
+    is drawn. TWO-LEVEL CANCEL while building: "Discard shape" (button
+    + Escape; mapbox-gl-draw keybindings are off so Escape is ours)
+    removes only the in-progress polygon, keeping completed areas, the
+    form, and drawing mode; the session Cancel confirms first when
+    completed areas exist ("Discard 3 drawn areas?"). Acres/miles
+    recompute server-side on every save. TIMBER STANDS render like
+    fields: prominent per-type fills + solid same-color outlines
+    (STAND_TYPE_COLORS in lib/assetTypes.ts: planted pine deep forest
+    #166534, natural pine olive #6b8e23, hardwood burnt orange #c2410c,
+    mixed deep violet #7c3aed, other gray; all checked distinct from
+    kelly, the crop palette, entity outlines, and the light dashed
+    Timber Scan draft palette), white name labels, and a "Timber types"
+    legend in the control column listing only types present. PIVOT
+    COVERAGE CIRCLES: a parametric editor (never vertex editing; the
+    polygon is derived and regenerated) with draggable center/radius
+    handles, a typed feet input (the radius IS wetted_length_ft; end
+    gun throw by dragging further), Full/Partial toggle with two arc
+    handles (compass bearings, clockwise sweep, live degrees, ~3
+    degree snap to 90/180/270), live acres, and Save through
+    set_geometry. Parameters (center_lon/lat, full_circle,
+    start/end_bearing_deg) live in the pivot's details as mapManaged
+    fields (cleanDetails carries them through form saves; the asset
+    page shows a "edited on the map" note). Circles render light blue
+    fill + solid light blue outline in the assets layer, distinct from
+    everything else, with the P marker kept at the center; the panel
+    shows Coverage (Full circle or N degree sweep), radius, and acres,
+    and offers Add/Edit coverage circle (replacing raw geometry editing
+    once a circle exists). lib/geo/pivot.ts unit-tests the circle and
+    sector math (pi r squared sanity, sector = full x sweep/360,
+    bearing conventions, wraparound sweeps, snapping). CSS-based fullscreen toggle (not the native Fullscreen
     API, so iOS modals stay visible). /map?focus=asset:<id> zooms to and
     selects an entity (used by list pages).
   - /import: upload GeoJSON/JSON, KML, KMZ, zipped shapefiles. Polygons
