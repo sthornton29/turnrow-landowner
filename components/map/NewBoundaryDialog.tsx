@@ -5,7 +5,13 @@ import { formatAcres } from "@/lib/format";
 import { STAND_TYPE_LABELS } from "@/lib/assetTypes";
 import type { EntityType, PropertyGeo, StandType } from "@/types/db";
 
-type BoundaryType = "field" | "pasture" | "parcel" | "property" | "timber_stand";
+type BoundaryType =
+  | "field"
+  | "pasture"
+  | "wetland"
+  | "parcel"
+  | "property"
+  | "timber_stand";
 
 export interface NewBoundaryPayload {
   entityType: EntityType;
@@ -24,6 +30,7 @@ export interface NewBoundaryPayload {
 const TYPE_LABEL: Record<BoundaryType, string> = {
   field: "Ag field",
   pasture: "Pasture",
+  wetland: "Wetland",
   parcel: "Parcel",
   property: "Property",
   timber_stand: "Timber",
@@ -177,6 +184,14 @@ export default function NewBoundaryDialog({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
           />
         </div>
+
+        {entityType === "wetland" ? (
+          <p className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600">
+            Open wetlands: marsh, sloughs, duck holes, WRP/easement ground.
+            Forested bottomland stays a timber stand (hardwood with a wetland
+            note).
+          </p>
+        ) : null}
 
         {isTimber ? (
           <>

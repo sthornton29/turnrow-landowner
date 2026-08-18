@@ -18,6 +18,7 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   parcel: "parcels",
   field: "fields",
   pasture: "pastures",
+  wetland: "wetlands",
   timber_stand: "timber_stands",
   road: "roads",
   asset: "assets",
@@ -28,6 +29,7 @@ const TYPE_LABEL: Record<EntityType, string> = {
   parcel: "Parcel",
   field: "Ag field",
   pasture: "Pasture",
+  wetland: "Wetland",
   timber_stand: "Timber stand",
   road: "Road",
   asset: "Asset",
@@ -61,6 +63,10 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   pasture: [
+    { key: "name", label: "Name", input: "text", required: true },
+    { key: "notes", label: "Notes", input: "textarea" },
+  ],
+  wetland: [
     { key: "name", label: "Name", input: "text", required: true },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
@@ -114,6 +120,7 @@ export function detailPagePath(entityType: EntityType, id: string): string {
     parcel: "/parcels",
     field: "/fields",
     pasture: "/pastures",
+    wetland: "/wetlands",
     timber_stand: "/timber",
     road: "/roads",
     asset: "/assets",
@@ -167,16 +174,13 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
         !full && Number.isFinite(start) && Number.isFinite(end)
           ? Math.round((((end - start) % 360) + 360) % 360) || 360
           : null;
-      const shape = a.details.custom_shape === true;
-      const positions = Array.isArray(a.details.positions)
-        ? a.details.positions.length
+      const adds = Array.isArray(a.details.add_polygons)
+        ? a.details.add_polygons.length
         : 0;
       rows.push([
         "Coverage",
-        (shape ? "Custom shape" : full ? "Full circle" : `${sweep}° sweep`) +
-          (positions > 0
-            ? ` · ${positions + 1} towable position${positions ? "s" : ""}`
-            : ""),
+        (full ? "Full circle" : `${sweep}° sweep`) +
+          (adds > 0 ? ` + ${adds} added area${adds === 1 ? "" : "s"}` : ""),
       ]);
     }
     // Plantable vs gross watered acres, when cutouts make them differ.
@@ -451,17 +455,12 @@ export default function FeaturePanel({
               const isPivot =
                 entityType === "asset" &&
                 (row as AssetGeo).asset_type === "irrigation_pivot";
-              const details = (row as AssetGeo).details;
-              const customShape = isPivot && details?.custom_shape === true;
-              const hasCircle =
-                isPivot && !customShape && details?.center_lon != null;
+              const hasCircle = isPivot && (row as AssetGeo).details?.center_lon != null;
               return (
                 <>
                   {/* Pivot shapes are parametric: a 64-vertex circle is
                       uneditable by hand, so shaped pivots get the
-                      editor instead of raw geometry editing. A pivot
-                      converted to a custom shape edits vertices like
-                      any polygon (one-way). */}
+                      editor instead of raw geometry editing. */}
                   {!hasCircle ? (
                     <button
                       onClick={onEditGeometry}
@@ -470,7 +469,7 @@ export default function FeaturePanel({
                       {geometryButtonLabel}
                     </button>
                   ) : null}
-                  {isPivot && !customShape && onPivotCircle ? (
+                  {isPivot && onPivotCircle ? (
                     <button
                       onClick={onPivotCircle}
                       className="rounded-lg border border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 hover:bg-sky-50"

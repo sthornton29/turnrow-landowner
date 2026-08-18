@@ -18,7 +18,9 @@ export default function AuthLayout({
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg sm:p-8">
         {children}
       </div>
-      <p className="mt-6 text-sm text-white/60">Turnrow Landowner</p>
+      <p className="mt-6 text-xs font-light uppercase tracking-[0.22em] text-white/60">
+        Landowner
+      </p>
     </div>
   );
 }

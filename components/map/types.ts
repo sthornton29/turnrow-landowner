@@ -7,6 +7,7 @@ import type {
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
+  WetlandGeo,
 } from "@/types/db";
 
 export type MapMode = "view" | "draw" | "edit" | "place" | "split" | "pivot";
@@ -21,6 +22,7 @@ export type AnyGeoRow =
   | ParcelGeo
   | FieldGeo
   | PastureGeo
+  | WetlandGeo
   | TimberStandGeo
   | RoadGeo
   | AssetGeo;
@@ -30,6 +32,7 @@ export interface LayerVisibility {
   parcel: boolean;
   field: boolean;
   pasture: boolean;
+  wetland: boolean;
   timber_stand: boolean;
   road: boolean;
   asset: boolean;

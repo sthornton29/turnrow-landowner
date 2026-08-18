@@ -39,6 +39,7 @@ export default async function PropertyDetailPage({
     { data: parcels },
     { data: fields },
     { data: pastures },
+    { data: wetlandRows },
     { data: stands },
     { data: roads },
     { data: assets },
@@ -55,6 +56,11 @@ export default async function PropertyDetailPage({
       .order("name"),
     supabase
       .from("pastures")
+      .select("id, name, notes, acres")
+      .eq("property_id", id)
+      .order("name"),
+    supabase
+      .from("wetlands")
       .select("id, name, notes, acres")
       .eq("property_id", id)
       .order("name"),
@@ -114,6 +120,7 @@ export default async function PropertyDetailPage({
     0
   );
   const pastureAcres = (pastures ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
+  const wetlandAcres = (wetlandRows ?? []).reduce((s, w) => s + (w.acres ?? 0), 0);
   const timberAcres = (stands ?? []).reduce((s, t) => s + (t.acres ?? 0), 0);
   const roadMiles = (roads ?? []).reduce((s, r) => s + (r.miles ?? 0), 0);
 
@@ -291,6 +298,46 @@ export default async function PropertyDetailPage({
           />
         </div>
       </section>
+
+      {(wetlandRows ?? []).length > 0 ? (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-gray-900">
+            Wetlands{" "}
+            <span className="text-sm font-normal text-gray-500">
+              {formatNumber((wetlandRows ?? []).length)} · {formatAcres(wetlandAcres)} ac
+            </span>
+          </h2>
+          <ul className="space-y-2">
+            {(wetlandRows ?? []).map((w) => (
+              <li key={w.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Link
+                    href={`/wetlands/${w.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {w.name}
+                  </Link>
+                  <span className="text-sm text-pine-900">{formatAcres(w.acres)} ac</span>
+                </div>
+                {w.notes ? <p className="mt-1 text-sm text-gray-600">{w.notes}</p> : null}
+                <RowEditor entityType="wetland" row={w} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2">
+            <MoveChildren
+              table="wetlands"
+              itemLabel="wetland"
+              items={(wetlandRows ?? []).map((w) => ({
+                id: w.id,
+                label: `${w.name} (${formatAcres(w.acres)} ac)`,
+              }))}
+              properties={moveTargets}
+              currentPropertyId={property.id}
+            />
+          </div>
+        </section>
+      ) : null}
 
       {(pastures ?? []).length > 0 ? (
         <section>
@@ -542,6 +589,7 @@ export default async function PropertyDetailPage({
             [(parcels ?? []).length, "parcel"],
             [(fields ?? []).length, "ag field"],
             [(pastures ?? []).length, "pasture"],
+            [(wetlandRows ?? []).length, "wetland"],
             [(stands ?? []).length, "timber stand"],
             [(roads ?? []).length, "road"],
             [(assets ?? []).length, "asset"],
@@ -556,8 +604,8 @@ export default async function PropertyDetailPage({
         />
         <p className="mt-1 text-xs text-gray-500">
           Deletes this property and everything on it (parcels, ag fields,
-          pastures, timber stands, roads, assets) and removes any lease land
-          links. Leases,
+          pastures, wetlands, timber stands, roads, assets) and removes any
+          lease land links. Leases,
           payments, and tax records are kept; tax statements on deleted
           parcels become unmatched. Move anything you want to keep to another
           property first.

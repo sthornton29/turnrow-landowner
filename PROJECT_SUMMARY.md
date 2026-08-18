@@ -1,10 +1,11 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 ("Ag Fields" rename, pastures (migration
-0014), rich summary pages for every record, AI rent upload on /income,
-irrigated/dryland acres end to end, Farm Data page restructure; earlier
-same day: composite pivot shapes (migration 0013), income projections
-from lease assumptions, Tenant Data panel, lease price methods)
+Last updated: 2026-08-17 (pivot editor simplified to circle +
+add/subtract polygons and laterals removed, wetlands land type,
+migration 0015; header brand lockup; parcels layer defaults off with
+persisted toggles; earlier same day: Ag Fields rename, pastures, rich
+summary pages, AI rent upload, irrigated/dryland acres, Farm Data
+restructure, income projections, Tenant Data panel)
 
 ## What this product is
 
@@ -99,6 +100,16 @@ Tables:
   toggle), property detail section, dashboard acres tile, and a
   /pastures/[id] summary page. FUTURE AREA: no grazing management
   features yet (deliberate).
+- wetlands (migration 0015): same pattern as pastures, for OPEN
+  wetlands only (marsh, sloughs, duck holes, WRP/easement ground;
+  labels and dialog help text say so). Forested bottomland remains a
+  timber stand (hardwood with the wetland note); no timber behavior
+  changed. Map color muted steel blue #6487a8 (checked distinct from
+  kelly, every crop color, the timber palette including planted pine
+  teal #0f766e and other-gray #6b7280, pivot light blue, pasture tan,
+  entity outlines). Appears everywhere pastures do plus
+  /wetlands/[id]. FUTURE AREA: no wetland program management features
+  yet (deliberate).
 - documents: generic attachments via entity_type + entity_id
   (entity_type check now covers property, parcel, field, timber_stand,
   road, asset; Phase 3+ adds lease, timber_sale, tax_statement). Files live
@@ -117,9 +128,10 @@ Phase 2 tables (all with the same org RLS + composite property FK):
   field_road | other), notes, MultiLineString geom, generated length_feet
   and miles.
 - assets: ONE table with a type system. property_id (nullable),
-  asset_type (well, irrigation_pivot, irrigation_lateral via migration
-  0013, underground_pipe, riser, shop, shed, barn, grain_bin, house,
-  fence, pond_dam, other), name (only required field), geometry accepting Point/Line/Polygon, year_installed, condition
+  asset_type (well, irrigation_pivot, underground_pipe, riser, shop,
+  shed, barn, grain_bin, house, fence, pond_dam, other; an
+  irrigation_lateral type existed briefly in 0013 and was removed in
+  0015 with zero rows), name (only required field), geometry accepting Point/Line/Polygon, year_installed, condition
   (excellent/good/fair/poor), estimated_value, notes, details jsonb
   (type-specific fields validated in the app against lib/assetTypes.ts,
   which drives the dynamic forms and panels), parent_asset_id
@@ -489,9 +501,13 @@ Functions and views:
 
 - app/(auth)/: login, signup, onboarding. Dark green (#14532d) background,
   stacked white logo.
-- app/(app)/: authenticated shell. Header: white bg, horizontal green logo
-  on desktop, T mark on mobile; bottom tab bar on mobile (Home, Map,
-  Properties, Import).
+- app/(app)/: authenticated shell. Header: white bg; the brand lockup is
+  the horizontal green logo (T mark on mobile) with "Landowner" as a
+  letterspaced small-caps wordmark in dark green tight to it, styled as
+  BRANDING (no hover/nav affordances; tapping it still goes to the
+  dashboard as logos conventionally do; the auth pages' footer line
+  uses the same small-caps treatment in white). Bottom tab bar on
+  mobile (Home, Map, Properties, Import).
   - /dashboard: stat tiles (total acres, properties, field acres, timber
     acres, wells, pivots, grain bins, buildings), static satellite
     thumbnail (Mapbox Static Images API) linking to the map, quick links.
@@ -500,14 +516,17 @@ Functions and views:
     entity"; alert cards and the map thumbnail stay org-wide.
   - /map: full-screen Mapbox satellite map. Property name labels always
     render (text-allow-overlap, zoom-scaled size, heavy halo) so they
-    are never crowded out by basemap or parcel/road labels. Six
-    toggleable layers:
-    properties (white outline), parcels (dashed light line), fields (kelly
-    green), timber stands (per-type fills, see TIMBER STANDS below),
+    are never crowded out by basemap or parcel/road labels. Toggleable
+    layers:
+    properties (white outline), parcels (dashed light line; DEFAULTS
+    OFF as clutter, and every user's layer toggle choices persist per
+    browser in localStorage, defaults applying only to fresh state),
+    ag fields (kelly green), pastures (warm tan), wetlands (steel
+    blue), timber stands (per-type fills, see TIMBER STANDS below),
     roads (white line over dark green casing, labels along the line), and
     assets (dark green circle markers with a per-type letter, dashed light
     blue lines for pipe/fence, faint outline for footprints, light blue
-    pivot coverage circles). Click
+    pivot coverage shapes). Click
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
     mobile). The Add menu offers: Boundary (polygon draw; save as field,
@@ -520,12 +539,7 @@ Functions and views:
     opens directly; Save asks for name + property, suggested
     from the center's location, and inserts the pivot with its
     parameters and derived polygon in one step). The line dialog's
-    kinds are Road, Pipe, Fence, and Lateral (irrigation_lateral: the
-    drawn line is the machine's travel path; a required machine length
-    in feet sweeps it into flat-ended strip coverage via
-    lib/geo/pivot.ts lateralGeometry, saved as the polygon with the
-    path kept in details; light blue rendering with an L marker;
-    minimal fields: make, length_ft, supply well link). When the
+    kinds are Road, Pipe, and Fence. When the
     boundary dialog's type is Timber, it expands in place with stand
     type (required, five types), species (prefills "Loblolly pine" on
     a pine pick, never stomping a typed value), year established, and
@@ -564,33 +578,31 @@ Functions and views:
     Full/Partial toggle with two arc
     handles (compass bearings, clockwise sweep, live degrees, ~3
     degree snap to 90/180/270), live acres, and Save through
-    set_geometry. COMPOSITE MODEL for real machines: extension zones
-    (+ Extension: a {start/end bearing, outer radius} sector unioned
-    on, with its own angle/radius handles and feet input; models end
-    gun sectors, corner-arm lobes, and bender reach, several allowed),
-    skip sectors (+ Skip: a wedge differenced out, orange handles;
-    obstacle wraps), exclusion cutouts (+ Cutout: draw a small polygon
-    that cuts a HOLE; pond, waterway, road: watered but not
-    plantable), towable positions (+ Position: another full parameter
-    set, geometry is the MultiPolygon union, own handles), and a
-    one-way "Convert to custom shape" escape hatch (confirm dialog;
-    freezes the polygon for ordinary vertex editing, custom_shape flag
-    remembered). TWO ACRE NUMBERS: acres_covered (headline) =
-    plantable after cutouts; acres_watered = gross; the panel shows
-    "212.4 plantable of 218.1 watered" when they differ. The saved
-    polygon is the plantable shape (holes punch through to satellite).
-    All parameters live in details as mapManaged fields (cleanDetails
-    carries scalars AND arrays/objects through form saves). Pivots and
-    laterals render light blue fill + solid light blue outline with
-    the letter marker kept at the primary center; panels show
-    Coverage (Full circle, N degree sweep, or Custom shape, plus
-    towable position count) and offer Add/Edit coverage (replacing raw
-    geometry editing unless converted to custom shape).
-    lib/geo/pivot.ts unit-tests the geometry (pi r squared sanity,
-    sector = full x sweep/360, extension ring acreage, skip
-    subtraction, cutout holes, towable multipolygon sums, lateral
-    strip area, details round trip, bearing conventions, wraparound
-    sweeps, snapping). CSS-based fullscreen toggle (not the native Fullscreen
+    set_geometry. Beyond the base circle/sector, exactly two manual
+    tools (the earlier extension zones, skip sectors, towable
+    positions, custom-shape conversion, and lateral type proved more
+    than needed and were removed in 0015 after a check found no assets
+    using them): + Add area draws a freehand polygon UNIONED into the
+    coverage (corner-arm lobes, end gun reach, odd extensions; a
+    corner machine is four small drawn lobes), and + Cut area draws a
+    polygon DIFFERENCED out (ponds, waterways, obstacles). Drawn
+    polygons list as removable chips in the editor. TWO ACRE NUMBERS:
+    acres_covered (headline) = plantable after cuts; acres_watered =
+    gross (base + adds); the panel shows "212.4 plantable of 218.1
+    watered" when they differ. The saved polygon is the plantable
+    shape (holes punch through to satellite). Details schema:
+    center_lon/lat, wetted_length_ft (the radius), full_circle,
+    start/end_bearing_deg, add_polygons, cut_polygons, all mapManaged
+    (cleanDetails carries scalars AND arrays through form saves;
+    pre-0015 'cutouts' still read). Pivots render light blue fill +
+    solid light blue outline with the P marker kept at the center;
+    panels show Coverage (Full circle or N degree sweep, plus added
+    area count) and offer Add/Edit coverage (replacing raw geometry
+    editing once a circle exists). lib/geo/pivot.ts unit-tests the
+    geometry (pi r squared sanity, sector = full x sweep/360, add
+    lobes grow gross, cuts reduce plantable only and punch real
+    holes, details round trip including the legacy cutouts key,
+    bearing conventions, wraparound sweeps, snapping). CSS-based fullscreen toggle (not the native Fullscreen
     API, so iOS modals stay visible). /map?focus=asset:<id> zooms to and
     selects an entity (used by list pages).
   - /import: upload GeoJSON/JSON, KML, KMZ, zipped shapefiles. Polygons
@@ -696,8 +708,8 @@ Functions and views:
     /fields/[id] (irrigated/dryland split, GIS acres beside the
     tenant's planted-by-practice acres labeled by source, covering
     leases with current-year projected rent, farm activity history,
-    documents), /pastures/[id], /parcels/[id] (tax statements),
-    /timber/[id] (linked timber sales), /roads/[id], plus upgraded
+    documents), /pastures/[id], /wetlands/[id], /parcels/[id] (tax
+    statements), /timber/[id] (linked timber sales), /roads/[id], plus upgraded
     property (thumbnail, pasture section, irrigated rollup, child rows
     linking to their pages) and asset pages (thumbnail). Map click
     panels carry a prominent "View full page" link
@@ -982,3 +994,11 @@ Functions and views:
   the farm-side /production payload carries a practice breakout); Farm
   Data page restructured data-first with connections tucked into a
   management area. Described above.
+- Post-Phase 6f (DONE, 2026-08-17, migration 0015): pivot editor
+  simplified to circle/sector + manual add/subtract polygons (advanced
+  zone/towable/custom-shape tools and the lateral type removed after a
+  DB check found zero usage; one existing cutout carried over
+  unchanged); wetlands as a minimal open-wetland land type in steel
+  blue; the header brand lockup (small-caps Landowner wordmark, not a
+  nav item); parcels layer defaulting off with per-browser persisted
+  layer toggles. Described above.

@@ -122,45 +122,12 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
       { key: "full_circle", label: "Full circle", input: "boolean", mapManaged: true },
       { key: "start_bearing_deg", label: "Start bearing", input: "number", mapManaged: true },
       { key: "end_bearing_deg", label: "End bearing", input: "number", mapManaged: true },
-      // Composite shape parameters (real machines are not perfect
-      // circles): extension zones (end guns, corner arms, benders),
-      // skip wedges (obstacle wraps), cutout polygons (pond, road:
-      // watered but not plantable), towable positions, and the one-way
-      // custom-shape flag. Arrays/objects, carried through form saves
-      // by cleanDetails like the scalars above.
-      { key: "extensions", label: "Extension zones", input: "text", mapManaged: true },
-      { key: "skips", label: "Skip sectors", input: "text", mapManaged: true },
-      { key: "cutouts", label: "Exclusion cutouts", input: "text", mapManaged: true },
-      { key: "positions", label: "Towable positions", input: "text", mapManaged: true },
-      { key: "custom_shape", label: "Custom shape", input: "boolean", mapManaged: true },
-      { key: "acres_watered", label: "Gross watered acres", input: "number", mapManaged: true },
-    ],
-  },
-  irrigation_lateral: {
-    label: "Lateral / linear move",
-    letter: "L",
-    defaultGeometry: "line",
-    canLinkToWell: true,
-    fields: [
-      {
-        key: "make",
-        label: "Make",
-        input: "select",
-        options: opts(
-          ["valley", "Valley"],
-          ["zimmatic", "Zimmatic"],
-          ["reinke", "Reinke"],
-          ["tl", "T-L"],
-          ["pierce", "Pierce"],
-          ["other", "Other"]
-        ),
-      },
-      { key: "length_ft", label: "Machine length", input: "number", unit: "ft" },
-      { key: "acres_covered", label: "Acres covered", input: "number", unit: "ac" },
-      // Coverage parameters from the map: the drawn travel path and any
-      // cutouts; coverage = path swept by the machine length.
-      { key: "path", label: "Travel path", input: "text", mapManaged: true },
-      { key: "cutouts", label: "Exclusion cutouts", input: "text", mapManaged: true },
+      // Manually drawn coverage shapes: add polygons union in (corner
+      // arms, end guns, odd reaches), cut polygons difference out
+      // (ponds, waterways, obstacles). Arrays, carried through form
+      // saves by cleanDetails like the scalars above.
+      { key: "add_polygons", label: "Added areas", input: "text", mapManaged: true },
+      { key: "cut_polygons", label: "Cut areas", input: "text", mapManaged: true },
       { key: "acres_watered", label: "Gross watered acres", input: "number", mapManaged: true },
     ],
   },

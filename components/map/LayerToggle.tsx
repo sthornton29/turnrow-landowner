@@ -7,6 +7,7 @@ const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
   { key: "parcel", label: "Parcels" },
   { key: "field", label: "Ag Fields" },
   { key: "pasture", label: "Pastures" },
+  { key: "wetland", label: "Wetlands" },
   { key: "timber_stand", label: "Timber" },
   { key: "road", label: "Roads" },
   { key: "asset", label: "Assets" },

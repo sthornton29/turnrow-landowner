@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Polygon } from "geojson";
 import { approxAcres, toMultiPolygon } from "./normalize";
 import {
   bearingTo,
@@ -7,7 +8,6 @@ import {
   destination,
   detailsFromComposite,
   distanceFt,
-  lateralGeometry,
   pivotPolygon,
   snapEndBearing,
   sweepDegrees,
@@ -114,57 +114,49 @@ const composite = (over: Partial<CompositePivotParams>): CompositePivotParams =>
   fullCircle: true,
   startBearingDeg: null,
   endBearingDeg: null,
-  extensions: [],
-  skips: [],
-  cutouts: [],
-  positions: [],
+  addPolygons: [],
+  cutPolygons: [],
   ...over,
 });
 
+// A small square polygon centered a given distance/bearing from CENTER.
+function square(atM: number, bearing: number, halfDeg: number): Polygon {
+  const c = destination(CENTER, atM, bearing) as [number, number];
+  return {
+    type: "Polygon",
+    coordinates: [[
+      [c[0] - halfDeg, c[1] - halfDeg],
+      [c[0] + halfDeg, c[1] - halfDeg],
+      [c[0] + halfDeg, c[1] + halfDeg],
+      [c[0] - halfDeg, c[1] + halfDeg],
+      [c[0] - halfDeg, c[1] - halfDeg],
+    ]],
+  };
+}
+
 describe("compositePivotGeometry", () => {
-  it("an extension zone adds the sector ring area", () => {
-    // Quarter-circle end gun zone at 1400 ft over a 1300 ft base:
-    // adds (90/360) * pi * (1400^2 - 1300^2) / 43560 acres.
-    const { grossAcres } = compositePivotGeometry(
-      composite({
-        extensions: [{ startBearingDeg: 0, endBearingDeg: 90, outerRadiusFt: 1400 }],
-      })
-    );
-    const expected =
-      FULL_1300_ACRES + (0.25 * Math.PI * (1400 * 1400 - 1300 * 1300)) / 43560;
+  it("an add polygon outside the base grows gross watered acres", () => {
+    // A corner lobe drawn beyond the circle edge.
+    const lobe = square(1300 * 0.3048 + 200, 45, 0.0008);
+    const lobeAcres = approxAcres(toMultiPolygon(lobe)!);
+    const { grossAcres } = compositePivotGeometry(composite({ addPolygons: [lobe] }));
+    const expected = FULL_1300_ACRES + lobeAcres;
     expect(Math.abs(grossAcres - expected) / expected).toBeLessThan(0.01);
   });
 
-  it("an extension shorter than the base radius adds nothing", () => {
+  it("an add polygon overlapping the base only counts the extra part", () => {
+    // Entirely inside the circle: no change.
+    const inside = square(100, 90, 0.0005);
     const { grossAcres } = compositePivotGeometry(
-      composite({
-        extensions: [{ startBearingDeg: 0, endBearingDeg: 90, outerRadiusFt: 1000 }],
-      })
+      composite({ addPolygons: [inside] })
     );
     expect(Math.abs(grossAcres - FULL_1300_ACRES) / FULL_1300_ACRES).toBeLessThan(0.01);
   });
 
-  it("a skip wedge subtracts its share, extensions included", () => {
-    // 90 degree skip on a full circle: three quarters remain.
-    const { grossAcres } = compositePivotGeometry(
-      composite({ skips: [{ startBearingDeg: 0, endBearingDeg: 90 }] })
-    );
-    const expected = FULL_1300_ACRES * 0.75;
-    expect(Math.abs(grossAcres - expected) / expected).toBeLessThan(0.01);
-  });
-
-  it("cutouts reduce plantable acres but not gross watered acres", () => {
-    // A small square pond inside the circle.
-    const d = 0.001; // ~100m square
-    const pond: [number, number][] = [
-      [CENTER[0] - d, CENTER[1] - d],
-      [CENTER[0] + d, CENTER[1] - d],
-      [CENTER[0] + d, CENTER[1] + d],
-      [CENTER[0] - d, CENTER[1] + d],
-      [CENTER[0] - d, CENTER[1] - d],
-    ];
+  it("cut polygons reduce plantable acres but not gross watered acres", () => {
+    const pond = square(0, 0, 0.001);
     const { grossAcres, plantableAcres, plantable } = compositePivotGeometry(
-      composite({ cutouts: [{ type: "Polygon", coordinates: [pond] }] })
+      composite({ cutPolygons: [pond] })
     );
     expect(Math.abs(grossAcres - FULL_1300_ACRES) / FULL_1300_ACRES).toBeLessThan(0.01);
     expect(plantableAcres).toBeLessThan(grossAcres);
@@ -176,111 +168,61 @@ describe("compositePivotGeometry", () => {
     expect(rings).toBeGreaterThan(1);
   });
 
-  it("towable positions union into a multipolygon with summed acres", () => {
-    const second = destination(CENTER, 3000, 90) as [number, number]; // well clear
-    const { watered, grossAcres } = compositePivotGeometry(
-      composite({
-        radiusFt: 1000,
-        positions: [
-          {
-            center: second,
-            radiusFt: 1000,
-            fullCircle: true,
-            startBearingDeg: null,
-            endBearingDeg: null,
-            extensions: [],
-            skips: [],
-          },
-        ],
-      })
+  it("cuts also trim added lobes", () => {
+    const lobe = square(1300 * 0.3048 + 150, 45, 0.0008);
+    const cutOfLobe = square(1300 * 0.3048 + 150, 45, 0.0004); // inside the lobe
+    const withLobe = compositePivotGeometry(composite({ addPolygons: [lobe] }));
+    const trimmed = compositePivotGeometry(
+      composite({ addPolygons: [lobe], cutPolygons: [cutOfLobe] })
     );
-    const one = (Math.PI * 1000 * 1000) / 43560;
-    expect(watered.type).toBe("MultiPolygon");
-    expect(Math.abs(grossAcres - 2 * one) / (2 * one)).toBeLessThan(0.01);
-  });
-});
-
-describe("lateralGeometry", () => {
-  it("a straight run covers path length x machine length", () => {
-    // Half-mile run (2640 ft) with a 400 ft machine: 2640*400/43560 ac.
-    const end = destination(CENTER, 2640 * 0.3048, 90) as [number, number];
-    const result = lateralGeometry([CENTER, end], 400, [])!;
-    const expected = (2640 * 400) / 43560;
-    expect(Math.abs(result.grossAcres - expected) / expected).toBeLessThan(0.01);
-  });
-
-  it("supports cutouts like pivots", () => {
-    const end = destination(CENTER, 800, 90) as [number, number];
-    const d = 0.0005;
-    const mid = destination(CENTER, 400, 90) as [number, number];
-    const cut: [number, number][] = [
-      [mid[0] - d, mid[1] - d],
-      [mid[0] + d, mid[1] - d],
-      [mid[0] + d, mid[1] + d],
-      [mid[0] - d, mid[1] + d],
-      [mid[0] - d, mid[1] - d],
-    ];
-    const result = lateralGeometry([CENTER, end], 400, [
-      { type: "Polygon", coordinates: [cut] },
-    ])!;
-    expect(result.plantableAcres).toBeLessThan(result.grossAcres);
-  });
-
-  it("rejects degenerate input", () => {
-    expect(lateralGeometry([CENTER], 400, [])).toBeNull();
-    expect(lateralGeometry([CENTER, CENTER], 0, [])).toBeNull();
+    expect(trimmed.grossAcres).toBeCloseTo(withLobe.grossAcres, 1);
+    expect(trimmed.plantableAcres).toBeLessThan(withLobe.plantableAcres);
   });
 });
 
 describe("details round trip", () => {
   it("serializes and reads back the composite shape", () => {
+    const lobe = square(500, 45, 0.0006);
+    const pond = square(100, 180, 0.0004);
     const params = composite({
       fullCircle: false,
       startBearingDeg: 10,
       endBearingDeg: 190,
-      extensions: [{ startBearingDeg: 40, endBearingDeg: 70, outerRadiusFt: 1390 }],
-      skips: [{ startBearingDeg: 100, endBearingDeg: 120 }],
-      cutouts: [
-        {
-          type: "Polygon",
-          coordinates: [[[0, 0], [0.001, 0], [0.001, 0.001], [0, 0]]],
-        },
-      ],
-      positions: [
-        {
-          center: [-86.9, 34.6],
-          radiusFt: 900,
-          fullCircle: true,
-          startBearingDeg: null,
-          endBearingDeg: null,
-          extensions: [],
-          skips: [],
-        },
-      ],
+      addPolygons: [lobe],
+      cutPolygons: [pond],
     });
     const details = detailsFromComposite(params);
     const back = compositeFromDetails(details)!;
     expect(back.radiusFt).toBe(1300);
     expect(back.startBearingDeg).toBe(10);
-    expect(back.extensions).toHaveLength(1);
-    expect(back.extensions[0].outerRadiusFt).toBe(1390);
-    expect(back.skips).toHaveLength(1);
-    expect(back.cutouts).toHaveLength(1);
-    expect(back.positions).toHaveLength(1);
-    expect(back.positions[0].radiusFt).toBe(900);
+    expect(back.addPolygons).toHaveLength(1);
+    expect(back.cutPolygons).toHaveLength(1);
+    expect(back.addPolygons[0].coordinates).toEqual(lobe.coordinates);
   });
 
-  it("reads pre-composite pivot details as empty zone lists", () => {
+  it("reads pre-0015 details: legacy cutouts become cut polygons", () => {
+    const pond = square(100, 180, 0.0004);
+    const back = compositeFromDetails({
+      center_lon: -87,
+      center_lat: 34.5,
+      wetted_length_ft: 1300,
+      full_circle: true,
+      cutouts: [pond.coordinates],
+    })!;
+    expect(back.addPolygons).toEqual([]);
+    expect(back.cutPolygons).toHaveLength(1);
+    expect(back.cutPolygons[0].coordinates).toEqual(pond.coordinates);
+  });
+
+  it("reads plain circle details as empty add/cut lists", () => {
     const back = compositeFromDetails({
       center_lon: -87,
       center_lat: 34.5,
       wetted_length_ft: 1300,
       full_circle: true,
     })!;
-    expect(back.extensions).toEqual([]);
-    expect(back.skips).toEqual([]);
-    expect(back.cutouts).toEqual([]);
-    expect(back.positions).toEqual([]);
+    expect(back.addPolygons).toEqual([]);
+    expect(back.cutPolygons).toEqual([]);
   });
 });
 

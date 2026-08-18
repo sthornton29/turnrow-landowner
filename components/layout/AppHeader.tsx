@@ -32,7 +32,10 @@ export default function AppHeader({
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-gray-200 bg-white">
       <div className="mx-auto flex h-full max-w-7xl items-center gap-4 px-4">
-        <Link href="/dashboard" className="flex shrink-0 items-center">
+        {/* Brand lockup: logo + "Landowner" wordmark. Reads as branding,
+            not a nav item: letterspaced small caps, no hover affordance.
+            Tapping it still goes home, as logos conventionally do. */}
+        <Link href="/dashboard" className="flex shrink-0 items-end gap-1.5">
           {/* Full wordmark on desktop, T mark on mobile */}
           <Image
             src="/brand/turnrow_horizontal_green.svg"
@@ -50,10 +53,13 @@ export default function AppHeader({
             priority
             className="h-8 w-auto md:hidden"
           />
+          <span
+            aria-hidden
+            className="pb-0.5 text-[11px] font-light uppercase leading-none tracking-[0.22em] text-pine-900"
+          >
+            Landowner
+          </span>
         </Link>
-        <span className="hidden text-sm font-medium text-gray-400 md:block">
-          Landowner
-        </span>
 
         <nav className="ml-auto hidden items-center gap-1 md:flex">
           {nav.map((item) => {

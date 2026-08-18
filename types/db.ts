@@ -110,10 +110,23 @@ export interface PastureGeo {
   updated_at: string;
 }
 
+// Open wetlands (marsh, sloughs, duck holes, easement ground); forested
+// bottomland stays a timber stand.
+export interface WetlandGeo {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  name: string;
+  notes: string | null;
+  acres: number | null;
+  boundary_geojson: MultiPolygon | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type AssetType =
   | "well"
   | "irrigation_pivot"
-  | "irrigation_lateral"
   | "underground_pipe"
   | "riser"
   | "shop"
@@ -214,6 +227,7 @@ export type EntityType =
   | "parcel"
   | "field"
   | "pasture"
+  | "wetland"
   | "timber_stand"
   | "road"
   | "asset";

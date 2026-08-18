@@ -33,11 +33,9 @@ import {
   destination as pivotDestination,
   detailsFromComposite,
   distanceFt,
-  lateralGeometry,
   snapEndBearing,
   sweepDegrees,
   type CompositePivotParams,
-  type PivotPosition,
 } from "@/lib/geo/pivot";
 import turfBuffer from "@turf/buffer";
 import turfDifference from "@turf/difference";
@@ -62,6 +60,7 @@ import type {
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
+  WetlandGeo,
 } from "@/types/db";
 import LayerToggle from "./LayerToggle";
 import FeaturePanel, { ENTITY_TABLE } from "./FeaturePanel";
@@ -76,10 +75,41 @@ const MINT = "#a7f3d0";
 // Pastures: warm tan, distinct from kelly (ag fields), canola light
 // green, wheat amber, the timber palette, and pivot blue.
 const PASTURE_TAN = "#d2b48c";
+// Wetlands (OPEN wetlands: marsh, sloughs, duck holes; forested
+// bottomland stays a timber stand): muted steel blue, checked distinct
+// from kelly, every crop color, the timber palette including planted
+// pine's deep teal #0f766e and the "other" gray #6b7280, pivot light
+// blue #7dd3fc/#38bdf8, pasture tan, and entity outlines.
+const WETLAND_BLUE = "#6487a8";
 
 const POLYGON_TYPES: EntityType[] = [
-  "property", "parcel", "field", "pasture", "timber_stand",
+  "property", "parcel", "field", "pasture", "wetland", "timber_stand",
 ];
+
+// Layer toggle defaults: parcels start OFF (they clutter the default
+// view); the user's choices persist per browser and win over defaults.
+const LAYER_DEFAULTS: LayerVisibility = {
+  property: true,
+  parcel: false,
+  field: true,
+  pasture: true,
+  wetland: true,
+  timber_stand: true,
+  road: true,
+  asset: true,
+};
+const LAYER_STORAGE_KEY = "turnrow.map.layers.v1";
+
+function loadLayerVisibility(): LayerVisibility {
+  if (typeof window === "undefined") return LAYER_DEFAULTS;
+  try {
+    const raw = window.localStorage.getItem(LAYER_STORAGE_KEY);
+    if (!raw) return LAYER_DEFAULTS;
+    return { ...LAYER_DEFAULTS, ...(JSON.parse(raw) as Partial<LayerVisibility>) };
+  } catch {
+    return LAYER_DEFAULTS;
+  }
+}
 
 function geomOf(row: AnyGeoRow): Geometry | null {
   if ("boundary_geojson" in row) return row.boundary_geojson;
@@ -112,15 +142,11 @@ function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection 
       props.standType = (row as TimberStandGeo).stand_type ?? "other";
     }
     features.push({ type: "Feature", geometry: g, properties: props });
-    // Pivot circles and laterals keep their letter marker at the
-    // primary center for low-zoom recognition (clickable like the
-    // polygon).
+    // Pivot coverage shapes keep their P marker at the center for
+    // low-zoom recognition (clickable like the polygon).
     if (entityType === "asset") {
       const a = row as AssetGeo;
-      if (
-        (a.asset_type === "irrigation_pivot" || a.asset_type === "irrigation_lateral") &&
-        g.type !== "Point"
-      ) {
+      if (a.asset_type === "irrigation_pivot" && g.type !== "Point") {
         const lon = Number(a.details?.center_lon);
         const lat = Number(a.details?.center_lat);
         const mp = toMultiPolygon(g);
@@ -178,6 +204,7 @@ export default function MapView({
   const [parcels, setParcels] = useState<ParcelGeo[]>([]);
   const [fields, setFields] = useState<FieldGeo[]>([]);
   const [pastures, setPastures] = useState<PastureGeo[]>([]);
+  const [wetlands, setWetlands] = useState<WetlandGeo[]>([]);
   const [timber, setTimber] = useState<TimberStandGeo[]>([]);
   const [roads, setRoads] = useState<RoadGeo[]>([]);
   const [assets, setAssets] = useState<AssetGeo[]>([]);
@@ -196,15 +223,14 @@ export default function MapView({
   modeRef.current = mode;
 
   const [selected, setSelected] = useState<SelectedFeature | null>(null);
-  const [visibility, setVisibility] = useState<LayerVisibility>({
-    property: true,
-    parcel: true,
-    field: true,
-    pasture: true,
-    timber_stand: true,
-    road: true,
-    asset: true,
-  });
+  const [visibility, setVisibility] = useState<LayerVisibility>(loadLayerVisibility);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LAYER_STORAGE_KEY, JSON.stringify(visibility));
+    } catch {
+      // Private browsing without storage: toggles just do not persist.
+    }
+  }, [visibility]);
   const [fullscreen, setFullscreen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
@@ -234,8 +260,8 @@ export default function MapView({
   drawingShapeRef.current = setDrawingShape;
 
   // Parametric pivot coverage editor: the geometry is always derived
-  // from the composite params (base circle/arc + extension zones +
-  // skips + cutouts + towable positions); never vertex-edited.
+  // from the params (base circle/arc + manually drawn add/cut
+  // polygons); never vertex-edited.
   // assetId null = a NEW pivot from the Add menu (crosshair placed the
   // center); Save then asks for name/property before inserting.
   const [pivotEdit, setPivotEdit] = useState<{
@@ -244,9 +270,10 @@ export default function MapView({
   } | null>(null);
   const pivotEditRef = useRef(pivotEdit);
   pivotEditRef.current = pivotEdit;
-  // Drawing an exclusion cutout (pond, road) inside the pivot editor.
-  const pivotCutoutRef = useRef(false);
-  const [drawingCutout, setDrawingCutout] = useState(false);
+  // Drawing an add (irrigated lobe) or cut (pond, obstacle) polygon
+  // inside the pivot editor.
+  const pivotShapeKindRef = useRef<"add" | "cut" | null>(null);
+  const [pivotDrawKind, setPivotDrawKind] = useState<"add" | "cut" | null>(null);
   // Crosshair placement is for a new pivot's center (Add menu), not an
   // asset pin.
   const placeForPivotRef = useRef(false);
@@ -277,11 +304,12 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, pas, t, r, a, mappings, farmData, connections, ents] = await Promise.all([
+    const [p, pa, f, pas, w, t, r, a, mappings, farmData, connections, ents] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
       supabase.from("pastures_geo").select("*").order("name"),
+      supabase.from("wetlands_geo").select("*").order("name"),
       supabase.from("timber_stands_geo").select("*").order("name"),
       supabase.from("roads_geo").select("*").order("name"),
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
@@ -295,6 +323,7 @@ export default function MapView({
     setParcels((pa.data as ParcelGeo[]) ?? []);
     setFields((f.data as FieldGeo[]) ?? []);
     setPastures((pas.data as PastureGeo[]) ?? []);
+    setWetlands((w.data as WetlandGeo[]) ?? []);
     setTimber((t.data as TimberStandGeo[]) ?? []);
     setRoads((r.data as RoadGeo[]) ?? []);
     setAssets((a.data as AssetGeo[]) ?? []);
@@ -353,11 +382,12 @@ export default function MapView({
       parcel: parcels,
       field: fields,
       pasture: pastures,
+      wetland: wetlands,
       timber_stand: timber,
       road: roads,
       asset: assets,
     }),
-    [properties, parcels, fields, pastures, timber, roads, assets]
+    [properties, parcels, fields, pastures, wetlands, timber, roads, assets]
   );
 
   const selectedRow: AnyGeoRow | null = useMemo(() => {
@@ -393,6 +423,7 @@ export default function MapView({
       ["roads-hit"],
       ["fields-fill"],
       ["pastures-fill"],
+      ["wetlands-fill"],
       ["timber-fill"],
       ["parcels-fill"],
       ["properties-fill"],
@@ -434,9 +465,10 @@ export default function MapView({
     map.on("load", () => {
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
-        "properties", "parcels", "fields", "pastures", "timber", "roads", "assets",
+        "properties", "parcels", "fields", "pastures", "wetlands", "timber",
+        "roads", "assets",
         "property-labels", "parcel-labels", "field-labels", "pasture-labels",
-        "timber-labels",
+        "wetland-labels", "timber-labels",
       ]) {
         map.addSource(id, { type: "geojson", data: empty });
       }
@@ -474,6 +506,12 @@ export default function MapView({
       map.addLayer({ id: "pastures-line", type: "line", source: "pastures",
         paint: { "line-color": PASTURE_TAN, "line-width": 2 } });
 
+      // Wetlands: muted steel blue (open wetlands only)
+      map.addLayer({ id: "wetlands-fill", type: "fill", source: "wetlands",
+        paint: { "fill-color": WETLAND_BLUE, "fill-opacity": 0.3 } });
+      map.addLayer({ id: "wetlands-line", type: "line", source: "wetlands",
+        paint: { "line-color": WETLAND_BLUE, "line-width": 2 } });
+
       // Ag fields: kelly green
       map.addLayer({ id: "fields-fill", type: "fill", source: "fields",
         paint: { "fill-color": KELLY, "fill-opacity": 0.18 } });
@@ -493,9 +531,8 @@ export default function MapView({
       // Asset lines (pipe, fence): dashed light blue, distinct from roads.
       // Asset polygons (footprints, pond surface): faint white. Pivot
       // coverage circles get their own light blue look below.
-      const IRRIGATION_TYPES = ["irrigation_pivot", "irrigation_lateral"];
       const isIrrigation: mapboxgl.Expression = [
-        "in", ["get", "assetType"], ["literal", IRRIGATION_TYPES],
+        "==", ["get", "assetType"], "irrigation_pivot",
       ];
       const notPivot: mapboxgl.Expression = ["!", isIrrigation];
       map.addLayer({ id: "assets-fill", type: "fill", source: "assets",
@@ -515,7 +552,7 @@ export default function MapView({
         paint: { "line-color": "#bae6fd", "line-width": 2, "line-dasharray": [2, 2] } });
 
       // Selection highlights
-      for (const src of ["properties", "parcels", "fields", "pastures", "timber"]) {
+      for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber"]) {
         map.addLayer({ id: `${src}-selected`, type: "line", source: src,
           paint: { "line-color": "#ffffff", "line-width": 4.5 },
           filter: ["==", ["get", "id"], ""] });
@@ -545,6 +582,10 @@ export default function MapView({
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#f5ead7", "text-halo-color": "#57431f", "text-halo-width": 1.2 } });
+      map.addLayer({ id: "wetland-labels", type: "symbol", source: "wetland-labels",
+        layout: { "text-field": ["get", "name"], "text-size": 11.5,
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#e2ecf5", "text-halo-color": "#2c3f52", "text-halo-width": 1.2 } });
       map.addLayer({ id: "timber-labels", type: "symbol", source: "timber-labels",
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
@@ -627,7 +668,8 @@ export default function MapView({
     map.on("click", (e) => clickRef.current(e));
     for (const layer of [
       "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
-      "timber-fill", "roads-hit", "assets-circle", "assets-line", "assets-fill",
+      "wetlands-fill", "timber-fill", "roads-hit", "assets-circle",
+      "assets-line", "assets-fill",
     ]) {
       map.on("mouseenter", layer, () => {
         if (modeRef.current === "view") map.getCanvas().style.cursor = "pointer";
@@ -641,9 +683,9 @@ export default function MapView({
       const geometry = e.features[0]?.geometry;
       if (!geometry) return;
       drawingShapeRef.current(false);
-      if (pivotCutoutRef.current && geometry.type === "Polygon") {
-        // Exclusion cutout drawn inside the pivot editor.
-        addPivotCutoutRef.current(geometry);
+      if (pivotShapeKindRef.current && geometry.type === "Polygon") {
+        // Add/cut polygon drawn inside the pivot editor.
+        addPivotShapeRef.current(geometry);
         return;
       }
       if (splitTargetRef.current && geometry.type === "LineString") {
@@ -713,6 +755,7 @@ export default function MapView({
     }
     setData("fields", fieldsFC);
     setData("pastures", rowsToFC(pastures, "pasture"));
+    setData("wetlands", rowsToFC(wetlands, "wetland"));
     setData("timber", rowsToFC(timber, "timber_stand"));
     setData("roads", rowsToFC(roads, "road"));
     setData("assets", rowsToFC(assets, "asset"));
@@ -720,20 +763,21 @@ export default function MapView({
     setData("parcel-labels", rowsToLabelFC(parcels, "parcel"));
     setData("field-labels", rowsToLabelFC(fields, "field"));
     setData("pasture-labels", rowsToLabelFC(pastures, "pasture"));
+    setData("wetland-labels", rowsToLabelFC(wetlands, "wetland"));
     setData("timber-labels", rowsToLabelFC(timber, "timber_stand"));
 
     if (!didFitRef.current) {
       const box = bboxOf([
         ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
-        ...pastures.map(geomOf), ...timber.map(geomOf), ...roads.map(geomOf),
-        ...assets.map(geomOf),
+        ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
+        ...roads.map(geomOf), ...assets.map(geomOf),
       ]);
       if (box) {
         map.fitBounds(box, { padding: 60, duration: 0 });
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, timber, roads, assets, farmActivity, entities]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, assets, farmActivity, entities]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -816,6 +860,7 @@ export default function MapView({
       ["parcel", ["parcels-fill", "parcels-line", "parcel-labels"]],
       ["field", ["fields-fill", "fields-line", "field-labels"]],
       ["pasture", ["pastures-fill", "pastures-line", "pasture-labels"]],
+      ["wetland", ["wetlands-fill", "wetlands-line", "wetland-labels"]],
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
       ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
@@ -834,18 +879,18 @@ export default function MapView({
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     const bySource: Record<string, string> = {
-      properties: "", parcels: "", fields: "", pastures: "", timber: "",
-      roads: "", assets: "",
+      properties: "", parcels: "", fields: "", pastures: "", wetlands: "",
+      timber: "", roads: "", assets: "",
     };
     if (selected) {
       const srcName: Record<EntityType, string> = {
         property: "properties", parcel: "parcels", field: "fields",
-        pasture: "pastures", timber_stand: "timber", road: "roads",
-        asset: "assets",
+        pasture: "pastures", wetland: "wetlands", timber_stand: "timber",
+        road: "roads", asset: "assets",
       };
       bySource[srcName[selected.entityType]] = selected.id;
     }
-    for (const src of ["properties", "parcels", "fields", "pastures", "timber"]) {
+    for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber"]) {
       if (map.getLayer(`${src}-selected`)) {
         map.setFilter(`${src}-selected`, ["==", ["get", "id"], bySource[src]]);
       }
@@ -1047,24 +1092,32 @@ export default function MapView({
 
   // ---- Pivot coverage circle editor ----
 
-  // Finish drawing an exclusion cutout: store it and return to handles.
-  const addPivotCutoutRef = useRef<(polygon: Polygon) => void>(() => {});
-  addPivotCutoutRef.current = (polygon: Polygon) => {
-    pivotCutoutRef.current = false;
-    setDrawingCutout(false);
+  // Finish drawing an add/cut polygon: store it and return to handles.
+  const addPivotShapeRef = useRef<(polygon: Polygon) => void>(() => {});
+  addPivotShapeRef.current = (polygon: Polygon) => {
+    const kind = pivotShapeKindRef.current;
+    pivotShapeKindRef.current = null;
+    setPivotDrawKind(null);
     drawRef.current?.deleteAll();
+    if (!kind) return;
     setPivotEdit((edit) =>
       edit
-        ? { ...edit, params: { ...edit.params, cutouts: [...edit.params.cutouts, polygon] } }
+        ? {
+            ...edit,
+            params:
+              kind === "add"
+                ? { ...edit.params, addPolygons: [...edit.params.addPolygons, polygon] }
+                : { ...edit.params, cutPolygons: [...edit.params.cutPolygons, polygon] },
+          }
         : edit
     );
   };
 
-  function startPivotCutout() {
+  function startPivotShape(kind: "add" | "cut") {
     const draw = drawRef.current;
     if (!draw) return;
-    pivotCutoutRef.current = true;
-    setDrawingCutout(true);
+    pivotShapeKindRef.current = kind;
+    setPivotDrawKind(kind);
     draw.changeMode("draw_polygon");
   }
 
@@ -1072,73 +1125,34 @@ export default function MapView({
     () => {}
   );
   applyPivotDragRef.current = (role, lngLat) => {
-    // Base drags on a position (the base circle or a towable position).
-    const dragPosition = (pos: PivotPosition, sub: string): PivotPosition => {
-      if (sub === "center") return { ...pos, center: lngLat };
-      if (sub === "radius") {
-        return { ...pos, radiusFt: Math.max(50, Math.round(distanceFt(pos.center, lngLat))) };
-      }
-      if (sub === "start" && pos.endBearingDeg !== null) {
-        // Snap so the SWEEP lands on 90/180/270 within ~3 degrees.
-        let bearing = bearingTo(pos.center, lngLat);
-        for (const target of [90, 180, 270]) {
-          if (Math.abs(sweepDegrees(bearing, pos.endBearingDeg) - target) <= 3) {
-            bearing = (pos.endBearingDeg - target + 360) % 360;
-            break;
-          }
-        }
-        return { ...pos, startBearingDeg: Math.round(bearing * 10) / 10 };
-      }
-      if (sub === "end" && pos.startBearingDeg !== null) {
-        const bearing = snapEndBearing(pos.startBearingDeg, bearingTo(pos.center, lngLat));
-        return { ...pos, endBearingDeg: Math.round(bearing * 10) / 10 };
-      }
-      return pos;
-    };
     setPivotEdit((edit) => {
       if (!edit) return edit;
       const p = edit.params;
-      const parts = role.split(":");
-      if (parts[0] === "ext") {
-        const i = Number(parts[1]);
-        const zone = p.extensions[i];
-        if (!zone) return edit;
-        const next = { ...zone };
-        if (parts[2] === "radius") {
-          next.outerRadiusFt = Math.max(
-            p.radiusFt + 10,
-            Math.round(distanceFt(p.center, lngLat))
-          );
-        } else {
-          const bearing = Math.round(bearingTo(p.center, lngLat) * 10) / 10;
-          if (parts[2] === "start") next.startBearingDeg = bearing;
-          else next.endBearingDeg = bearing;
+      if (role === "center") {
+        return { ...edit, params: { ...p, center: lngLat } };
+      }
+      if (role === "radius") {
+        return {
+          ...edit,
+          params: { ...p, radiusFt: Math.max(50, Math.round(distanceFt(p.center, lngLat))) },
+        };
+      }
+      if (role === "start" && p.endBearingDeg !== null) {
+        // Snap so the SWEEP lands on 90/180/270 within ~3 degrees.
+        let bearing = bearingTo(p.center, lngLat);
+        for (const target of [90, 180, 270]) {
+          if (Math.abs(sweepDegrees(bearing, p.endBearingDeg) - target) <= 3) {
+            bearing = (p.endBearingDeg - target + 360) % 360;
+            break;
+          }
         }
-        const extensions = p.extensions.map((z, j) => (j === i ? next : z));
-        return { ...edit, params: { ...p, extensions } };
+        return { ...edit, params: { ...p, startBearingDeg: Math.round(bearing * 10) / 10 } };
       }
-      if (parts[0] === "skip") {
-        const i = Number(parts[1]);
-        const zone = p.skips[i];
-        if (!zone) return edit;
-        const bearing = Math.round(bearingTo(p.center, lngLat) * 10) / 10;
-        const next =
-          parts[2] === "start"
-            ? { ...zone, startBearingDeg: bearing }
-            : { ...zone, endBearingDeg: bearing };
-        const skips = p.skips.map((z, j) => (j === i ? next : z));
-        return { ...edit, params: { ...p, skips } };
+      if (role === "end" && p.startBearingDeg !== null) {
+        const bearing = snapEndBearing(p.startBearingDeg, bearingTo(p.center, lngLat));
+        return { ...edit, params: { ...p, endBearingDeg: Math.round(bearing * 10) / 10 } };
       }
-      if (parts[0] === "pos") {
-        const i = Number(parts[1]);
-        const pos = p.positions[i];
-        if (!pos) return edit;
-        const positions = p.positions.map((q, j) =>
-          j === i ? dragPosition(q, parts[2]) : q
-        );
-        return { ...edit, params: { ...p, positions } };
-      }
-      return { ...edit, params: { ...p, ...dragPosition(p, role) } };
+      return edit;
     });
   };
 
@@ -1166,56 +1180,29 @@ export default function MapView({
         },
       ],
     });
-    const handleFeatures: Feature[] = [];
     const at = (
       center: [number, number],
       radiusFt: number,
       bearing: number
     ): [number, number] =>
       pivotDestination(center, radiusFt * 0.3048, bearing) as [number, number];
-    const positionHandles = (pos: PivotPosition, prefix: string) => {
-      const midBearing = pos.fullCircle
-        ? 90
-        : (pos.startBearingDeg! +
-            sweepDegrees(pos.startBearingDeg!, pos.endBearingDeg!) / 2) %
-          360;
+    const midBearing = p.fullCircle
+      ? 90
+      : (p.startBearingDeg! + sweepDegrees(p.startBearingDeg!, p.endBearingDeg!) / 2) % 360;
+    const handleFeatures: Feature[] = [
+      { type: "Feature", properties: { role: "center", kind: "center" },
+        geometry: { type: "Point", coordinates: p.center } },
+      { type: "Feature", properties: { role: "radius", kind: "radius" },
+        geometry: { type: "Point", coordinates: at(p.center, p.radiusFt, midBearing) } },
+    ];
+    if (!p.fullCircle && p.startBearingDeg !== null && p.endBearingDeg !== null) {
       handleFeatures.push(
-        { type: "Feature", properties: { role: `${prefix}center`, kind: "center" },
-          geometry: { type: "Point", coordinates: pos.center } },
-        { type: "Feature", properties: { role: `${prefix}radius`, kind: "radius" },
-          geometry: { type: "Point", coordinates: at(pos.center, pos.radiusFt, midBearing) } }
+        { type: "Feature", properties: { role: "start", kind: "start" },
+          geometry: { type: "Point", coordinates: at(p.center, p.radiusFt, p.startBearingDeg) } },
+        { type: "Feature", properties: { role: "end", kind: "end" },
+          geometry: { type: "Point", coordinates: at(p.center, p.radiusFt, p.endBearingDeg) } }
       );
-      if (!pos.fullCircle && pos.startBearingDeg !== null && pos.endBearingDeg !== null) {
-        handleFeatures.push(
-          { type: "Feature", properties: { role: `${prefix}start`, kind: "start" },
-            geometry: { type: "Point", coordinates: at(pos.center, pos.radiusFt, pos.startBearingDeg) } },
-          { type: "Feature", properties: { role: `${prefix}end`, kind: "end" },
-            geometry: { type: "Point", coordinates: at(pos.center, pos.radiusFt, pos.endBearingDeg) } }
-        );
-      }
-    };
-    positionHandles(p, "");
-    p.positions.forEach((pos, i) => positionHandles(pos, `pos:${i}:`));
-    p.extensions.forEach((z, i) => {
-      const mid =
-        (z.startBearingDeg + sweepDegrees(z.startBearingDeg, z.endBearingDeg) / 2) % 360;
-      handleFeatures.push(
-        { type: "Feature", properties: { role: `ext:${i}:start`, kind: "start" },
-          geometry: { type: "Point", coordinates: at(p.center, z.outerRadiusFt, z.startBearingDeg) } },
-        { type: "Feature", properties: { role: `ext:${i}:end`, kind: "end" },
-          geometry: { type: "Point", coordinates: at(p.center, z.outerRadiusFt, z.endBearingDeg) } },
-        { type: "Feature", properties: { role: `ext:${i}:radius`, kind: "radius" },
-          geometry: { type: "Point", coordinates: at(p.center, z.outerRadiusFt, mid) } }
-      );
-    });
-    p.skips.forEach((z, i) => {
-      handleFeatures.push(
-        { type: "Feature", properties: { role: `skip:${i}:start`, kind: "skip" },
-          geometry: { type: "Point", coordinates: at(p.center, p.radiusFt, z.startBearingDeg) } },
-        { type: "Feature", properties: { role: `skip:${i}:end`, kind: "skip" },
-          geometry: { type: "Point", coordinates: at(p.center, p.radiusFt, z.endBearingDeg) } }
-      );
-    });
+    }
     handles?.setData({ type: "FeatureCollection", features: handleFeatures });
   }, [pivotEdit, mapLoaded]);
 
@@ -1224,7 +1211,6 @@ export default function MapView({
     const row = selectedRow as AssetGeo | null;
     if (!map || !row || !selected || selected.entityType !== "asset") return;
     const details = (row.details ?? {}) as Record<string, unknown>;
-    if (details.custom_shape === true) return; // one-way: vertex editing only
     let params = compositeFromDetails(details);
     if (!params) {
       const g = row.geom_geojson;
@@ -1239,10 +1225,8 @@ export default function MapView({
         fullCircle: true,
         startBearingDeg: null,
         endBearingDeg: null,
-        extensions: [],
-        skips: [],
-        cutouts: [],
-        positions: [],
+        addPolygons: [],
+        cutPolygons: [],
       };
     }
     setSelected(null);
@@ -1256,8 +1240,8 @@ export default function MapView({
   function cancelPivotEditor() {
     setPivotEdit(null);
     setPendingPivotSave(false);
-    pivotCutoutRef.current = false;
-    setDrawingCutout(false);
+    pivotShapeKindRef.current = null;
+    setPivotDrawKind(null);
     setMode("view");
     setSaveError(null);
   }
@@ -1280,41 +1264,6 @@ export default function MapView({
     };
   }
 
-  // One-way escape hatch: freeze the generated polygon as ordinary
-  // vertex-editable geometry for machines the parameters cannot express.
-  async function convertPivotToCustomShape() {
-    const edit = pivotEditRef.current;
-    if (!edit || edit.assetId === null) return;
-    if (
-      !window.confirm(
-        "Convert to a custom shape? The circle handles go away for good; you edit the outline point by point from then on."
-      )
-    ) {
-      return;
-    }
-    const asset = assets.find((a) => a.id === edit.assetId);
-    const derived = pivotDerived(
-      edit.params,
-      (asset?.details ?? {}) as Record<string, unknown>
-    );
-    setSaving(true);
-    const { error: dErr } = await supabase
-      .from("assets")
-      .update({ details: { ...derived.details, custom_shape: true } })
-      .eq("id", edit.assetId);
-    const gErr = dErr
-      ? null
-      : await applyGeometry({ entityType: "asset", id: edit.assetId }, derived.geometry);
-    setSaving(false);
-    if (dErr || gErr) {
-      setSaveError("Could not convert. " + (dErr?.message ?? gErr?.message ?? ""));
-      return;
-    }
-    const sel: SelectedFeature = { entityType: "asset", id: edit.assetId };
-    cancelPivotEditor();
-    await loadData();
-    setSelected(sel);
-  }
 
   // Save from the Add-menu flow: the circle is drawn, now name it and
   // pick a property (suggested from the center's location), then insert
@@ -1643,10 +1592,8 @@ export default function MapView({
           fullCircle: true,
           startBearingDeg: null,
           endBearingDeg: null,
-          extensions: [],
-          skips: [],
-          cutouts: [],
-          positions: [],
+          addPolygons: [],
+          cutPolygons: [],
         },
       });
       return;
@@ -1751,36 +1698,6 @@ export default function MapView({
           name: payload.name, road_type: payload.roadType },
         "road", pendingLine
       );
-    } else if (payload.kind === "irrigation_lateral") {
-      // The drawn line is the travel path; coverage is the path swept
-      // by the machine length (flat ends), saved as the geometry with
-      // the path kept in details for regeneration.
-      const path = [...pendingLine.coordinates].sort((a, b) => b.length - a.length)[0];
-      const derived = payload.machineLengthFt
-        ? lateralGeometry(path, payload.machineLengthFt, [])
-        : null;
-      if (!derived) {
-        setSaving(false);
-        setSaveError("Enter the machine length in feet.");
-        return;
-      }
-      sel = await insertAndSetGeometry(
-        "assets",
-        {
-          organization_id: orgId,
-          property_id: payload.propertyId,
-          name: payload.name,
-          asset_type: "irrigation_lateral",
-          details: {
-            length_ft: Math.round(payload.machineLengthFt!),
-            path,
-            acres_covered: Math.round(derived.plantableAcres * 10) / 10,
-            acres_watered: Math.round(derived.grossAcres * 10) / 10,
-          },
-        },
-        "asset",
-        derived.plantable
-      );
     } else {
       sel = await insertAndSetGeometry(
         "assets",
@@ -1820,7 +1737,8 @@ export default function MapView({
     if (!map) return;
     const box = bboxOf([
       ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
-      ...timber.map(geomOf), ...roads.map(geomOf), ...assets.map(geomOf),
+      ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
+      ...roads.map(geomOf), ...assets.map(geomOf),
     ]);
     if (box) map.fitBounds(box, { padding: 60 });
   }
@@ -2038,37 +1956,38 @@ export default function MapView({
               setPivotEdit((edit) =>
                 edit ? { ...edit, params: { ...edit.params, ...patch } } : edit
               );
-            const hasCutouts = p.cutouts.length > 0;
+            const hasCuts = p.cutPolygons.length > 0;
             const chipClass =
               "flex items-center gap-1 rounded bg-white/15 px-2 py-0.5 text-xs";
             const addClass =
               "rounded bg-white/15 px-2.5 py-1 text-xs font-semibold hover:bg-white/25";
             return (
               <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[94%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
-                {drawingCutout ? (
+                {pivotDrawKind ? (
                   <>
                     <p className="text-xs">
-                      Draw the cutout (pond, road, rock) on the map; double tap
-                      the last point to finish. It cuts a hole in the coverage.
+                      {pivotDrawKind === "add"
+                        ? "Draw the irrigated area to add (corner lobe, end gun reach); double tap the last point to finish. It joins the coverage."
+                        : "Draw the area to cut out (pond, waterway, obstacle); double tap the last point to finish. It cuts a hole in the coverage."}
                     </p>
                     <div className="mt-1.5 flex justify-center">
                       <button
                         onClick={() => {
-                          pivotCutoutRef.current = false;
-                          setDrawingCutout(false);
+                          pivotShapeKindRef.current = null;
+                          setPivotDrawKind(null);
                           drawRef.current?.deleteAll();
                         }}
                         className={addClass}
                       >
-                        Cancel cutout
+                        Cancel drawing
                       </button>
                     </div>
                   </>
                 ) : (
                   <>
                     <p className="text-xs">
-                      White handle moves, blue is a radius, green/red are arc
-                      edges, orange are skip wedges.
+                      White handle moves the center, blue sets the radius
+                      {p.fullCircle ? "" : ", green/red set the arc"}.
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center justify-center gap-2">
                       <label className="flex items-center gap-1 text-xs">
@@ -2080,7 +1999,7 @@ export default function MapView({
                             setParams({ radiusFt: Math.max(50, Number(e.target.value) || 50) })
                           }
                           className="w-20 rounded border-0 px-1.5 py-0.5 text-xs text-gray-900"
-                          title="Wetted length in feet; end gun sectors get their own zones"
+                          title="Wetted length in feet; draw added areas for end gun or corner reach"
                         />
                         ft
                       </label>
@@ -2107,7 +2026,7 @@ export default function MapView({
                         ))}
                       </span>
                       <span className="text-xs tabular-nums">
-                        {hasCutouts
+                        {hasCuts
                           ? `${formatAcres(geo.plantableAcres)} plantable of ${formatAcres(geo.grossAcres)} watered`
                           : `${formatAcres(geo.grossAcres)} ac`}
                         {p.fullCircle
@@ -2119,156 +2038,49 @@ export default function MapView({
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
                       <button
-                        onClick={() =>
-                          setParams({
-                            extensions: [
-                              ...p.extensions,
-                              {
-                                startBearingDeg: 315,
-                                endBearingDeg: 45,
-                                outerRadiusFt: Math.round(p.radiusFt + 90),
-                              },
-                            ],
-                          })
-                        }
-                        title="End gun sector, corner arm lobe, or bender reach: a sector at a longer radius"
+                        onClick={() => startPivotShape("add")}
+                        title="Draw an irrigated area that joins the coverage (corner arm lobe, end gun reach, odd extension)"
                         className={addClass}
                       >
-                        + Extension
+                        + Add area
                       </button>
                       <button
-                        onClick={() =>
-                          setParams({
-                            skips: [...p.skips, { startBearingDeg: 80, endBearingDeg: 110 }],
-                          })
-                        }
-                        title="A wedge never watered (barn, pond, road wrap)"
+                        onClick={() => startPivotShape("cut")}
+                        title="Draw an area to cut out of the coverage (pond, waterway, obstacle)"
                         className={addClass}
                       >
-                        + Skip
+                        + Cut area
                       </button>
-                      <button
-                        onClick={startPivotCutout}
-                        title="Draw a small polygon that cuts a hole (watered but not plantable)"
-                        className={addClass}
-                      >
-                        + Cutout
-                      </button>
-                      <button
-                        onClick={() =>
-                          setParams({
-                            positions: [
-                              ...p.positions,
-                              {
-                                center: pivotDestination(
-                                  p.center,
-                                  p.radiusFt * 0.3048 * 2.2,
-                                  90
-                                ) as [number, number],
-                                radiusFt: p.radiusFt,
-                                fullCircle: true,
-                                startBearingDeg: null,
-                                endBearingDeg: null,
-                                extensions: [],
-                                skips: [],
-                              },
-                            ],
-                          })
-                        }
-                        title="Towable pivot: another position for the same machine"
-                        className={addClass}
-                      >
-                        + Position
-                      </button>
-                      {pivotEdit.assetId !== null ? (
-                        <button
-                          onClick={convertPivotToCustomShape}
-                          title="One-way: freeze the shape for point-by-point editing"
-                          className={addClass}
-                        >
-                          Convert to custom shape
-                        </button>
-                      ) : null}
                     </div>
-                    {p.extensions.length + p.skips.length + p.cutouts.length + p.positions.length >
-                    0 ? (
+                    {p.addPolygons.length + p.cutPolygons.length > 0 ? (
                       <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
-                        {p.extensions.map((z, i) => (
-                          <span key={`e${i}`} className={chipClass}>
-                            Ext {i + 1}: {Math.round(z.outerRadiusFt)} ft
-                            <input
-                              type="number"
-                              value={Math.round(z.outerRadiusFt)}
-                              onChange={(e) =>
-                                setParams({
-                                  extensions: p.extensions.map((q, j) =>
-                                    j === i
-                                      ? {
-                                          ...q,
-                                          outerRadiusFt: Math.max(
-                                            p.radiusFt + 10,
-                                            Number(e.target.value) || 0
-                                          ),
-                                        }
-                                      : q
-                                  ),
-                                })
-                              }
-                              className="w-16 rounded border-0 px-1 py-0 text-xs text-gray-900"
-                            />
+                        {p.addPolygons.map((_, i) => (
+                          <span key={`a${i}`} className={chipClass}>
+                            Add {i + 1}
                             <button
                               onClick={() =>
                                 setParams({
-                                  extensions: p.extensions.filter((_, j) => j !== i),
+                                  addPolygons: p.addPolygons.filter((_, j) => j !== i),
                                 })
                               }
                               className="font-semibold hover:text-red-300"
-                              title="Remove this extension zone"
+                              title="Remove this added area"
                             >
                               ×
                             </button>
                           </span>
                         ))}
-                        {p.skips.map((z, i) => (
-                          <span key={`s${i}`} className={chipClass}>
-                            Skip {i + 1}:{" "}
-                            {Math.round(sweepDegrees(z.startBearingDeg, z.endBearingDeg))}°
-                            <button
-                              onClick={() =>
-                                setParams({ skips: p.skips.filter((_, j) => j !== i) })
-                              }
-                              className="font-semibold hover:text-red-300"
-                              title="Remove this skip wedge"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        ))}
-                        {p.cutouts.map((_, i) => (
+                        {p.cutPolygons.map((_, i) => (
                           <span key={`c${i}`} className={chipClass}>
-                            Cutout {i + 1}
-                            <button
-                              onClick={() =>
-                                setParams({ cutouts: p.cutouts.filter((_, j) => j !== i) })
-                              }
-                              className="font-semibold hover:text-red-300"
-                              title="Remove this cutout"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        ))}
-                        {p.positions.map((_, i) => (
-                          <span key={`p${i}`} className={chipClass}>
-                            Position {i + 2}
+                            Cut {i + 1}
                             <button
                               onClick={() =>
                                 setParams({
-                                  positions: p.positions.filter((_, j) => j !== i),
+                                  cutPolygons: p.cutPolygons.filter((_, j) => j !== i),
                                 })
                               }
                               className="font-semibold hover:text-red-300"
-                              title="Remove this towable position"
+                              title="Remove this cut area"
                             >
                               ×
                             </button>
