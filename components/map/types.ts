@@ -7,6 +7,7 @@ import type {
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
+  UtilityEasementGeo,
   WetlandGeo,
 } from "@/types/db";
 
@@ -25,6 +26,7 @@ export type AnyGeoRow =
   | WetlandGeo
   | TimberStandGeo
   | RoadGeo
+  | UtilityEasementGeo
   | AssetGeo;
 
 export interface LayerVisibility {
@@ -35,6 +37,7 @@ export interface LayerVisibility {
   wetland: boolean;
   timber_stand: boolean;
   road: boolean;
+  utility_easement: boolean;
   asset: boolean;
 }
 

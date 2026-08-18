@@ -13,6 +13,7 @@ const ENTITY_TYPES: EntityType[] = [
   "wetland",
   "timber_stand",
   "road",
+  "utility_easement",
   "asset",
 ];
 
@@ -22,8 +23,13 @@ export default async function MapPage({
 }: {
   searchParams: Promise<{ focus?: string }>;
 }) {
-  const { profile } = await requireOrg();
+  const { supabase, profile } = await requireOrg();
   const { focus: focusParam } = await searchParams;
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("name")
+    .eq("id", profile.organization_id)
+    .single();
 
   let focus: SelectedFeature | null = null;
   if (focusParam) {
@@ -33,5 +39,11 @@ export default async function MapPage({
     }
   }
 
-  return <MapClient orgId={profile.organization_id!} focus={focus} />;
+  return (
+    <MapClient
+      orgId={profile.organization_id!}
+      orgName={org?.name ?? null}
+      focus={focus}
+    />
+  );
 }

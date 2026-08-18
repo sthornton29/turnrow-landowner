@@ -181,6 +181,28 @@ export interface RoadGeo {
   updated_at: string;
 }
 
+export type EasementType = "powerline" | "pipeline" | "other";
+
+// Utility easements (powerline/pipeline corridors). NOT the farm's own
+// underground irrigation pipe (that is an asset); labels always say
+// "easement" so the two never read as the same thing.
+export interface UtilityEasementGeo {
+  id: string;
+  organization_id: string;
+  property_id: string | null;
+  name: string;
+  easement_type: EasementType;
+  holder: string | null;
+  width_ft: number | null;
+  recorded_ref: string | null;
+  notes: string | null;
+  length_feet: number | null;
+  miles: number | null;
+  geom_geojson: MultiLineString | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AssetGeo {
   id: string;
   organization_id: string;
@@ -230,4 +252,5 @@ export type EntityType =
   | "wetland"
   | "timber_stand"
   | "road"
+  | "utility_easement"
   | "asset";

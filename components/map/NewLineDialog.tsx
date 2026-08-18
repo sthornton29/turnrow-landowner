@@ -1,16 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { ROAD_TYPE_LABELS } from "@/lib/assetTypes";
-import type { PropertyGeo, RoadType } from "@/types/db";
+import { EASEMENT_TYPE_LABELS, ROAD_TYPE_LABELS } from "@/lib/assetTypes";
+import type { EasementType, PropertyGeo, RoadType } from "@/types/db";
 
-export type LineKind = "road" | "underground_pipe" | "fence";
+export type LineKind = "road" | "underground_pipe" | "fence" | "utility_easement";
 
 export interface NewLinePayload {
   kind: LineKind;
   name: string;
   propertyId: string | null; // required for road
   roadType: RoadType | null;
+  // Utility easements (the utility's corridor, not the farm's own pipe)
+  easementType: EasementType | null;
+  holder: string | null;
+  widthFt: number | null;
+  recordedRef: string | null;
 }
 
 // Shown after a line is drawn: is it a road, buried pipe, or a fence?
@@ -34,8 +39,12 @@ export default function NewLineDialog({
   const [propertyId, setPropertyId] = useState(
     suggestedPropertyId ?? properties[0]?.id ?? ""
   );
+  // Easement fields as state so they survive the whole session.
+  const [easementType, setEasementType] = useState<EasementType>("powerline");
+  const isEasement = kind === "utility_easement";
 
   function handleSubmit(formData: FormData) {
+    const width = String(formData.get("width_ft") ?? "").trim();
     onSave({
       kind,
       name: String(formData.get("name") ?? "").trim(),
@@ -44,6 +53,14 @@ export default function NewLineDialog({
         kind === "road"
           ? ((String(formData.get("road_type") ?? "") || null) as RoadType | null)
           : null,
+      easementType: isEasement ? easementType : null,
+      holder: isEasement
+        ? String(formData.get("holder") ?? "").trim() || null
+        : null,
+      widthFt: isEasement && width ? Number(width) : null,
+      recordedRef: isEasement
+        ? String(formData.get("recorded_ref") ?? "").trim() || null
+        : null,
     });
   }
 
@@ -56,12 +73,13 @@ export default function NewLineDialog({
       <form action={handleSubmit} className="mt-3 space-y-3">
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">This is a</label>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             {(
               [
                 ["road", "Road"],
-                ["underground_pipe", "Pipe"],
+                ["underground_pipe", "Pipe (yours)"],
                 ["fence", "Fence"],
+                ["utility_easement", "Utility easement"],
               ] as Array<[LineKind, string]>
             ).map(([k, label]) => (
               <button
@@ -90,6 +108,66 @@ export default function NewLineDialog({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
           />
         </div>
+
+        {isEasement ? (
+          <>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Easement type
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(Object.keys(EASEMENT_TYPE_LABELS) as EasementType[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setEasementType(t)}
+                    className={
+                      "rounded-lg border px-1.5 py-1.5 text-xs font-medium " +
+                      (easementType === t
+                        ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50")
+                    }
+                  >
+                    {EASEMENT_TYPE_LABELS[t].replace(" easement", "")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Holder (utility/company)
+              </label>
+              <input
+                name="holder"
+                placeholder="Optional"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Width (ft)
+                </label>
+                <input
+                  name="width_ft"
+                  type="number"
+                  placeholder="Optional"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Recorded ref
+                </label>
+                <input
+                  name="recorded_ref"
+                  placeholder="Book/page"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
 
         {kind === "road" ? (
           <div>

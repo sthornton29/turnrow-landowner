@@ -339,6 +339,36 @@ export const STAND_TYPE_COLORS: Record<string, string> = {
   other: "#6b7280", // gray
 };
 
+// Utility easements: always labeled "easement" (a pipeline easement is
+// the utility's corridor, never the farm's own underground irrigation
+// pipe asset).
+export const EASEMENT_TYPE_LABELS: Record<string, string> = {
+  powerline: "Powerline easement",
+  pipeline: "Pipeline easement",
+  other: "Other easement",
+};
+
+// Easement map colors: powerline red long-dash, pipeline safety orange
+// dot-dash, other gray. Checked distinct from roads white, irrigation
+// light blue, wetlands steel blue, the timber palette, and the crop
+// palette (wheat amber #d97706 is the nearest neighbor to the pipeline
+// orange; the dash pattern and line-vs-fill difference keep them
+// apart).
+export const EASEMENT_COLORS: Record<string, string> = {
+  powerline: "#dc2626",
+  pipeline: "#f97316",
+  other: "#9ca3af",
+};
+
+// Corridor acres for an easement with a known width: length x width.
+export function easementAcres(
+  lengthFeet: number | null | undefined,
+  widthFt: number | null | undefined
+): number | null {
+  if (!lengthFeet || !widthFt || lengthFeet <= 0 || widthFt <= 0) return null;
+  return (lengthFeet * widthFt) / 43560;
+}
+
 export const ROAD_TYPE_LABELS: Record<string, string> = {
   gravel: "Gravel",
   dirt: "Dirt",

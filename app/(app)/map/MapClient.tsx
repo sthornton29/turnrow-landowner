@@ -15,9 +15,11 @@ const MapView = dynamic(() => import("@/components/map/MapView"), {
 
 export default function MapClient({
   orgId,
+  orgName,
   focus,
 }: {
   orgId: string;
+  orgName: string | null;
   focus: SelectedFeature | null;
 }) {
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
@@ -27,5 +29,5 @@ export default function MapClient({
       </div>
     );
   }
-  return <MapView orgId={orgId} focus={focus} />;
+  return <MapView orgId={orgId} orgName={orgName} focus={focus} />;
 }

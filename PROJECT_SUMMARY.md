@@ -1,11 +1,10 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 (pivot editor simplified to circle +
-add/subtract polygons and laterals removed, wetlands land type,
-migration 0015; header brand lockup; parcels layer defaults off with
-persisted toggles; earlier same day: Ag Fields rename, pastures, rich
-summary pages, AI rent upload, irrigated/dryland acres, Farm Data
-restructure, income projections, Tenant Data panel)
+Last updated: 2026-08-17 (Print button: WYSIWYG framed PDF maps with
+legend/scale/attribution; utility easements layer, migration 0016;
+earlier same day: simplified pivot editor, wetlands, brand lockup,
+parcels off by default, Ag Fields rename, pastures, summary pages, AI
+rent upload, irrigated/dryland acres)
 
 ## What this product is
 
@@ -100,6 +99,24 @@ Tables:
   toggle), property detail section, dashboard acres tile, and a
   /pastures/[id] summary page. FUTURE AREA: no grazing management
   features yet (deliberate).
+- utility_easements (migration 0016): powerline/pipeline/other
+  corridors, ALWAYS labeled "easement" (a pipeline easement is the
+  utility's corridor, never the farm's own underground irrigation pipe
+  asset). organization_id, property_id NULLABLE (easements cross
+  property lines; property deletion DETACHES via set null, a
+  deliberate departure from roads' cascade), name, easement_type
+  check, holder, width_ft, recorded_ref, notes, MultiLineString geom,
+  generated length_feet/miles like roads. Corridor acres = length x
+  width, derived in the app (lib/assetTypes.ts easementAcres,
+  unit-tested), never stored. RLS, geo view, set_geometry + documents
+  gain 'utility_easement' (easement deeds are exactly the documents
+  landowners lose; the summary page says so). Drawn via the line
+  dialog's "Utility easement" kind with inline fields; map layer
+  (persisted toggle): buffered corridor strip when width is set (turf
+  buffer at width/2) plus per-type centerlines, powerline red #dc2626
+  long-dash, pipeline safety orange #f97316 dot-dash, other gray, with
+  a per-type legend; click panel and /easements/[id] summary page show
+  length, width, corridor acres, holder, recorded ref, documents.
 - wetlands (migration 0015): same pattern as pastures, for OPEN
   wetlands only (marsh, sloughs, duck holes, WRP/easement ground;
   labels and dialog help text say so). Forested bottomland remains a
@@ -523,10 +540,32 @@ Functions and views:
     browser in localStorage, defaults applying only to fresh state),
     ag fields (kelly green), pastures (warm tan), wetlands (steel
     blue), timber stands (per-type fills, see TIMBER STANDS below),
-    roads (white line over dark green casing, labels along the line), and
+    roads (white line over dark green casing, labels along the line),
+    utility easements (see the table entry: red/orange dashed lines +
+    corridor strips with a per-type legend), and
     assets (dark green circle markers with a per-type letter, dashed light
     blue lines for pipe/fence, faint outline for footprints, light blue
-    pivot coverage shapes). Click
+    pivot coverage shapes). PRINT BUTTON (top right): a print setup
+    mode overlays a Letter-aspect frame (portrait/landscape, default
+    landscape) and the user pans/zooms freely underneath it; the frame
+    IS the printed extent (WYSIWYG). The panel has independent
+    per-layer checkboxes prefilled from the live toggles, label on/off
+    per layer (parcel numbers default off in print), crops and entity
+    coloring, a title (defaults to the property name when the view is
+    one property, else the org name) and a subtitle defaulting to
+    today's date. Generate renders the framed extent on a hidden map
+    at print resolution (devicePixelRatio override to 3, ~290 DPI on
+    the printed map area, a true render with only the checked layers,
+    preserveDrawingBuffer capture) and assembles the PDF client-side
+    with jsPDF (components/map/printPdf.ts): map within margins, title
+    and date, a legend of only the checked layers with swatches
+    matching the map styles (timber types, crops, easement types),
+    a scale bar from the render's real ground distance, a north
+    indicator, the Turnrow lockup (rasterized brand SVG with text
+    fallback), and the Mapbox/OpenStreetMap attribution line. Progress
+    shows during rendering; the file downloads as <title>-<date>.pdf
+    (phones print from any PDF viewer; no window.print anywhere).
+    Click
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
     mobile). The Add menu offers: Boundary (polygon draw; save as field,
@@ -539,7 +578,7 @@ Functions and views:
     opens directly; Save asks for name + property, suggested
     from the center's location, and inserts the pivot with its
     parameters and derived polygon in one step). The line dialog's
-    kinds are Road, Pipe, and Fence. When the
+    kinds are Road, Pipe (yours), Fence, and Utility easement. When the
     boundary dialog's type is Timber, it expands in place with stand
     type (required, five types), species (prefills "Loblolly pine" on
     a pine pick, never stomping a typed value), year established, and
@@ -1002,3 +1041,9 @@ Functions and views:
   blue; the header brand lockup (small-caps Landowner wordmark, not a
   nav item); parcels layer defaulting off with per-browser persisted
   layer toggles. Described above.
+- Post-Phase 6g (DONE, 2026-08-17, migration 0016): the map Print
+  button (WYSIWYG framed Letter PDFs with per-layer/label control,
+  legend, scale bar, north indicator, brand lockup, attribution,
+  client-side via jsPDF at print resolution) and the utility easements
+  layer (powerline/pipeline corridors with widths, corridor acres,
+  recorded refs, and easement-deed documents). Described above.

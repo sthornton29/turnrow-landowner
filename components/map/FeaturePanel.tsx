@@ -7,8 +7,10 @@ import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   ASSET_TYPES,
   CONDITION_LABELS,
+  EASEMENT_TYPE_LABELS,
   ROAD_TYPE_LABELS,
   STAND_TYPE_LABELS,
+  easementAcres,
 } from "@/lib/assetTypes";
 import type { AssetGeo, EntityType, ParcelGeo, RoadGeo } from "@/types/db";
 import type { AnyGeoRow } from "./types";
@@ -21,6 +23,7 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   wetland: "wetlands",
   timber_stand: "timber_stands",
   road: "roads",
+  utility_easement: "utility_easements",
   asset: "assets",
 };
 
@@ -32,6 +35,7 @@ const TYPE_LABEL: Record<EntityType, string> = {
   wetland: "Wetland",
   timber_stand: "Timber stand",
   road: "Road",
+  utility_easement: "Utility easement",
   asset: "Asset",
 };
 
@@ -85,6 +89,20 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "road_type", label: "Road type", input: "select", options: ROAD_TYPE_LABELS },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
+  utility_easement: [
+    { key: "name", label: "Name", input: "text", required: true },
+    {
+      key: "easement_type",
+      label: "Easement type",
+      input: "select",
+      options: EASEMENT_TYPE_LABELS,
+      required: true,
+    },
+    { key: "holder", label: "Holder (utility/company)", input: "text" },
+    { key: "width_ft", label: "Corridor width (ft)", input: "number" },
+    { key: "recorded_ref", label: "Recorded ref (book/page)", input: "text" },
+    { key: "notes", label: "Notes", input: "textarea" },
+  ],
   asset: [
     { key: "name", label: "Name", input: "text", required: true },
     { key: "notes", label: "Notes", input: "textarea" },
@@ -123,6 +141,7 @@ export function detailPagePath(entityType: EntityType, id: string): string {
     wetland: "/wetlands",
     timber_stand: "/timber",
     road: "/roads",
+    utility_easement: "/easements",
     asset: "/assets",
   };
   return `${base[entityType]}/${id}`;
@@ -156,6 +175,18 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     push("Last burn", r.last_burn_year);
   } else if (entityType === "road") {
     push("Road type", r.road_type, ROAD_TYPE_LABELS);
+  } else if (entityType === "utility_easement") {
+    push("Easement type", r.easement_type, EASEMENT_TYPE_LABELS);
+    push("Holder", r.holder);
+    if (r.width_ft != null) {
+      rows.push(["Corridor width", `${formatNumber(Number(r.width_ft))} ft`]);
+      const acres = easementAcres(
+        r.length_feet as number | null,
+        r.width_ft as number | null
+      );
+      if (acres !== null) rows.push(["Corridor acres", formatAcres(acres)]);
+    }
+    push("Recorded ref", r.recorded_ref);
   } else if (entityType === "asset") {
     const a = row as AssetGeo;
     push("Type", ASSET_TYPES[a.asset_type]?.label ?? a.asset_type);
@@ -279,7 +310,7 @@ export default function FeaturePanel({
       : ((row as { name?: string }).name ?? "");
 
   const geometryButtonLabel =
-    entityType === "road"
+    entityType === "road" || entityType === "utility_easement"
       ? "Edit line"
       : entityType === "asset"
         ? ((row as AssetGeo).geom_geojson?.type?.includes("Line")
@@ -328,7 +359,7 @@ export default function FeaturePanel({
   }
 
   const metric =
-    entityType === "road"
+    entityType === "road" || entityType === "utility_easement"
       ? `${formatNumber(Math.round((row as RoadGeo).length_feet ?? 0))} ft (${((row as RoadGeo).miles ?? 0).toFixed(2)} mi)`
       : entityType !== "asset" && "acres" in row
         ? `${formatAcres((row as { acres: number | null }).acres)} acres`
@@ -367,7 +398,11 @@ export default function FeaturePanel({
           <dl className="space-y-1.5 text-sm">
             {metric ? (
               <div className="flex justify-between">
-                <dt className="text-gray-500">{entityType === "road" ? "Length" : "Acres"}</dt>
+                <dt className="text-gray-500">
+                  {entityType === "road" || entityType === "utility_easement"
+                    ? "Length"
+                    : "Acres"}
+                </dt>
                 <dd className="font-medium text-gray-900">{metric}</dd>
               </div>
             ) : null}

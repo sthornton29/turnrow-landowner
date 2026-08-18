@@ -23,7 +23,13 @@ import {
   toMultiLineString,
   toMultiPolygon,
 } from "@/lib/geo/normalize";
-import { ASSET_TYPES, STAND_TYPE_COLORS, STAND_TYPE_LABELS } from "@/lib/assetTypes";
+import {
+  ASSET_TYPES,
+  EASEMENT_COLORS,
+  EASEMENT_TYPE_LABELS,
+  STAND_TYPE_COLORS,
+  STAND_TYPE_LABELS,
+} from "@/lib/assetTypes";
 import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
 import {
@@ -60,27 +66,35 @@ import type {
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
+  UtilityEasementGeo,
   WetlandGeo,
 } from "@/types/db";
 import LayerToggle from "./LayerToggle";
+import {
+  generateMapPdf,
+  mapAspect,
+  type LegendEntry,
+  type PrintLabelFlags,
+  type PrintLayerFlags,
+} from "./printPdf";
 import FeaturePanel, { ENTITY_TABLE } from "./FeaturePanel";
 import NewBoundaryDialog, { type NewBoundaryPayload } from "./NewBoundaryDialog";
 import NewLineDialog, { type NewLinePayload } from "./NewLineDialog";
 import NewAssetDialog, { type NewAssetPayload } from "./NewAssetDialog";
 import type { AnyGeoRow, LayerVisibility, MapMode, SelectedFeature } from "./types";
 
-const KELLY = "#39b54a";
-const PINE = "#14532d";
+export const KELLY = "#39b54a";
+export const PINE = "#14532d";
 const MINT = "#a7f3d0";
 // Pastures: warm tan, distinct from kelly (ag fields), canola light
 // green, wheat amber, the timber palette, and pivot blue.
-const PASTURE_TAN = "#d2b48c";
+export const PASTURE_TAN = "#d2b48c";
 // Wetlands (OPEN wetlands: marsh, sloughs, duck holes; forested
 // bottomland stays a timber stand): muted steel blue, checked distinct
 // from kelly, every crop color, the timber palette including planted
 // pine's deep teal #0f766e and the "other" gray #6b7280, pivot light
 // blue #7dd3fc/#38bdf8, pasture tan, and entity outlines.
-const WETLAND_BLUE = "#6487a8";
+export const WETLAND_BLUE = "#6487a8";
 
 const POLYGON_TYPES: EntityType[] = [
   "property", "parcel", "field", "pasture", "wetland", "timber_stand",
@@ -96,6 +110,7 @@ const LAYER_DEFAULTS: LayerVisibility = {
   wetland: true,
   timber_stand: true,
   road: true,
+  utility_easement: true,
   asset: true,
 };
 const LAYER_STORAGE_KEY = "turnrow.map.layers.v1";
@@ -123,7 +138,7 @@ function nameOf(row: AnyGeoRow, entityType: EntityType): string {
     : ((row as { name?: string }).name ?? "");
 }
 
-function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
+export function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
   const features: Feature[] = [];
   for (const row of rows) {
     const g = geomOf(row);
@@ -140,6 +155,9 @@ function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection 
     }
     if (entityType === "timber_stand") {
       props.standType = (row as TimberStandGeo).stand_type ?? "other";
+    }
+    if (entityType === "utility_easement") {
+      props.easementType = (row as UtilityEasementGeo).easement_type ?? "other";
     }
     features.push({ type: "Feature", geometry: g, properties: props });
     // Pivot coverage shapes keep their P marker at the center for
@@ -169,7 +187,73 @@ function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection 
   return { type: "FeatureCollection", features };
 }
 
-function rowsToLabelFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
+// Properties carry their entity's color for the color-by-entity mode.
+function propertiesFCWithEntity(
+  properties: PropertyGeo[],
+  entities: Array<{ id: string; name: string }>
+): FeatureCollection {
+  const entityIndex = new Map(entities.map((e, i) => [e.id, i]));
+  const fc = rowsToFC(properties, "property");
+  for (const feature of fc.features) {
+    const row = properties.find((p) => p.id === feature.properties?.id);
+    if (row?.entity_id !== null && row?.entity_id !== undefined) {
+      const idx = entityIndex.get(row.entity_id);
+      if (idx !== undefined) {
+        feature.properties = { ...feature.properties, entityColor: entityColor(idx) };
+      }
+    }
+  }
+  return fc;
+}
+
+// Ag fields carry their current-year crop color for the Crops toggle.
+function fieldsFCWithCrops(
+  fields: FieldGeo[],
+  byField: Record<string, FarmActivityInfo[]>
+): FeatureCollection {
+  const fc = rowsToFC(fields, "field");
+  for (const feature of fc.features) {
+    const activity = byField[String(feature.properties?.id)];
+    if (activity?.length) {
+      feature.properties = { ...feature.properties, cropColor: activity[0].color };
+    }
+  }
+  return fc;
+}
+
+// Corridor strips for easements with a known width: the centerline
+// buffered by width/2 (display only; acres = length x width).
+function easementCorridorFC(easements: UtilityEasementGeo[]): FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: easements
+      .filter((e) => e.width_ft && e.width_ft > 0 && e.geom_geojson)
+      .flatMap((e) => {
+        try {
+          const buffered = turfBuffer(
+            { type: "Feature", properties: {}, geometry: e.geom_geojson! },
+            e.width_ft! / 2,
+            { units: "feet" }
+          );
+          return buffered
+            ? [{
+                type: "Feature" as const,
+                properties: {
+                  id: e.id,
+                  entityType: "utility_easement",
+                  easementType: e.easement_type ?? "other",
+                },
+                geometry: buffered.geometry,
+              }]
+            : [];
+        } catch {
+          return [];
+        }
+      }),
+  };
+}
+
+export function rowsToLabelFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
   const features: Feature[] = [];
   for (const row of rows) {
     const g = geomOf(row);
@@ -189,9 +273,11 @@ function rowsToLabelFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollec
 
 export default function MapView({
   orgId,
+  orgName,
   focus,
 }: {
   orgId: string;
+  orgName?: string | null;
   focus?: SelectedFeature | null;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -207,6 +293,7 @@ export default function MapView({
   const [wetlands, setWetlands] = useState<WetlandGeo[]>([]);
   const [timber, setTimber] = useState<TimberStandGeo[]>([]);
   const [roads, setRoads] = useState<RoadGeo[]>([]);
+  const [easements, setEasements] = useState<UtilityEasementGeo[]>([]);
   const [assets, setAssets] = useState<AssetGeo[]>([]);
   const [loading, setLoading] = useState(true);
   const [cropsOn, setCropsOn] = useState(false);
@@ -300,11 +387,32 @@ export default function MapView({
   const didFitRef = useRef(false);
   const didFocusRef = useRef(false);
 
+  // ------------------------------------------------------------ print setup
+  // A page-aspect frame overlays the map; the user pans/zooms freely
+  // underneath to set the exact printed extent (WYSIWYG). Generation
+  // renders that extent at print resolution and downloads a PDF.
+  const [printOpen, setPrintOpen] = useState(false);
+  const [printBusy, setPrintBusy] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
+  const [printOrientation, setPrintOrientation] =
+    useState<"landscape" | "portrait">("landscape");
+  const [printLayers, setPrintLayers] = useState<PrintLayerFlags>({
+    property: true, parcel: false, field: true, pasture: true, wetland: true,
+    timber_stand: true, road: true, utility_easement: true, asset: true,
+    crops: false, entity: false,
+  });
+  const [printLabels, setPrintLabels] = useState<PrintLabelFlags>({
+    property: true, parcel: false, field: true, pasture: true, wetland: true,
+    timber_stand: true, road: true, utility_easement: true, asset: true,
+  });
+  const [printTitle, setPrintTitle] = useState("");
+  const [printSubtitle, setPrintSubtitle] = useState("");
+
   // ---------------------------------------------------------------- data
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, pas, w, t, r, a, mappings, farmData, connections, ents] = await Promise.all([
+    const [p, pa, f, pas, w, t, r, ue, a, mappings, farmData, connections, ents] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
@@ -312,6 +420,7 @@ export default function MapView({
       supabase.from("wetlands_geo").select("*").order("name"),
       supabase.from("timber_stands_geo").select("*").order("name"),
       supabase.from("roads_geo").select("*").order("name"),
+      supabase.from("utility_easements_geo").select("*").order("name"),
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
       supabase.from("field_mappings").select("*").eq("status", "confirmed"),
       supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
@@ -326,6 +435,7 @@ export default function MapView({
     setWetlands((w.data as WetlandGeo[]) ?? []);
     setTimber((t.data as TimberStandGeo[]) ?? []);
     setRoads((r.data as RoadGeo[]) ?? []);
+    setEasements((ue.data as UtilityEasementGeo[]) ?? []);
     setAssets((a.data as AssetGeo[]) ?? []);
 
     // Current-year farm activity keyed to local fields / properties
@@ -385,9 +495,10 @@ export default function MapView({
       wetland: wetlands,
       timber_stand: timber,
       road: roads,
+      utility_easement: easements,
       asset: assets,
     }),
-    [properties, parcels, fields, pastures, wetlands, timber, roads, assets]
+    [properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets]
   );
 
   const selectedRow: AnyGeoRow | null = useMemo(() => {
@@ -421,6 +532,7 @@ export default function MapView({
     const groups: string[][] = [
       ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
       ["roads-hit"],
+      ["easements-hit", "easements-corridor-fill"],
       ["fields-fill"],
       ["pastures-fill"],
       ["wetlands-fill"],
@@ -466,7 +578,7 @@ export default function MapView({
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
         "properties", "parcels", "fields", "pastures", "wetlands", "timber",
-        "roads", "assets",
+        "roads", "easements", "easement-corridors", "assets",
         "property-labels", "parcel-labels", "field-labels", "pasture-labels",
         "wetland-labels", "timber-labels",
       ]) {
@@ -528,6 +640,37 @@ export default function MapView({
       map.addLayer({ id: "roads-hit", type: "line", source: "roads",
         paint: { "line-color": "#ffffff", "line-width": 16, "line-opacity": 0.01 } });
 
+      // Utility easements: corridor strip when a width is known, plus
+      // per-type styled centerlines. Powerline red long-dash, pipeline
+      // safety orange dot-dash, other solid gray; instantly apart from
+      // roads (white), the farm's own pipe (dashed light blue), and
+      // every land palette.
+      const easementColor: mapboxgl.Expression = [
+        "match", ["get", "easementType"],
+        "powerline", EASEMENT_COLORS.powerline,
+        "pipeline", EASEMENT_COLORS.pipeline,
+        EASEMENT_COLORS.other,
+      ];
+      map.addLayer({ id: "easements-corridor-fill", type: "fill",
+        source: "easement-corridors",
+        paint: { "fill-color": easementColor, "fill-opacity": 0.18 } });
+      map.addLayer({ id: "easements-corridor-line", type: "line",
+        source: "easement-corridors",
+        paint: { "line-color": easementColor, "line-width": 1 } });
+      map.addLayer({ id: "easements-line-powerline", type: "line", source: "easements",
+        filter: ["==", ["get", "easementType"], "powerline"],
+        paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2.5,
+          "line-dasharray": [4, 2] } });
+      map.addLayer({ id: "easements-line-pipeline", type: "line", source: "easements",
+        filter: ["==", ["get", "easementType"], "pipeline"],
+        paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2.5,
+          "line-dasharray": [3, 1.5, 0.4, 1.5] } });
+      map.addLayer({ id: "easements-line-other", type: "line", source: "easements",
+        filter: ["==", ["get", "easementType"], "other"],
+        paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2.5 } });
+      map.addLayer({ id: "easements-hit", type: "line", source: "easements",
+        paint: { "line-color": "#ffffff", "line-width": 16, "line-opacity": 0.01 } });
+
       // Asset lines (pipe, fence): dashed light blue, distinct from roads.
       // Asset polygons (footprints, pond surface): faint white. Pivot
       // coverage circles get their own light blue look below.
@@ -558,6 +701,9 @@ export default function MapView({
           filter: ["==", ["get", "id"], ""] });
       }
       map.addLayer({ id: "roads-selected", type: "line", source: "roads",
+        paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 },
+        filter: ["==", ["get", "id"], ""] });
+      map.addLayer({ id: "easements-selected", type: "line", source: "easements",
         paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 },
         filter: ["==", ["get", "id"], ""] });
       map.addLayer({ id: "assets-selected-line", type: "line", source: "assets",
@@ -598,6 +744,10 @@ export default function MapView({
         layout: { "symbol-placement": "line", "text-field": ["get", "name"],
           "text-size": 10, "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
+      map.addLayer({ id: "easement-labels", type: "symbol", source: "easements",
+        layout: { "symbol-placement": "line", "text-field": ["get", "name"],
+          "text-size": 10, "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#ffffff", "text-halo-color": "#7f1d1d", "text-halo-width": 1.1 } });
 
       // Asset markers on top: branded circle + type letter + name below
       map.addLayer({ id: "assets-circle", type: "circle", source: "assets",
@@ -668,8 +818,8 @@ export default function MapView({
     map.on("click", (e) => clickRef.current(e));
     for (const layer of [
       "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
-      "wetlands-fill", "timber-fill", "roads-hit", "assets-circle",
-      "assets-line", "assets-fill",
+      "wetlands-fill", "timber-fill", "roads-hit", "easements-hit",
+      "assets-circle", "assets-line", "assets-fill",
     ]) {
       map.on("mouseenter", layer, () => {
         if (modeRef.current === "view") map.getCanvas().style.cursor = "pointer";
@@ -728,36 +878,15 @@ export default function MapView({
     const setData = (source: string, fc: FeatureCollection) =>
       (map.getSource(source) as GeoJSONSource)?.setData(fc);
 
-    // Properties carry their entity's color for the color-by-entity mode
-    const entityIndex = new Map(entities.map((e, i) => [e.id, i]));
-    const propertiesFC = rowsToFC(properties, "property");
-    for (const feature of propertiesFC.features) {
-      const row = properties.find((p) => p.id === feature.properties?.id);
-      if (row?.entity_id !== null && row?.entity_id !== undefined) {
-        const idx = entityIndex.get(row.entity_id);
-        if (idx !== undefined) {
-          feature.properties = {
-            ...feature.properties,
-            entityColor: entityColor(idx),
-          };
-        }
-      }
-    }
-    setData("properties", propertiesFC);
+    setData("properties", propertiesFCWithEntity(properties, entities));
     setData("parcels", rowsToFC(parcels, "parcel"));
-    // Fields carry their current-year crop color for the Crops toggle
-    const fieldsFC = rowsToFC(fields, "field");
-    for (const feature of fieldsFC.features) {
-      const activity = farmActivity.byField[String(feature.properties?.id)];
-      if (activity?.length) {
-        feature.properties = { ...feature.properties, cropColor: activity[0].color };
-      }
-    }
-    setData("fields", fieldsFC);
+    setData("fields", fieldsFCWithCrops(fields, farmActivity.byField));
     setData("pastures", rowsToFC(pastures, "pasture"));
     setData("wetlands", rowsToFC(wetlands, "wetland"));
     setData("timber", rowsToFC(timber, "timber_stand"));
     setData("roads", rowsToFC(roads, "road"));
+    setData("easements", rowsToFC(easements, "utility_easement"));
+    setData("easement-corridors", easementCorridorFC(easements));
     setData("assets", rowsToFC(assets, "asset"));
     setData("property-labels", rowsToLabelFC(properties, "property"));
     setData("parcel-labels", rowsToLabelFC(parcels, "parcel"));
@@ -770,14 +899,14 @@ export default function MapView({
       const box = bboxOf([
         ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
         ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
-        ...roads.map(geomOf), ...assets.map(geomOf),
+        ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
       ]);
       if (box) {
         map.fitBounds(box, { padding: 60, duration: 0 });
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, assets, farmActivity, entities]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, farmActivity, entities]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -863,6 +992,11 @@ export default function MapView({
       ["wetland", ["wetlands-fill", "wetlands-line", "wetland-labels"]],
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
+      ["utility_easement", [
+        "easements-corridor-fill", "easements-corridor-line",
+        "easements-line-powerline", "easements-line-pipeline",
+        "easements-line-other", "easements-hit", "easement-labels",
+      ]],
       ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
     ];
     for (const [key, layers] of groups) {
@@ -880,13 +1014,13 @@ export default function MapView({
     if (!map || !mapLoaded) return;
     const bySource: Record<string, string> = {
       properties: "", parcels: "", fields: "", pastures: "", wetlands: "",
-      timber: "", roads: "", assets: "",
+      timber: "", roads: "", easements: "", assets: "",
     };
     if (selected) {
       const srcName: Record<EntityType, string> = {
         property: "properties", parcel: "parcels", field: "fields",
         pasture: "pastures", wetland: "wetlands", timber_stand: "timber",
-        road: "roads", asset: "assets",
+        road: "roads", utility_easement: "easements", asset: "assets",
       };
       bySource[srcName[selected.entityType]] = selected.id;
     }
@@ -897,6 +1031,9 @@ export default function MapView({
     }
     if (map.getLayer("roads-selected")) {
       map.setFilter("roads-selected", ["==", ["get", "id"], bySource.roads]);
+    }
+    if (map.getLayer("easements-selected")) {
+      map.setFilter("easements-selected", ["==", ["get", "id"], bySource.easements]);
     }
     if (map.getLayer("assets-selected-line")) {
       map.setFilter("assets-selected-line",
@@ -1486,6 +1623,7 @@ export default function MapView({
     const isPoint = g?.type === "Point" || g?.type === "MultiPoint";
     const isLineTarget =
       selected.entityType === "road" ||
+      selected.entityType === "utility_easement" ||
       (selected.entityType === "asset" &&
         (g?.type === "LineString" || g?.type === "MultiLineString"));
 
@@ -1538,6 +1676,7 @@ export default function MapView({
     let g: Geometry | null = null;
     const isLineTarget =
       target.entityType === "road" ||
+      target.entityType === "utility_easement" ||
       (target.entityType === "asset" &&
         all.some((f) => f.geometry.type.includes("Line")));
     if (isLineTarget) {
@@ -1698,6 +1837,15 @@ export default function MapView({
           name: payload.name, road_type: payload.roadType },
         "road", pendingLine
       );
+    } else if (payload.kind === "utility_easement") {
+      sel = await insertAndSetGeometry(
+        "utility_easements",
+        { organization_id: orgId, property_id: payload.propertyId,
+          name: payload.name, easement_type: payload.easementType ?? "other",
+          holder: payload.holder, width_ft: payload.widthFt,
+          recorded_ref: payload.recordedRef },
+        "utility_easement", pendingLine
+      );
     } else {
       sel = await insertAndSetGeometry(
         "assets",
@@ -1729,6 +1877,182 @@ export default function MapView({
       resetDrawState();
       await loadData();
       setSelected(sel);
+    }
+  }
+
+  // ---------------------------------------------------------------- print
+
+  function openPrintSetup() {
+    const map = mapRef.current;
+    setSelected(null);
+    // Prefill layers from the live toggles; parcel LABELS default off
+    // in print even when the layer is on.
+    setPrintLayers({
+      property: visibility.property,
+      parcel: visibility.parcel,
+      field: visibility.field,
+      pasture: visibility.pasture,
+      wetland: visibility.wetland,
+      timber_stand: visibility.timber_stand,
+      road: visibility.road,
+      utility_easement: visibility.utility_easement,
+      asset: visibility.asset,
+      crops: cropsOn,
+      entity: entityColorsOn,
+    });
+    // Title: the property name when the current view is one property,
+    // else the organization name.
+    let title = orgName ?? "";
+    if (map) {
+      const viewBounds = map.getBounds();
+      if (viewBounds) {
+        const inView = properties.filter((p) => {
+          const box = bboxOf([p.boundary_geojson]);
+          return (
+            box &&
+            box[0] < viewBounds.getEast() && box[2] > viewBounds.getWest() &&
+            box[1] < viewBounds.getNorth() && box[3] > viewBounds.getSouth()
+          );
+        });
+        if (inView.length === 1) title = inView[0].name;
+      }
+    }
+    setPrintTitle(title);
+    setPrintSubtitle(new Date().toLocaleDateString());
+    setPrintError(null);
+    setPrintOpen(true);
+  }
+
+  function printFrameRect(): { left: number; top: number; width: number; height: number } | null {
+    const el = containerRef.current;
+    if (!el) return null;
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    const aspect = mapAspect(printOrientation);
+    const maxW = cw * 0.86;
+    const maxH = ch * 0.66;
+    let w = maxW;
+    let h = w / aspect;
+    if (h > maxH) {
+      h = maxH;
+      w = h * aspect;
+    }
+    return { left: (cw - w) / 2, top: (ch - h) / 2, width: w, height: h };
+  }
+
+  function buildPrintLegend(flags: PrintLayerFlags): LegendEntry[] {
+    const out: LegendEntry[] = [];
+    if (flags.property && !flags.entity) {
+      out.push({ label: "Property boundary", color: "#6b7280", kind: "outline" });
+    }
+    if (flags.property && flags.entity) {
+      entities.forEach((e, i) =>
+        out.push({ label: e.name, color: entityColor(i), kind: "outline" })
+      );
+    }
+    if (flags.parcel && parcels.length > 0) {
+      out.push({ label: "Parcels", color: "#9ca3af", kind: "dash" });
+    }
+    if (flags.field && fields.length > 0) {
+      if (flags.crops) {
+        for (const c of farmActivity.legend) {
+          out.push({ label: c.label, color: c.color, kind: "fill" });
+        }
+      } else {
+        out.push({ label: "Ag fields", color: KELLY, kind: "fill" });
+      }
+    }
+    if (flags.pasture && pastures.length > 0) {
+      out.push({ label: "Pastures", color: PASTURE_TAN, kind: "fill" });
+    }
+    if (flags.wetland && wetlands.length > 0) {
+      out.push({ label: "Wetlands", color: WETLAND_BLUE, kind: "fill" });
+    }
+    if (flags.timber_stand) {
+      for (const type of Object.keys(STAND_TYPE_LABELS)) {
+        if (timber.some((t) => ((t as TimberStandGeo).stand_type ?? "other") === type)) {
+          out.push({
+            label: STAND_TYPE_LABELS[type],
+            color: STAND_TYPE_COLORS[type],
+            kind: "fill",
+          });
+        }
+      }
+    }
+    if (flags.road && roads.length > 0) {
+      out.push({ label: "Roads", color: PINE, kind: "line" });
+    }
+    if (flags.utility_easement) {
+      for (const type of ["powerline", "pipeline", "other"] as const) {
+        if (easements.some((e) => (e.easement_type ?? "other") === type)) {
+          out.push({
+            label: EASEMENT_TYPE_LABELS[type],
+            color: EASEMENT_COLORS[type],
+            kind: type === "powerline" ? "dash" : type === "pipeline" ? "dotdash" : "line",
+          });
+        }
+      }
+    }
+    if (flags.asset && assets.length > 0) {
+      out.push({ label: "Assets", color: PINE, kind: "point" });
+      if (
+        assets.some(
+          (a) =>
+            a.asset_type === "irrigation_pivot" &&
+            a.geom_geojson &&
+            a.geom_geojson.type !== "Point"
+        )
+      ) {
+        out.push({ label: "Pivot coverage", color: "#38bdf8", kind: "fill" });
+      }
+    }
+    return out;
+  }
+
+  async function generatePrint() {
+    const map = mapRef.current;
+    const rect = printFrameRect();
+    if (!map || !rect) return;
+    const sw = map.unproject([rect.left, rect.top + rect.height]);
+    const ne = map.unproject([rect.left + rect.width, rect.top]);
+    setPrintError(null);
+    setPrintBusy("Starting...");
+    try {
+      await generateMapPdf({
+        bounds: [[sw.lng, sw.lat], [ne.lng, ne.lat]],
+        orientation: printOrientation,
+        title: printTitle.trim() || orgName || "Map",
+        subtitle: printSubtitle.trim(),
+        layers: printLayers,
+        labels: printLabels,
+        sources: {
+          properties: propertiesFCWithEntity(properties, entities),
+          parcels: rowsToFC(parcels, "parcel"),
+          fields: fieldsFCWithCrops(fields, farmActivity.byField),
+          pastures: rowsToFC(pastures, "pasture"),
+          wetlands: rowsToFC(wetlands, "wetland"),
+          timber: rowsToFC(timber, "timber_stand"),
+          roads: rowsToFC(roads, "road"),
+          easements: rowsToFC(easements, "utility_easement"),
+          easementCorridors: easementCorridorFC(easements),
+          assets: rowsToFC(assets, "asset"),
+          propertyLabels: rowsToLabelFC(properties, "property"),
+          parcelLabels: rowsToLabelFC(parcels, "parcel"),
+          fieldLabels: rowsToLabelFC(fields, "field"),
+          pastureLabels: rowsToLabelFC(pastures, "pasture"),
+          wetlandLabels: rowsToLabelFC(wetlands, "wetland"),
+          timberLabels: rowsToLabelFC(timber, "timber_stand"),
+        },
+        legend: buildPrintLegend(printLayers),
+        onProgress: setPrintBusy,
+      });
+      setPrintOpen(false);
+    } catch (err) {
+      setPrintError(
+        err instanceof Error ? err.message : "Could not generate the PDF."
+      );
+    } finally {
+      setPrintBusy(null);
     }
   }
 
@@ -1814,9 +2138,212 @@ export default function MapView({
         </div>
       ) : null}
 
+      {/* Print button (top right) */}
+      {mode === "view" && !selected && !printOpen ? (
+        <button
+          onClick={openPrintSetup}
+          className="absolute right-3 top-3 z-20 rounded-lg bg-white/95 px-3 py-2 text-sm font-semibold text-gray-800 shadow-md hover:bg-white"
+        >
+          Print
+        </button>
+      ) : null}
+
+      {/* Print frame: the page-aspect print area; pan/zoom the map
+          underneath to set the exact printed extent (WYSIWYG). */}
+      {printOpen
+        ? (() => {
+            const rect = printFrameRect();
+            if (!rect) return null;
+            return (
+              <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+                <div
+                  className="absolute rounded-sm border-2 border-white"
+                  style={{
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    boxShadow: "0 0 0 100000px rgba(0,0,0,0.45)",
+                  }}
+                >
+                  <span className="absolute -top-6 left-0 text-xs font-medium text-white drop-shadow">
+                    Print area: pan and zoom the map to frame it
+                  </span>
+                </div>
+              </div>
+            );
+          })()
+        : null}
+
+      {/* Print setup panel */}
+      {printOpen ? (
+        <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[62%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-72 md:rounded-xl md:border">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">Print map</h2>
+            <button
+              onClick={() => setPrintOpen(false)}
+              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="mt-2 space-y-2 text-sm">
+            <label className="block text-xs font-medium text-gray-600">
+              Title
+              <input
+                value={printTitle}
+                onChange={(e) => setPrintTitle(e.target.value)}
+                className="mt-0.5 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="block text-xs font-medium text-gray-600">
+              Subtitle / date
+              <input
+                value={printSubtitle}
+                onChange={(e) => setPrintSubtitle(e.target.value)}
+                className="mt-0.5 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <div className="flex gap-1.5">
+              {(["landscape", "portrait"] as const).map((o) => (
+                <button
+                  key={o}
+                  onClick={() => setPrintOrientation(o)}
+                  className={
+                    "flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium capitalize " +
+                    (printOrientation === o
+                      ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                      : "border-gray-300 text-gray-600")
+                  }
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+
+            <p className="pt-1 text-xs font-medium text-gray-600">
+              Layers (labels toggle beside each)
+            </p>
+            <div className="space-y-1">
+              {(
+                [
+                  ["property", "Property boundaries", true],
+                  ["parcel", "Parcels", true],
+                  ["field", "Ag fields", true],
+                  ["timber_stand", "Timber stands", true],
+                  ["pasture", "Pastures", true],
+                  ["wetland", "Wetlands", true],
+                  ["road", "Roads", true],
+                  ["utility_easement", "Utility easements", true],
+                  ["asset", "Assets", true],
+                ] as Array<[keyof PrintLabelFlags, string, boolean]>
+              ).map(([key, label, hasLabels]) => (
+                <div key={key} className="flex items-center gap-2 text-sm text-gray-800">
+                  <label className="flex flex-1 cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={printLayers[key]}
+                      onChange={(e) =>
+                        setPrintLayers((l) => ({ ...l, [key]: e.target.checked }))
+                      }
+                      className="h-4 w-4 accent-kelly-500"
+                    />
+                    {label}
+                  </label>
+                  {hasLabels && printLayers[key] ? (
+                    <label
+                      className="flex cursor-pointer items-center gap-1 text-xs text-gray-500"
+                      title={`${label} labels on the printed map`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={printLabels[key]}
+                        onChange={(e) =>
+                          setPrintLabels((l) => ({ ...l, [key]: e.target.checked }))
+                        }
+                        className="h-3.5 w-3.5 accent-kelly-500"
+                      />
+                      labels
+                    </label>
+                  ) : null}
+                </div>
+              ))}
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  checked={printLayers.crops}
+                  onChange={(e) =>
+                    setPrintLayers((l) => ({ ...l, crops: e.target.checked }))
+                  }
+                  className="h-4 w-4 accent-kelly-500"
+                />
+                Color ag fields by crop
+              </label>
+              {entities.length > 1 ? (
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800">
+                  <input
+                    type="checkbox"
+                    checked={printLayers.entity}
+                    onChange={(e) =>
+                      setPrintLayers((l) => ({ ...l, entity: e.target.checked }))
+                    }
+                    className="h-4 w-4 accent-kelly-500"
+                  />
+                  Color boundaries by entity
+                </label>
+              ) : null}
+            </div>
+
+            {printError ? <p className="text-xs text-red-600">{printError}</p> : null}
+            <button
+              onClick={generatePrint}
+              disabled={printBusy !== null}
+              className="w-full rounded-lg bg-kelly-500 px-3 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+            >
+              {printBusy ?? "Generate PDF"}
+            </button>
+            <p className="text-[11px] text-gray-500">
+              Downloads a Letter PDF of the framed area with legend, scale
+              bar, and satellite imagery at print resolution.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {/* Left control column */}
       <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
+        {visibility.utility_easement && easements.length > 0 ? (
+          <div className="rounded-lg bg-white/95 p-2 shadow-md">
+            <p className="text-xs font-medium text-gray-800">Easements</p>
+            <div className="mt-1 space-y-0.5">
+              {(Object.keys(EASEMENT_TYPE_LABELS) as Array<keyof typeof EASEMENT_COLORS>)
+                .filter((type) =>
+                  easements.some((e) => (e.easement_type ?? "other") === type)
+                )
+                .map((type) => (
+                  <p key={type} className="flex items-center gap-1.5 text-xs text-gray-700">
+                    <span
+                      className="h-0.5 w-4"
+                      style={{
+                        background: EASEMENT_COLORS[type],
+                        ...(type === "powerline"
+                          ? { backgroundImage: `repeating-linear-gradient(90deg, ${EASEMENT_COLORS.powerline} 0 6px, transparent 6px 9px)`, backgroundColor: "transparent" }
+                          : type === "pipeline"
+                            ? { backgroundImage: `repeating-linear-gradient(90deg, ${EASEMENT_COLORS.pipeline} 0 5px, transparent 5px 7px, ${EASEMENT_COLORS.pipeline} 7px 8px, transparent 8px 10px)`, backgroundColor: "transparent" }
+                            : {}),
+                      }}
+                    />
+                    {EASEMENT_TYPE_LABELS[type]}
+                  </p>
+                ))}
+            </div>
+          </div>
+        ) : null}
         {visibility.timber_stand && timber.length > 0 ? (
           <div className="rounded-lg bg-white/95 p-2 shadow-md">
             <p className="text-xs font-medium text-gray-800">Timber types</p>
