@@ -1,10 +1,30 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-20 (easements expanded to the full landowner set
-with line-or-polygon geometry, relationship, expiration, and category
-styling, migration 0019; pick-first drawing (choose the type, then
-draw); asset placement as pin, drawn outline, or parametric circle
-with grain bin diameter sync)
+Last updated: 2026-08-20 (document vault with a typed taxonomy, AI
+classification and per-type scans, and boundary plotting from deeds
+and plats, migration 0020; government payments (FSA farms, base acres,
+PLC / ARC-CO projections, income share), migration 0021; the Ask data
+assistant on a read-only RLS seam, migration 0022; Help Center with a
+"?" drawer, how-to chat, and Contact support)
+
+## DEPLOY CHECKLIST (this release)
+
+1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql, and
+   0022_assistant.sql in Supabase, in that order, BEFORE the deploy
+   goes live (the Documents page reads documents.doc_type and the
+   government payments pages read the fsa_* tables; a deploy without
+   the migrations breaks those pages).
+2. Set the new Vercel env vars: NASS_API_KEY (USDA Quick Stats),
+   RESEND_API_KEY, SUPPORT_EMAIL, and optionally SUPPORT_FROM. Contact
+   support returns a clear 503 until the Resend vars exist; NASS price
+   refresh returns 503 until NASS_API_KEY exists; everything else
+   works without them.
+3. `npm run help:build` runs automatically as the prebuild step and
+   compiles docs/help into lib/helpContent.generated.ts (that generated
+   file is ALSO committed, so a build that skips prebuild still has
+   help content). The build FAILS if a nav route has no help topic or
+   any topic contains an em dash.
+4. Confirm the Vercel deploy is green, then test.
 
 ## What this product is
 
@@ -23,8 +43,21 @@ and Postgres row level security guarantees each org sees only its own data.
   sthornton29/turnrow-landowner
 - Mapbox GL JS 3 (satellite-streets-v12 style) + @mapbox/mapbox-gl-draw
 - File parsing: shpjs (zipped shapefiles), @tmcw/togeojson (KML), jszip (KMZ)
-- Anthropic API (claude-sonnet-4-6) planned for AI document extraction in
-  Phase 3+
+- Anthropic API (claude-sonnet-4-6) for AI document extraction and
+  classification (/api/extract), the Ask data assistant
+  (/api/data-assistant, streaming tool loop), and the help chat
+  (/api/support-chat, streaming, no tools)
+- Resend (plain fetch to api.resend.com, no SDK) for Contact support
+  emails; BLM PLSS CadNSDI ArcGIS REST (gis.blm.gov) for section
+  polygons, queried through the same server-side ArcGIS utilities as
+  the county import (lib/gisServer.ts, now URL-generic with spatial
+  query, timeout, and label options); USDA NASS Quick Stats and the FSA
+  ARC-CO benchmark workbook for government payment inputs
+- Help content pipeline: docs/help/*.md (front matter title, route,
+  group, order, updated, keywords) compiled by scripts/build-help.mjs
+  (`npm run help:build`, wired as `prebuild`) into
+  lib/helpContent.generated.ts, a committed generated module (no
+  runtime fetch), plus docs/help/_digest.md for the help chat prompt
 - Mobile-first responsive PWA (manifest + icons wired; no service worker yet)
 - @turf/area for geodesic pre-import acre estimates in the GIS proxy;
   @turf/intersect, difference, union, buffer, simplify for Timber Scan
@@ -41,7 +74,16 @@ and Postgres row level security guarantees each org sees only its own data.
   presence, legacy-row migration), circle footprints (area, rim-drag
   round trip, details round trip, diameter sync, sq ft vs acres
   formatting), timber settlement spreadsheet collapse + MBF/Doyle
-  handling, timber allocation math)
+  handling, timber allocation math, document taxonomy completeness,
+  metes-and-bounds traverse (DMS parsing, units, curves, closure and
+  compass-rule force close, georeferencing), PLSS aliquot subdivision
+  (parsing, quarter/half UV math, section cutting, exceptions), PLSS
+  where builder and cache keys, plot preview helpers, NASS Quick Stats
+  parsing and seed cotton blend, FSA benchmark workbook discovery and
+  parsing, program config resolution, PLC and ARC-CO engines with
+  worked examples, government payment projection and allocation,
+  income government line, assistant SQL guard mirror, assistant tool
+  schemas, help route matching and search and nav coverage)
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -49,7 +91,16 @@ and Postgres row level security guarantees each org sees only its own data.
 - NEXT_PUBLIC_SUPABASE_ANON_KEY
 - NEXT_PUBLIC_MAPBOX_TOKEN
 - ANTHROPIC_API_KEY (server-side only, no NEXT_PUBLIC_ prefix; used by
-  /api/extract for AI document extraction with claude-sonnet-4-6)
+  /api/extract for AI document extraction and classification, by
+  /api/data-assistant for the Ask assistant, and by /api/support-chat
+  for the help chat, all claude-sonnet-4-6)
+- NASS_API_KEY (government payments; free key from
+  quickstats.nass.usda.gov; /api/gov/nass-monthly-prices returns 503
+  without it)
+- RESEND_API_KEY, SUPPORT_EMAIL (the address support messages go to),
+  SUPPORT_FROM (optional; a Resend-verified sender, defaults to
+  "Turnrow Landowner <support@turnrow.farm>"); /api/support-contact
+  returns a clear 503 while RESEND_API_KEY or SUPPORT_EMAIL is unset
 - FARM_API_BASE_URL (Phase 6; base URL of the farm software's partner API,
   e.g. https://<farm-domain>/api/partner/v1, no trailing slash)
 - FARM_API_ENCRYPTION_KEY (Phase 6; 64 hex chars, AES-256-GCM key that
@@ -57,7 +108,9 @@ and Postgres row level security guarantees each org sees only its own data.
 - CRON_SECRET (Phase 6; shared secret Vercel sends when invoking the
   /api/farm/sync cron; the route rejects anything else)
 - SUPABASE_SERVICE_ROLE_KEY (Phase 6; used ONLY by the cron sync, which
-  runs with no signed-in user and scopes every query itself)
+  runs with no signed-in user and scopes every query itself, and by the
+  GLOBAL public-data cache writers: RMA prices, the PLSS section cache,
+  the FSA benchmark cache. NEVER in the assistant path.)
 
 ## Database schema (migrations 0001_phase1_schema.sql, 0002_phase2_timber_roads_assets.sql)
 
@@ -182,6 +235,39 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  DOCUMENT VAULT (migration 0020): doc_type text not null default
+  'other' with a check over 27 types in seven groups (lib/documents.ts
+  is the single source of truth, unit-tested against the SQL list):
+  Title & ownership = deed_warranty, deed_quitclaim, deed_timber,
+  deed_mineral, title_insurance, title_opinion, closing_statement,
+  probate_estate; Surveys & legal = survey_plat, legal_description;
+  Encumbrances & debt = easement_deed, mortgage_dot, lien_release;
+  Government & conservation = fsa_156ez, fsa_map, crp_contract,
+  nrcs_conservation_plan, wetland_determination, hel_determination;
+  Valuation & management = appraisal, timber_cruise, management_plan,
+  soil_survey; Insurance & agreements = insurance_policy,
+  hunting_agreement, current_use_application; Other = other (every
+  pre-0020 row backfilled to other; /documents/retype re-types them in
+  bulk). Also title, extracted jsonb (the reviewed scan payload),
+  extracted_at, extraction_reviewed, ai_suggested_type (the
+  classifier's suggestion, kept until the user accepts or overrides),
+  linked_easement_id (composite FK to easements, set null on delete:
+  an easement deed points at the easement it describes),
+  produced_boundary_type + produced_boundary_id (the property or parcel
+  boundary a deed or plat PLOTTED, link only), and search_text
+  (lowercased file name + title + doc_type + extracted text,
+  maintained by a BEFORE INSERT/UPDATE trigger
+  private.documents_search_text(); a pg_trgm GIN index when the
+  extension is available, else ILIKE scans). Index (organization_id,
+  doc_type). GLOBAL plss_cache (no organization_id; BLM PLSS section
+  polygons keyed state|township|range|section|meridian with geojson
+  and attrs incl. acres; select to authenticated, service-role writes
+  only, the RMA cache flavor). assistant_usage (org RLS): one row per
+  AI call per user with kind in (assistant, support_chat,
+  support_contact, extract) for the hourly limits in
+  lib/rateLimit.ts (table-backed, in-memory fallback per server when
+  the table errors); limits: extract 60/h, assistant 30/h, help chat
+  20/h, support contact 5/h.
 
 Phase 2 tables (all with the same org RLS + composite property FK):
 
@@ -391,6 +477,82 @@ Entity level (migrations 0007 and 0009; org RLS, same policy pattern):
   percentages/members within an entity, inter-entity leases, per-entity
   user permissions.
 
+Government payments (migration 0021; engine in lib/gov/, ported from
+the farm software per docs/GOV_PAYMENTS_PATHWAYS.md with payment
+limits, Barchart futures, and SCO dropped):
+
+- Per-org (org RLS + composite FKs): fsa_farms (farm_number, state,
+  county, farmland_acres, cropland_acres, dcp_cropland_acres, notes,
+  source_document_id; unique org + farm_number + state + county),
+  fsa_farm_properties (farm -> property with allocation_pct 0..100,
+  default 100; a split farm carries several rows), fsa_base_acres
+  (commodity slug in corn, soybeans, wheat, seed_cotton, grain_sorghum,
+  oats, barley, peanuts, canola, sesame; base_acres, plc_yield,
+  tract_numbers text[]; unique farm + commodity), fsa_elections (farm x
+  commodity x program_year: plc | arc_co | arc_ic; the app defaults to
+  PLC when no row exists).
+- GLOBAL admin-curated (select to all authenticated, writes gated on
+  private.is_platform_admin(), edited in Settings > Admin: government
+  payment program parameters): covered_commodities (seeded with the
+  OBBBA 2025-2031 statutory reference prices, national loan rates,
+  units, marketing-year start months: corn 4.10/2.42 MY9, soybeans
+  10.00/6.82 MY9, wheat 6.35/3.72 MY6, seed cotton 0.42/0.25 MY8,
+  grain sorghum 4.40/2.42 MY9, oats 2.65/2.20 MY6, barley 5.45/2.75
+  MY6, peanuts 0.315/0.195 MY8, canola 0.2015/0.1009 MY7, sesame
+  0.2015/0.1009 MY9; lint/cottonseed shares and month weights
+  nullable), program_year_config (crop_year column kept so the ported
+  resolver is verbatim; seeded 2025, 2026, 2027 with arc_guarantee
+  0.90, arc cap 0.12, ERP olympic factor 0.88, ERP cap 1.15, payment
+  factor 0.85, ARC-IC factor 0.65, sequestration 0.054; exact year ->
+  most recent earlier -> earliest -> era defaults, non-exact flagged
+  isFallback), arc_plc_price_data (commodity x program_year:
+  effective_reference_price, mya_price_estimate, mya_price_final,
+  wasde_midpoint, benchmark_price, source, note; seeded FSA-published
+  ERPs corn 4.42, soybeans 10.71, wheat 6.35 and national benchmark
+  prices 5.03 / 12.17 / 6.98 for 2025 and 2026), mya_monthly_prices
+  (confirmed NASS months, source usda | manual with an audit note).
+- GLOBAL server-refreshed (select only; service role writes, write-
+  then-swap): fsa_benchmark_cache (unique data_year, state_code,
+  county, commodity, practice) and fsa_benchmark_fetches (the 24 h
+  per year x state guard against fsa.usda.gov).
+- Math (lib/gov/govPayments.ts, pure, unit-tested with worked examples
+  in the test names): PLC rate = max(0, ERP - max(MYA, loan rate)),
+  gross = rate x PLC yield x base acres, net = gross x 0.85 x (1 -
+  0.054) (corn ERP 4.42, MYA 4.10, yield 150, base 100 => 0.32 rate,
+  4,800.00 gross, 3,859.68 net); ARC-CO guarantee = 0.90 x benchmark
+  price x benchmark county yield, shortfall vs actual revenue, rate
+  capped at 0.12 x benchmark revenue, same netting; flat fallback when
+  no benchmark row (labeled "flat est." with the reason); ERP = min(1.15
+  x statutory, max(statutory, 0.88 x Olympic average of the 5 lagged
+  MYAs)) with an FSA-published ERP winning; MYA precedence final >
+  manual > WASDE midpoint > NASS blend estimate (published months only,
+  marketing-weighted, no futures); seed cotton blended monthly from
+  lint cents/lb and cottonseed $/ton (0.43 / 0.57). PAYMENT-YEAR
+  ATTRIBUTION: program year N pays October N+1; the +1 lives only in
+  revenueCropYearFor / programYearFor / expectedArcPlcDate.
+  lib/gov/govProjection.ts projectFarms (election default PLC, drivers
+  and notes per row) + allocateToProperties by allocation_pct
+  (unlinked farms roll to UNLINKED_FARM); lib/gov/govData.ts
+  loadGovInputs / projectOrg / projectForPaymentYear are the ONE engine
+  the page, the summary cards, the income line, and the assistant all
+  call. No producer payment limits anywhere (the tenant's world).
+- lib/gov/fsaImport.ts createOrUpdateFarmFromExtraction(supabase,
+  orgId, extracted, { sourceDocumentId, propertyId }) turns a reviewed
+  FSA-156EZ scan into a farm + base acre rows (fuzzy commodity
+  matching via lib/crops.ts canonicalCrop; unmatched commodities are
+  reported, never guessed). Called from the scan review with an
+  explicit confirm; manual entry on /gov-payments works without a
+  scan.
+- Routes (session required): GET /api/gov/nass-monthly-prices
+  (commodity + year; 24 h in-process promise cache; POST lets a
+  platform admin save confirmed months), POST /api/gov/fsa-benchmark
+  (cache-first lookup, fetch guard, data_year reported when an older
+  file is served, not_found shape), POST /api/gov/mya-estimate (the
+  blend for display; persists mya_price_estimate only for platform
+  admins and never over a manual or final value).
+- Leases: LeaseTerms.gov_payment_share_pct (jsonb only, default 0) on
+  crop share and flex terms, edited on the lease form.
+
 Lease price methods (migration 0012; price_method lives in leases.terms
 jsonb): crop share and flex leases record HOW their average crop price
 is established, and the app fills each year's price assumption from the
@@ -593,14 +755,208 @@ Functions and views:
   their lockup). Tapping the logo goes home, which is the MAP: login,
   the root redirect, onboarding, proxy, and the PWA start_url all land
   on /map, and the nav order starts with Map, then Dashboard,
-  Properties, Timber, Assets, Leases, Property Taxes, Income, Farm
-  Data, Import, and a gear icon for /settings. Bottom tab bar on
-  mobile (Map, Home, Properties, Leases, Income) with the gear in the
+  Properties, Timber, Assets, Leases, Property Taxes, Income, Gov
+  Payments, Documents, Ask, Farm Data, Import, then the "?" help
+  button and a gear icon for /settings. Bottom tab bar on mobile (Map,
+  Home, Properties, Leases, Income) with the "?" and the gear in the
   top bar. ONE SETTINGS PAGE (/settings): Members section (list,
   invites, roles; owner-only invite form), Admin section (the
   platform-admin county GIS registry rendered inline via
-  AdminGisClient embedded mode, platform admins only), and Sign out.
-  /settings/members and /admin/gis redirect there.
+  AdminGisClient embedded mode, platform admins only), an Admin
+  "government payment program parameters" section
+  (components/gov/AdminProgramParams.tsx editing covered_commodities,
+  program_year_config, and arc_plc_price_data rows, platform admins
+  only), and Sign out. /settings/members and /admin/gis redirect there.
+  - /documents (DOCUMENT VAULT): every document in the org grouped by
+    the taxonomy groups (collapsible, with counts), filters by
+    property (including documents attached to the property's parcels,
+    fields, stands, and other children), entity (via
+    properties.entity_id), and type, and a search box over name, title,
+    search_text, the attached-to label, and the extracted highlights.
+    Each row: a group-colored DocTypeChip (tap to change the type), the
+    extracted highlights (lib/documents.ts extractedHighlights:
+    grantor, recording ref, farm number, policy amount...), a link to
+    the attached entity's page, Open (signed URL), Scan, and Plot
+    boundary when canPlotBoundary(doc_type). UPLOAD from here: file
+    picker, attach-to picker (entity type then row), type select; on
+    file choose /api/extract kind=classify suggests a type shown as an
+    amber "AI: Warranty deed?" chip the user ACCEPTS or overrides; the
+    row saves as 'other' + ai_suggested_type until accepted
+    (classification never auto-applies). EntityDocuments (every entity
+    page) does the same inline: chips, per-row type select, suggestion
+    chip, Scan button, Plot boundary link. /documents/retype is the
+    bulk backfill: untyped rows with a select prefilled from
+    ai_suggested_type, "Classify all" running the classifier
+    sequentially with progress (suggestions persist), Apply updates
+    only the rows given a real type. SCAN ("Scan this document",
+    components/documents/ScanDocumentButton + DocumentReview): the
+    file is fetched by signed URL and posted to /api/extract with
+    kind = scanKindFor(doc_type) (deed for deed_* and easement_deed;
+    survey for survey_plat and legal_description; title_insurance for
+    title_insurance and title_opinion; fsa_156ez; determination for
+    wetland/HEL; generic for the rest), each a forced tool with
+    unsure_fields; the amber review form is driven by EXTRACTED_FIELDS
+    (deeds: grantor, grantee, execution and recording dates, recording
+    ref, consideration, county, state, parcel refs, the legal
+    description VERBATIM; surveys: surveyor, date, stated acres,
+    recording ref, legal description; title insurance: insurer, policy
+    number, amount, date, the exceptions TABLE; FSA-156EZ: farm number,
+    county, state, tract numbers, farmland / cropland / DCP cropland
+    acres, the base acres table (commodity, base acres, PLC yield);
+    determinations: tract, codes, date, notes; generic: title,
+    parties, date, amount, reference, summary), tables as editable
+    grids; Save writes documents.extracted + extracted_at +
+    extraction_reviewed; existing values show in a collapsible
+    Extracted block with Edit and Rescan. Confirming a 156EZ scan asks
+    (window.confirm) to create or update the FSA farm and base acres
+    via lib/gov/fsaImport.ts and reports what was written and any
+    unmatched commodities with a link to Government Payments.
+  - /documents/[id]/plot (PLOT BOUNDARY FROM THIS DOCUMENT, the
+    flagship, on deeds, plats, and legal descriptions): a three-step
+    mobile-first stepper (app/(app)/documents/[id]/plot/PlotClient.tsx,
+    components/documents/plot/PlotMap.tsx). An HONEST LIMITATIONS panel
+    heads the page: plot quality follows description quality; closure
+    error is shown, never hidden; aliquot parts assume regular
+    sections and government lots are approximations; the county GIS
+    import remains the fast path when records and GIS agree. Step 1
+    Extract: /api/extract kind=legal_description reads the document
+    and classifies it (aliquot | metes_bounds | mixed | unknown; the
+    raw result is stored under extracted.legal_description_extraction
+    so reopening does not re-spend; a prior deed/survey scan's legal
+    description text seeds it) into an amber review: kind toggle,
+    verbatim source text, and either a tracts list (aliquot text,
+    section, township + N/S, range + E/W, meridian HU/SS/TA/unknown,
+    exceptions) or the CALLS GRID (bearing text with a live azimuth
+    from parseBearing or a red "Unreadable bearing", distance, unit,
+    curve fields, reorder/remove). Step 2a ALIQUOT: each tract queries
+    POST /api/plss (state, township, range, section, meridian
+    optional), which serves plss_cache first and otherwise the
+    live-verified (2026-08-20) BLM National PLSS CadNSDI MapServer on
+    gis.blm.gov (layer 1 townships, layer 2 sections; the section layer
+    carries no township columns, so the where clause matches the
+    PLSSID string STATE + MERIDIAN CODE + TTT + FRAC + DIR + RRR + FRAC
+    + DIR + DUP, e.g. AL160040S0080W0 = Alabama, Huntsville meridian,
+    T4S R8W; Alabama meridian codes 16 Huntsville, 25 St. Stephens, 29
+    Tallahassee), then writes the cache with the service role; several
+    candidates (meridian unstated) render as pick buttons with a mini
+    map; lib/geo/aliquot.ts parses the chain ("NW1/4 of SE1/4", halves,
+    spelled-out quarters, NWSE shorthand, "and" lists, less/save-and-
+    except clauses, lots) and cuts the section by bilinear
+    interpolation inside its four corners (quarter/half recursion from
+    largest to smallest), unions tracts, differences aliquot
+    exceptions, and notes lot approximations and exceptions that must
+    be cut by hand. Step 2b METES AND BOUNDS: lib/geo/traverse.ts runs
+    live (bearings in DMS and decimal in every common notation,
+    azimuths, due directions; feet, chains, poles/rods, links, varas,
+    meters, yards; curves by chord bearing + length or tangent
+    radius + arc/delta with direction), with the CLOSURE card
+    prominent (distance and 1:N ratio, color-coded: closed / good at or
+    above 1:5000 / fair to 1:1000 / poor), area and perimeter, and a
+    "Force close (compass rule)" checkbox clearly labeled as adjusting
+    the drawn courses (Bowditch distribution, adjusted flag); then
+    GEOREFERENCE on a satellite map: pick a reference property or
+    parcel (the POB starts at its centroid), tap or drag the point of
+    beginning, quick-pick the nearest boundary vertices ("Use NW
+    corner"), and a rotation slider with typed value (-15 to +15
+    degrees in 0.1 steps) for basis-of-bearing differences, the shape
+    overlaid live through toGeoJSON (local tangent plane, the pivot
+    meter constants). Step 3 PREVIEW AND SAVE: the plotted polygon
+    (kelly) over the target's existing boundary (white), acres tiles
+    plotted vs current vs deeded (parcels.deeded_acres), and an
+    explicit Save-as choice: new property (name, county, state), new
+    parcel (property + parcel number), replace an existing property
+    or parcel boundary (confirm dialog states the old acres). Save
+    inserts when needed, writes the MultiPolygon through set_geometry,
+    and updates the document (produced_boundary_type/_id plus
+    extracted.legal_description_plot: kind, closure, rotation, pob,
+    plotted acres, target, saved_at) with a link to /map?focus=.
+  - /gov-payments (GOVERNMENT PAYMENTS): a payment-year vs program-year
+    toggle with the framing "2025 program year, paid October 2026",
+    year chips, entity chips (like /income), headline tiles (projected
+    on your land, your share under leases, prices in use with the MYA
+    source state and a "Refresh from USDA NASS" action), then a table
+    by entity > property > FSA farm > commodity: base acres, PLC yield,
+    election (inline select writing fsa_elections), projected net
+    payment, a Drivers disclosure per row (effective price, ERP,
+    rate, benchmark revenue, guarantee, cap, flat flag, notes, and an
+    FSA county benchmark lookup button), farm management on the same
+    page (add/edit/delete farms, link properties with allocation %,
+    base acres editor), and a plain-language METHODOLOGY panel (the
+    formulas, sources and as-of dates, fallback notices, and the
+    estimate disclaimer: FSA determines actual payments after the
+    marketing year closes). GovPaymentsCard (server component) on
+    /properties/[id] and /entities/[id] shows base acres per commodity
+    and the projected payment for the current payment year when a farm
+    is linked. INCOME: lib/income.ts gains IncomeType "government":
+    govShareRows(inputs, paymentYear) allocates each lease's land
+    (lease_lands -> property -> fsa_farm_properties, by leased acres
+    over property acres) and applies gov_payment_share_pct; a nonzero
+    share enters the Government payments row of both /income tables
+    (projected, payment-year attributed); at 0% totals are untouched
+    and informationalGovPayments renders "base acres on this land
+    generate approximately $X/yr to your tenant" on /gov-payments and
+    the summaries.
+  - /ask (ASK ABOUT YOUR LAND, the data assistant): a mobile-first chat
+    (components/assistant/AssistantChat.tsx; starter questions such as
+    "How many acres do I own in Lawrence County?" and "Which parcels
+    have unpaid 2025 taxes?"; a dashboard AskEntryCard with a one-line
+    question box; ?q= deep link) streaming from POST
+    /api/data-assistant (NDJSON lines: {t} text, {s} status such as
+    "Looking at income for 2025" shown as chips, {d} done, {e} error;
+    session required, org required, 30/h per user, claude-sonnet-4-6,
+    system prompt cached, max 6 tool rounds, maxDuration 60). TWO TOOL
+    TIERS (lib/assistantTools.ts): CURATED tools that run the SAME
+    engines the pages use on the session client (list_properties,
+    land_summary, income_summary, taxes_status, timber_sales_summary,
+    farm_activity, easements_summary, gov_payments_summary via
+    lib/gov/govData, each returning a plain-language sources list the
+    model must cite: "across your 3 properties in Lawrence County"),
+    and run_sql for the long tail: guardSql in lib/assistantSql.ts
+    (unit-tested mirror) then supabase.rpc("assistant_query", {q}).
+    ISOLATION GUARANTEE (migration 0022): assistant_query(q) is
+    SECURITY INVOKER, so model-written SQL runs as the signed-in user
+    under the same RLS policies as every page; the function strips one
+    trailing semicolon and rejects any other semicolon or comment,
+    requires SELECT or WITH, rejects write and admin keywords as whole
+    words (insert, update, delete, merge, truncate, drop, alter,
+    create, grant, revoke, copy, call, do, execute, refresh, lock, set,
+    reset, comment, security, vacuum, analyze, cluster, reindex,
+    listen, notify, into, pg_sleep, pg_read_*, pg_ls_dir, dblink, lo_*,
+    FOR UPDATE/SHARE, which also catches data-modifying CTEs), sets
+    `transaction_read_only = on` and a 5 s statement_timeout, wraps
+    the query as `select * from (q) s limit 200`, and is granted only
+    to authenticated. No service-role client exists anywhere in the
+    assistant path; tenant isolation is the database's RLS, never
+    prompt language, and that is the acceptance test.
+  - /help and the "?" drawer (HELP CENTER): 26 topics in docs/help
+    (getting-started, map, drawing, assets, printing, properties,
+    entities, easements, import-county, import-files, timber,
+    timber-scan, timber-sales, leases, lease-price-methods, taxes,
+    income, documents, plot-boundary, gov-payments, farms,
+    farm-activity, assets-page, settings, ask, help, plus
+    _limitations.md listing what the app does not do, which heads the
+    chat digest) compiled by scripts/build-help.mjs. /help groups
+    topics like the nav with search (title > keywords > body ranking)
+    and a topic view rendered by lib/helpMarkdown.tsx (safe subset),
+    ?topic= deep links. The "?" button in the header opens
+    components/help/HelpDrawer.tsx (right panel on desktop, bottom
+    sheet on phones; Escape closes; lib/helpBus.ts openHelp({route,
+    tab}) from anywhere) with four tabs: This page (lib/help.ts
+    topicForRoute: longest route-prefix match, lowest order wins,
+    related topics listed), All topics (search), How-to chat, and
+    Contact support. HOW-TO CHAT (/api/support-chat): session
+    required, 20/h, claude-sonnet-4-6 streaming text/plain, system
+    prompt = rules + the compiled digest + the current page's topic,
+    NO tools and NO user data; it says so ("I know how the app works;
+    for questions about your own land and numbers use Ask") and points
+    to Contact support when the app cannot do something. CONTACT
+    SUPPORT (/api/support-contact): session required, 5/h, the server
+    gathers user email, org, role, page, build (VERCEL_GIT_COMMIT_SHA
+    short), and browser, accepts an optional screenshot (data URL
+    under 2 MB, attached), sends through Resend with reply_to the
+    user, and returns 503 with a clear message when unconfigured. The
+    data assistant (knows your data) and the help chat (knows the
+    app) stay deliberately separate surfaces.
   - /dashboard: stat tiles (total acres, properties, field acres, timber
     acres, wells, pivots, grain bins, buildings), static satellite
     thumbnail (Mapbox Static Images API) linking to the map, quick links.
@@ -1149,6 +1505,22 @@ Functions and views:
 - Numbers with commas; acres to 1 decimal (lib/format.ts formatAcres);
   dollars with commas and 2 decimals (formatDollars).
 - Every future AI extraction must be shown for user review before saving.
+  AI document CLASSIFICATION is a suggestion chip the user accepts or
+  overrides; a document never gets a type other than 'other' without
+  that confirmation.
+- The assistant path (/api/data-assistant, lib/assistantTools.ts,
+  lib/assistantSql.ts, assistant_query) NEVER uses the service-role
+  client; RLS on the session client is the tenant isolation guarantee.
+  Public-data caches (RMA, PLSS, FSA benchmark) are the only
+  service-role writers besides the farm sync cron.
+- Government payment figures are estimates keyed to the program year
+  and attributed to the payment year (October of the following year);
+  the +1 lives in one place (lib/gov/govPayments.ts). No producer
+  payment limits.
+- Help content: every nav route needs a topic in docs/help and no
+  topic may contain an em dash; scripts/build-help.mjs fails the build
+  otherwise. Run `npm run help:build` after editing docs/help (prebuild
+  does it automatically) and commit the generated module.
 - PROJECT_SUMMARY.md is regenerated at the end of every phase.
 
 ## Build phases
@@ -1256,4 +1628,33 @@ Functions and views:
   synced two ways with the asset form, letter markers at footprint
   centroids, footprint sq ft / acres in the panel). Unit tests for
   the easement catalog and migration and for circle geometry/sync.
+  Described above.
+- Post-Phase 6j (DONE, 2026-08-20, migrations 0020 + 0021 + 0022):
+  DOCUMENT VAULT (27-type taxonomy in seven groups, a Documents nav
+  page with filters, search, and upload, AI classification as a
+  confirm-or-override chip, per-type scans with amber review stored
+  on the document, a bulk re-type backfill, and PLOT BOUNDARY FROM A
+  DOCUMENT: PLSS aliquot resolution against the live-verified BLM
+  CadNSDI service with a global section cache and bilinear quarter
+  subdivision, and a metes-and-bounds traverse plotter with closure
+  error, compass-rule force close, and map georeferencing by pinned
+  point of beginning plus rotation, both ending in a plotted-vs-
+  current-vs-deeded preview and an explicit new-or-replace save);
+  GOVERNMENT PAYMENTS (FSA farms, property links with allocation,
+  base acres and elections, global OBBBA program parameters and price
+  data seeded and admin-editable, NASS MYA blends and the FSA
+  benchmark workbook cache, PLC and ARC-CO engines ported from the
+  farm software, payment-year attribution, a Government Payments page
+  with methodology, property and entity cards, and the
+  gov_payment_share_pct lease term feeding a Government payments
+  income line); the ASK data assistant (curated tools over the same
+  engines plus a read-only SECURITY INVOKER SQL seam with whole-word
+  write rejection, read-only transaction, timeout, and row cap; RLS
+  is the isolation guarantee; per-user hourly limits); and the HELP
+  CENTER (26 how-to topics compiled at build time, /help, the "?"
+  drawer with the current page's topic, search, a no-data how-to
+  chat, and Contact support through Resend). Unit tests for the
+  taxonomy, traverse, aliquot, PLSS where builder, NASS parsing, FSA
+  workbook parsing, program config, PLC/ARC-CO engines, projection,
+  income government line, SQL guard, tool schemas, and help routing.
   Described above.

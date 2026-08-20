@@ -1,0 +1,591 @@
+# Turnrow Landowner capabilities digest
+
+Generated 2026-08-20, version 0.1.0, build 0c40548. Compiled from docs/help; regenerate with npm run help:build.
+
+# What Turnrow Landowner does NOT do
+
+Turnrow Landowner keeps a landowner's records: property and parcel boundaries on a satellite map, timber stands, roads, easements and assets, leases and tenant payments, timber sales, property taxes, documents, government program base acres, and the farm activity a tenant chooses to share. It deliberately does not do the following. If someone asks, say so plainly and do not improvise a workaround:
+
+- **No accounting or tax preparation.** Income views show projected and received rent, timber money, and property taxes for planning. They are not a ledger, a P&L, or anything for a tax return.
+- **No legal advice.** Boundaries plotted from deeds are estimates that follow the quality of the description. A licensed survey is the only thing that settles a line.
+- **No payment processing.** Rent and timber checks are recorded by you; nothing moves money.
+- **No farming operations.** No planting, spraying, or equipment records. Farm activity comes only from a tenant's farm software when the tenant shares it.
+- **No weather or market advice.** Price benchmarks feed lease projections; nothing recommends when to sell.
+- **No automatic county data.** County parcel records and public USDA data are looked up when you ask and always shown for your confirmation before anything saves.
+- **No app-store app.** The app runs in the browser and can be added to a phone home screen from the browser's share or menu button.
+- **No self-serve signup.** New organizations and users join by invitation.
+- **US land, US dollars, US programs only.** County parcel lookups cover the counties in the registry (north Alabama first).
+
+# Ask about your land  (page: /ask)
+
+## What Ask does
+
+Ask answers questions about **your own records**: "How many acres do I own in Lawrence County?", "Which parcels have unpaid 2025 taxes?", "What did timber sales bring in last year?", "What easements cross the river farm?" It reads the same figures the pages show and tells you, in plain language, what it looked at to answer.
+
+## What it does not do
+
+It does not change anything, and it cannot see other organizations' data. It does not know how to use the app; for that, open the ? button, whose how-to chat knows the app and not your data. Keep the two straight: Ask knows your land, Help knows the app.
+
+## Tips
+
+- Name the year when it matters ("2025 taxes").
+- If it says it could not find something, check that the records exist (a lease with no land linked has no acres to count).
+- It has an hourly limit per person to keep costs sane.
+
+# Assets list  (page: /assets)
+
+## What this page is for
+
+Every well, pivot, bin, building, pond, fence, and pipe you have recorded, filterable by property and type, with a total estimated value. Tap a row to open the asset page, or Show on map to zoom to it.
+
+## The asset page
+
+Shared fields (name, property, year installed, condition, estimated value, notes) plus a form specific to the type: well depth and pump details, pivot make and wetted length, bin capacity and diameter, building construction and utilities, and so on. Pivots, risers, and pipes can link to their supply well. Photos and documents attach below. Deactivate keeps the history and takes the asset off the map; delete is permanent.
+
+## Common questions
+
+- **The bin diameter changed the circle on the map.** That is on purpose: a grain bin drawn as a circle uses the same diameter both places.
+- **Where do I place it?** Assets are placed from the Map (pin, drawn outline, or circle). An asset created without a location says so and waits.
+
+# Getting started  (page: /dashboard)
+
+## What this app is for
+
+Turnrow Landowner keeps the records of land you own and lease out: where the boundaries are, what is on the ground (timber, roads, wells, bins, easements), who leases it and what they owe, what the county charges in property taxes, the papers that prove it all, and the government program base acres tied to it. Everything you enter is private to your organization.
+
+## Where to begin
+
+- **Get your land on the map.** The fastest start is Import, then Import from county records: search by owner name, pick the parcels, and the boundaries arrive already drawn. If the county is not in the registry yet, upload a shapefile, KML, or GeoJSON, or draw boundaries by hand on the Map.
+- **Group properties under the right owner.** If family land sits in an LLC, a trust, and your own name, create an entity for each under Properties then Entities and assign properties to them. Most pages can be filtered by entity.
+- **Add what is on the ground.** Timber stands, roads, wells, pivots, bins, and easements are drawn or pinned from the Map's Add button.
+- **Bring in the paperwork.** Leases, tax statements, deeds, surveys, and FSA-156EZ forms can be uploaded and read for you; you review what was read before it saves.
+
+## The Dashboard
+
+The Dashboard shows total acres, property count, ag field and timber acres, and counts of wells, pivots, bins, and buildings, with a satellite thumbnail that opens the map. When land sits in more than one entity, chips across the top scope the numbers to one entity. Alert cards flag things that need attention, such as tenant insurance about to expire or taxes coming due.
+
+## Getting help
+
+- **The ? button** in the top bar opens Help on every page: a guide to the page you are on, a search across all topics, a how-to chat that knows the app, and Contact support, which reaches a person.
+- **Ask** (in the menu) is different: it answers questions about your own land and numbers from your records, such as "how many acres do I own in Lawrence County".
+
+## Common questions
+
+- **Can I use this on my phone?** Yes. The app is built for phones first. Add it to your home screen from the browser menu and it opens like an app.
+- **Can someone else in the family log in?** Yes. An owner invites people by email under Settings then Members.
+- **Is my data shared with my tenant?** No. The only connection runs the other way: a tenant can choose to share their field data with you.
+
+# Documents  (page: /documents)
+
+## The vault
+
+Every file you attach anywhere (property, parcel, lease, timber sale, easement, asset, entity, tax statement) lives in Documents, grouped by kind: Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, and Other. Filter by property, entity, or type, and search by name or by what was read out of the file. Each row opens the file and links to the thing it is attached to.
+
+## Uploading and typing
+
+Upload from a page's Documents section or from the Documents page (pick what to attach it to). On upload the app suggests the document type with an amber chip; accept it or choose another. Until you confirm, the file is filed under Other with the suggestion remembered. Older files uploaded before types existed sit under Other; the **Type untyped** screen lets you classify them all and apply in bulk.
+
+## Scanning
+
+**Scan this document** reads the key fields for its type and shows them for your review, amber where it was unsure: grantor, grantee, dates, and recording reference for deeds, plus the legal description word for word; surveyor, date, and stated acres for plats; insurer, policy amount, date, and the exceptions list for title insurance; farm number, tracts, and the base acres table for an FSA-156EZ; tract, codes, and date for wetland and HEL determinations. Saved fields show on the row and on the attached page, and they are searchable. Confirming a 156EZ creates or updates the FSA farm and base acres used by Government Payments.
+
+## Plot boundary
+
+Deeds, plats, and legal descriptions offer **Plot boundary**: the app reads the legal description and turns it into a boundary on the map. See the next topic.
+
+## Common questions
+
+- **Photos of a well or barn?** Those are documents too, attached to the asset, shown as a gallery.
+- **Can I rename a file?** Give it a title; the original file name stays.
+- **Who can see my documents?** Only members of your organization.
+
+# Plotting a boundary from a deed  (page: /documents)
+
+## Two kinds of descriptions
+
+- **Aliquot parts**: "the NW quarter of the SE quarter of Section 12, Township 4 South, Range 8 West." The app finds that section on the public survey grid, subdivides it by quarters and halves, unions the parts, subtracts any "less and except" parts, and lands a boundary on the map directly.
+- **Metes and bounds**: a starting point and a chain of calls, "thence N 45 degrees 30 minutes E 660 feet." The app reads the calls into a table you can correct, plots the shape, and you place it on the map.
+
+## The steps
+
+- **Read**: the description is extracted from the document and shown for review, amber where unsure. Fix tracts or calls in the table. Bearings that cannot be read are flagged red.
+- **Resolve or plot**: aliquot tracts resolve against the survey grid (if the meridian is unknown you pick among candidates). Metes and bounds calls plot into a shape with the **error of closure** shown up front: the gap between where the last call ends and the starting point, as feet and as a ratio. Green is 1:5,000 or better, amber down to 1:1,000, red worse. **Force close** spreads the gap across the courses and is labeled as an adjustment.
+- **Place** (metes and bounds only): pin the point of beginning on the satellite map, drag it to fit, and nudge the rotation a fraction of a degree if the deed's basis of bearing differs from true north. The shape follows live.
+- **Preview and save**: the plotted boundary overlays the current one with acres side by side (plotted, current, deeded). Save it as a new property or parcel, or replace an existing boundary after a confirmation that states the old acres. The document remembers which boundary it produced.
+
+## Honest limitations
+
+Plot quality follows description quality. Old deeds omit curves, mix units, or reference monuments that no longer exist. Aliquot math assumes regular sections; government lots along rivers and township lines are approximations. Closure is shown, never hidden. When the county's parcel map agrees with your records, Import from county records is faster and usually better. Nothing here replaces a licensed survey.
+
+## Common questions
+
+- **The shape is mirrored or spun.** Check bearing quadrants (N 45 E vs N 45 W) in the calls table, then use the rotation control for small differences.
+- **Units?** Feet, chains (66 ft), poles or rods (16.5 ft), links, varas, and meters are all understood; pick the unit per call when the deed mixes them.
+
+# Easements  (page: /easements)
+
+## What counts as an easement
+
+A recorded right someone else holds over your land, or one you hold over a neighbor's. Types are grouped into families: utility (powerline, pipeline, waterline or sewer, telecom or fiber), access and transport (private access, public road right of way, railroad), water (drainage, flowage for a reservoir), conservation (land trust or USDA conservation easements), and other (cemetery access, temporary construction, solar or wind, other). Severed mineral rights are not an easement and are not recorded here.
+
+## Recording one
+
+Draw it from the Map: + Add, Draw, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+
+## On the map and in print
+
+Families share a look: utility reds and oranges, access browns with a tie pattern for railroads, water blues with a stronger fill for flowage, a violet hatch for conservation, grays for the rest. The legend lists only the families on screen. Tapping an easement shows its exact type and every field; its page holds the recorded deed.
+
+## Common questions
+
+- **The easement crosses two properties.** Property is optional on easements; leave it blank or pick the main one.
+- **Our own buried irrigation pipe?** That is an asset (Underground pipe), not an easement.
+- **Where does the easement deed go?** Upload it on the easement's page, or in Documents with type Easement deed.
+
+# Entities  (page: /entities)
+
+## What an entity is
+
+An entity is the legal owner of record: your own name, a family LLC, a trust, a corporation, a partnership, or an estate. Properties are assigned to entities so acres, income, taxes, and government payments can be viewed per owner.
+
+## Where entities come from
+
+- Create one here with a name and type.
+- Import from county records creates or matches entities from the owner names on the parcels you import, and remembers how each county printed the name (an alias). The next search from that county shows a Known entity badge on matching records.
+
+## The entity page
+
+Shows the properties held, acres, a year's income and taxes, and documents such as operating agreements. A base acres and government payments card appears once FSA farms are linked to its properties.
+
+## Common questions
+
+- **Two entities are really the same owner.** Open one and use Merge into another entity; its properties, aliases, and documents move to the target.
+- **Deleting an entity deletes my land?** No. Its properties stay and simply show no entity.
+
+# Farm activity  (page: /farm-activity)
+
+## What this page shows
+
+Everything connected tenants have shared, by crop year: the crop on each mapped field, varieties, planting date, whether it is harvested, and yield when shared. Rows roll up by property. The Map's Crops layer colors ag fields by the same data for the current year.
+
+## Common questions
+
+- **Yield shows "not shared."** The farmer did not enable yields; ask them or leave it.
+- **A field is missing.** Confirm its mapping under Farms then Mapping.
+
+# Farm connections  (page: /farms)
+
+## What a connection is
+
+If your tenant uses Turnrow's farm software, they can share part of their records with you: which of their fields are on your land, what they planted, and, if they choose, yields and prices. You redeem a one-time share code they generate (TRW-XXXX-XXXX-XXXX). Nothing flows the other way.
+
+## What the farmer controls
+
+The farmer decides what to share (fields only, plantings, yields, projected prices and yields) and can end the share at any time. When they do, the connection shows as ended and the data already shared stays on your side.
+
+## Mapping fields
+
+After connecting, the app suggests which of the tenant's fields match your ag fields (by name and acres within ten percent). You confirm or ignore each suggestion; the app never confirms for you. Confirmed mappings power the Crops map layer, farm activity, and the tenant data panel on leases.
+
+## Refreshing
+
+Data refreshes on a schedule and with the Refresh now button. When the farm software is unreachable, the last synced data still shows with a note.
+
+## Common questions
+
+- **The code says already used.** Codes work once; ask the farmer for a new one.
+- **Can I see their whole operation?** No. Only fields they marked as yours, and only the scopes they enabled.
+
+# Government payments  (page: /gov-payments)
+
+## What this page is for
+
+Base acres tied to your land generate USDA program payments (PLC or ARC-CO) every year, paid to whoever farms it. This page records the FSA farms on your land, their base acres and yields by commodity, the program election, and projects what those acres are expected to pay, so you understand what your land is worth in the program and can negotiate leases with open eyes.
+
+## Setting it up
+
+- **FSA farms**: add a farm by its FSA farm number, county, and farmland and cropland acres, and link it to one or more properties (with a split percentage when one farm spans properties). Scanning an FSA-156EZ in Documents creates or updates all of this for you after your review.
+- **Base acres**: per commodity, base acres and the PLC yield.
+- **Election**: PLC or ARC-CO per commodity per program year (PLC when nothing is recorded).
+
+## How the estimate works, in plain language
+
+- **PLC** pays when the season's average price falls below the commodity's effective reference price. The payment is that gap times the PLC yield times base acres, then reduced by the 85 percent payment factor and sequestration.
+- **ARC-CO** pays when county revenue (county yield times price) falls below 90 percent of the county's benchmark revenue, capped at 12 percent of the benchmark, then reduced the same way.
+- Prices come from USDA's monthly prices received, blended the way USDA weights a marketing year. County benchmarks come from FSA's published workbook. Program parameters (reference prices, loan rates, factors) are kept current by the platform.
+- **Program year vs payment year**: the program year is the crop year; FSA pays it in October of the following year. Toggle between the two framings; the same money stays on screen.
+
+These are estimates. FSA determines actual payments after the marketing year closes.
+
+## Leases and income
+
+Crop share and flex leases carry a **Government payment share percent**. When it is above zero, your share flows into Income as a Government payments line in the payment year. At zero, Income is unchanged and this page still shows "base acres on this land generate approximately this much per year to your tenant."
+
+## Common questions
+
+- **Payment limits?** Not modeled here; those apply to the person receiving the payment.
+- **A price is blank.** USDA has not published enough months yet; the panel says what is missing.
+
+# Help and support  (page: /help)
+
+## The ? button
+
+On every page, the ? button opens Help with four tabs: **This page** (the guide for where you are), **All topics** (search), **How-to chat** (an assistant that knows the app from these guides and nothing about your data), and **Contact support** (a message to a person, with your email, organization, and page attached automatically, plus an optional screenshot). Support replies to your email.
+
+## The Help Center
+
+This page lists every topic grouped like the menu, with search across titles, keywords, and content.
+
+## Ask vs Help
+
+**Ask** (in the menu) answers from your records. **Help** answers about the app. If the how-to chat cannot answer, it will say so and point you to Contact support.
+
+# Import files  (page: /import)
+
+## What it does
+
+Upload boundary files you already have: a zipped shapefile from a surveyor, a KML or KMZ from Google Earth, or GeoJSON. Each feature in the file is previewed, you say what it is, and it saves.
+
+## How to use it
+
+- Drop the file in. Polygons can become a property, parcel, ag field, pasture, wetland, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
+- Each row suggests the property that contains it (a "Suggested from location" chip). Confirm or change it. Properties in the same batch save first so other rows can attach to them.
+- Rows that fail are skipped and listed so you can fix and retry them.
+
+## Common questions
+
+- **The file is in the wrong place on the map.** Some files carry a projection the app converts automatically (Web Mercator). If shapes land far away, export the file again in WGS84 (latitude and longitude).
+- **Can I import a spreadsheet of acres?** Not here; this page needs shapes. Leases and taxes accept their own documents.
+
+# Import from county records  (page: /import/county)
+
+## What it does
+
+Search a county's public parcel map by owner name or parcel number, preview the parcels on satellite, pick the ones that are yours, and import them with their boundaries, parcel numbers, and deeded acres already filled in. It is the fastest way to get land on the map.
+
+## How to use it
+
+- Pick the county. Only counties in the registry appear; the registry grows as counties are verified.
+- Search by owner (try the name as the county prints it, last name first) or by parcel number in any format; separators like dots and dashes do not matter.
+- Results group by owner name. Check the parcels you want, choose whether they form a new property or join an existing one, and confirm the owner entity (a Known entity badge means the name was imported before).
+- Import. Parcels arrive with boundaries and deeded acres; the property boundary can be set from its parcels in one click afterward.
+
+## Common questions
+
+- **My county is not listed.** Upload a file instead (see Import files), draw by hand, or plot from a deed in Documents. Ask support to add the county; each one is verified live before it appears.
+- **Acres show as blank.** Some counties publish no deeded acres; map acres are computed from the shape regardless.
+- **Duplicate parcels?** Re-importing the same parcel number into the same property is blocked; importing into another property is allowed so you can fix mistakes.
+
+# Income views  (page: /income)
+
+## What this page shows
+
+A year at a time: expected and received income by type (agricultural rent, hunting, timber, government payments), property taxes due and paid, gross, and net. A second table breaks the same year down by entity and property. Earlier years are a tap away, with a small chart across years.
+
+## Projected vs received
+
+- **Expected** comes from generated payment schedules where they exist, otherwise from each lease's terms and year assumptions. A banner notes when part of the year is a projection.
+- **Received** is what you recorded: lease payments by date received, timber settlements, and government payments.
+- Amounts split across properties by leased acres for leases and by linked stand acres for timber. Land with no link shows as unassigned so it is never hidden.
+
+## Rent upload
+
+Photograph or upload a rent check or a tenant's settlement sheet. The app reads payer, date, amount, check number, and memo, suggests the lease from the payer, and you confirm before it is recorded. A logger's settlement lands in the timber flow instead.
+
+## Common questions
+
+- **Why is a lease missing from this year?** Expired or terminated leases do not project. Record any late payment directly on the lease.
+- **Government payments show as a line but also as a note.** The line is your share under leases that set a share percent. The note is the informational estimate of what the base acres generate for the tenant when your share is zero.
+
+# Leases  (page: /leases)
+
+## Tenants and leases
+
+A **tenant** is the person or operation that rents from you, with contact details and insurance on file. A **lease** belongs to a tenant and covers land you pick (whole properties or specific ag fields) with editable leased acres, since contract acres often differ from map acres.
+
+Agricultural leases are **cash** (per acre or lump sum), **flex** (a base rate plus a bonus), or **crop share** (your share of the crop less any shared expenses). Hunting leases are a flat amount or per acre, with an insurance reminder.
+
+## Uploading a lease
+
+Upload the signed lease as a PDF and the app reads the type, dates, acres, rent structure, payment schedule, and special provisions, and suggests a price method from the pricing clause. Fields it was unsure about are highlighted amber. Nothing saves until you review and confirm.
+
+## Payments
+
+Each lease can carry a **payment schedule** (one to four installments with dates and shares). Generate expected payments for a year and record checks against them; status (upcoming, due soon, past due, paid, partial) is worked out from what you record. Unscheduled receipts can be recorded too. Regenerating a year never touches an installment that already has a payment on it. Rent checks can also be photographed on the Income page and matched to the right lease.
+
+## Common questions
+
+- **The lease covers land on two properties.** Link both properties, each with its leased acres; income splits by those acres.
+- **The tenant switched from cash to crop share.** End the old lease and create a new one; history stays intact.
+- **Where do government payments fit?** Crop share and flex terms have a Government payment share percent. See the Government payments topic.
+
+# Lease price methods and projections  (page: /leases)
+
+## Why a price matters
+
+Crop share and flex rent depend on a crop price. Each lease records **how** its price is established, and the app fills each year's price assumption from that source. The filled value is amber until you save it; nothing is saved for you.
+
+## The methods
+
+- **Manual**: you type the price.
+- **Tenant average**: the tenant's farm software shares their projected or final average price for the crop (only if they turned that sharing on).
+- **RMA benchmark**: the public USDA crop insurance projected or harvest price for the crop and state, or their average. No connection needed.
+- **Custom recipe**: a formula the app designs from the lease's pricing clause (for example the average of two elevator quotes less a basis), computed the same way every year.
+
+## Year assumptions
+
+For each year, a crop share lease holds one entry per crop grown on the leased ground: crop, acres, expected yield, expected price, and shared expenses. Two crops on the same ground (wheat then soybeans) are two entries. Projected rent sums them. An incomplete entry keeps the year marked incomplete rather than guessing.
+
+## The tenant data panel
+
+When a tenant is connected and has mapped fields to this lease's land, a panel shows what they planted on it this year, projected or actual yield, and projected or final price, with Use buttons that fill the assumptions amber for your review.
+
+## Common questions
+
+- **The RMA price is blank.** Price discovery for that crop and state has not started yet; the card says when it opens.
+- **The tenant's price is for a different crop.** Prices match crops strictly; a mismatched crop shows under its own row and never fills another crop's price.
+
+# The map  (page: /map)
+
+## What this page is for
+
+The Map is the home page: your properties on satellite imagery with every boundary and feature you have recorded. Tap anything to open its panel, edit its details, or jump to its full page.
+
+## Layers and legend
+
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures, wetlands, timber, roads, easements, and assets. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+
+- **Timber types** get their own legend when stands are on screen (planted pine, natural pine, hardwood, mixed, other).
+- **Easements** show a legend by family: utility, access and transport, drainage and flowage, conservation, and other. Railroads get a tie pattern, conservation easements a hatch.
+- **Crops** appears when a connected tenant has shared plantings; it recolors ag fields by this year's crop.
+- **By entity** appears when land sits in more than one entity; it recolors property outlines by owner.
+
+## Tapping things
+
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. Where things overlap, assets win, then roads, ag fields, timber, parcels, and properties.
+
+## Other controls
+
+- **Zoom all** fits everything you own on screen.
+- **Fullscreen** hides the app frame; on a phone the panels stay usable.
+- **Print** (top right) makes a PDF of the framed area. See the Printing topic.
+- **+ Add** starts drawing or placing. See the Drawing and Assets topics.
+
+## Common questions
+
+- **Why do my acres differ from the deed?** Map acres are computed from the drawn shape. County records often carry deeded acres that differ slightly; parcels show both.
+- **A label is hiding something.** Turn that layer off in Layers while you work, then turn it back on.
+- **Can I see last year's crop?** The Crops layer shows the current year only; the Farm Data page shows history.
+
+# Drawing boundaries, roads, and easements  (page: /map)
+
+## Pick first, then draw
+
+Tap **+ Add** then **Draw**. A picker asks what you are drawing: Property boundary, Parcel, Ag field, Timber stand, Pasture, Wetland, Road, Easement (then Line or Area), Fence, or Underground pipe. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+
+## Drawing a shape
+
+- Tap the map to place points. Double tap the last point to finish.
+- **Discard shape** (or the Escape key) removes only the shape you are tracing. Finished areas and everything typed in the form stay.
+- **Cancel** ends the whole session. If finished areas exist it asks first, so a mistap never throws away minutes of tracing.
+- Save fills in the property from where you drew (a "Suggested from location" chip). Change it if the guess is wrong.
+
+## Several areas in one record
+
+After the first area is finished, the save form offers **+ Add area** and **Cut area out**. Add draws another polygon that merges in (areas do not need to touch). Cut draws a hole (a pond, a house lot). The form stays as you left it while you draw more.
+
+## Editing later
+
+Tap a feature and choose **Edit boundary** or **Edit line**. Drag the points, or use **Add area** and **Cut area** on the toolbar for bigger changes, then Save. Timber stands also offer **Split**: draw a line across the stand and it becomes two stands with the details copied.
+
+## Common questions
+
+- **Line or area for an easement?** A line when you know the centerline (a powerline, an access lane); it shows length, and width is a note. An area when you know the strip, the flowage pool, or the conservation tract; it shows acres.
+- **Where did Pipe and Fence go?** They are in the Draw picker. Your own buried irrigation pipe is an asset; a pipeline company's corridor is an easement.
+- **The wrong type is selected.** Cancel the session and pick again. The type cannot change mid-session on purpose.
+
+# Assets on the map  (page: /map)
+
+## Placing an asset
+
+Tap **+ Add** then **Asset**. Pick the type (well, shop, barn, grain bin, house, pond or dam, and so on) and how to place it:
+
+- **Pin**: a crosshair sits over the map. Pan the map under it or drag the crosshair itself, or tap My location to use the phone's GPS, then press Place here.
+- **Draw outline**: trace the footprint (a shop, a barn, a pond surface). The panel then shows the footprint in square feet, or acres when it is large.
+- **Circle**: for round structures. Place the center with the crosshair, then set the diameter by typing it or dragging the blue rim handle; the white handle moves the center. Grain bins start on Circle, and the diameter is the bin's diameter on its asset page. Type a new diameter on either side and the other updates.
+
+Only a name is required. Specs, photos, and documents are added on the asset page afterward.
+
+## Irrigation pivots
+
+Tap **+ Add** then **Irrigation pivot**. Place the center, and the coverage editor opens: drag the blue handle or type the wetted length in feet, choose Full or Partial circle (green and red handles set the arc), then Save. The coverage circle drives irrigated acres on the ag fields it covers. **+ Add area** draws extra irrigated ground that joins the coverage (a corner arm lobe, end gun reach); **+ Cut area** removes ground that is watered but not plantable (a pond, a waterway). The panel shows plantable acres, and gross watered acres when they differ.
+
+## Editing
+
+Pins: tap the asset, then Move pin. Footprints: Edit outline. Circles: Edit circle (it reopens the center and diameter editor; circles are never vertex-edited). Pivots: Edit coverage.
+
+## Common questions
+
+- **Can a pond be a circle?** Yes. Circle is offered for every type; it just leads for grain bins.
+- **Where is the letter on the marker from?** Each type has a letter (W well, B bin, P pivot, S shop). Footprints and circles keep the letter at their center so they read from far out.
+- **Deactivate or delete?** Deactivate keeps the history and takes the asset off the map. Delete is permanent.
+
+# Printing a map PDF  (page: /map)
+
+## Making a printed map
+
+Tap **Print** at the top right of the map. A page-shaped frame appears; pan and zoom until the frame holds exactly what you want printed. The frame is the printed area.
+
+## The setup panel
+
+- **Title and subtitle**: the title defaults to the property name when one property fills the view, otherwise your organization name; the subtitle defaults to today's date.
+- **Orientation**: landscape or portrait.
+- **Layers and labels**: each layer has its own checkbox for the print, prefilled from the live map, plus a label toggle. Parcel numbers start off in print.
+- **Crops** and **By entity** recoloring carry into the print when checked.
+
+## Hiding single items
+
+While the frame is up, tap any item on the map to leave it out of the print. It turns ghosted; tap it again to bring it back. A counter on the frame shows how many are hidden and clears them all in one tap. The panel adds property chips when several properties are in frame and a **Choose items** list with a filter box. Hidden items are gone from the PDF, its labels, and its legend. Nothing about hiding is saved; the next print starts fresh.
+
+## Generate
+
+Generate renders the framed area at print resolution and downloads a Letter PDF with the map, title, a legend of only the layers you checked, a scale bar, a north arrow, and the Turnrow mark. On a phone, open the PDF and print or share from there.
+
+## Common questions
+
+- **Why is the legend short?** It lists only layers that are checked and present in the frame.
+- **Can I print more than one page?** Each print is one page. Frame a second area and generate again.
+
+# Properties, parcels, and entities  (page: /properties)
+
+## Properties and parcels
+
+A **property** is a piece of land you think of as one place (the home place, the river farm). Each has a boundary, county and state, optional FSA farm numbers, and notes. **Parcels** are the county's tax parcels inside it, each with a parcel number, its own boundary, and deeded acres when the county supplied them. Tax statements match to parcels, so keeping parcel numbers accurate pays off at tax time.
+
+The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures, wetlands, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
+
+## Entities
+
+Under Properties then **Entities**, create the owners of record: an individual, LLC, corporation, partnership, trust, or estate. Assign each property to its entity on the property page. Entity pages roll up acres, income, and documents (operating agreements, formation papers). Land held in your own name does not need an entity. Dashboard, Income, and Government Payments can be filtered by entity.
+
+## Moving things between properties
+
+Every parcel, ag field, pasture, wetland, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
+
+## Acres
+
+- **Map acres** are computed from the drawn boundary and shown to one decimal. They change whenever the shape changes.
+- **Deeded acres** come from the county record and are shown beside map acres on parcels.
+- **Irrigated acres** on an ag field are the part covered by pivot coverage circles; the rest is dryland.
+
+## Common questions
+
+- **A property's boundary is missing.** On the property page, Set boundary from parcels unions its parcels into one outline; or draw it on the map; or plot it from a deed in Documents.
+- **Can one property belong to two entities?** No. Split it into two properties if ownership is split.
+- **What are FSA numbers for?** They tie the property to USDA farm records and show on the map panel and the property page. Government Payments has its own FSA farm records with base acres.
+
+# Settings  (page: /settings)
+
+## Members
+
+Owners invite people by email and set their role. **Owner** can invite and manage members; **member** can do everything else. Invites show until accepted. Sign out is at the bottom.
+
+## Admin sections
+
+Platform administrators see extra sections: the county GIS registry (the public parcel services behind Import from county records, each verified live) and program parameters for government payment estimates (reference prices, loan rates, factors by program year). Regular users do not see these.
+
+## Common questions
+
+- **Change my name?** Your display name is editable on this page.
+- **Remove someone?** Owners can remove a member; their past uploads stay attributed.
+
+# Property taxes  (page: /taxes)
+
+## What this page is for
+
+Track every county tax statement and what you paid on it. The completeness view lists all your parcels for a tax year and shows which have a statement and which are paid, partially paid, unpaid, or delinquent, so nothing slips.
+
+## Uploading statements
+
+Upload a statement as a PDF or photo (several at once). The app reads the county, parcel number, owner, tax year, assessed value, amount due, and due date, highlights anything it was unsure about in amber, and matches the parcel number to your parcels in any separator format. Confirm each one before it saves. A statement for a parcel you do not have yet waits unmatched until you add the parcel.
+
+## Paying
+
+Record a payment on a statement (partial payments are fine) or select several statements in the completeness view and record one check across all of them. Status is always computed from payments, never typed.
+
+## Due dates
+
+The default calendar is Alabama's (due October 1, delinquent January 1). Settings lets you set a different month and day per county.
+
+## Common questions
+
+- **The same parcel shows twice.** One statement per parcel per year is allowed; the upload warns on a duplicate.
+- **Taxes in Income?** Statements count as expected expense and payments as actual, netted against rent and timber income.
+
+# Timber stands  (page: /timber)
+
+## What a stand is
+
+A timber stand is an area managed as one unit: planted pine of one age, a hardwood bottom, a mixed block. Each has a type (planted pine, natural pine, hardwood, mixed, other), species, year established, site index, last thinning and burn years, notes, and a boundary. The Timber page lists stands by property with acres by type.
+
+## Adding stands
+
+- On the Map: + Add, Draw, Timber stand. The save form asks the stand type (required) and prefills Loblolly pine for pine picks.
+- From Timber Scan: let the app propose stands from satellite and crop data, then accept the ones that look right (see Timber Scan).
+- From a file: shapefile or KML through Import.
+
+## Working with stands
+
+- **Split**: from the map panel, draw a line across a stand to cut it into two with the details copied; useful after a partial harvest.
+- **Colors**: planted pine deep teal, natural pine olive, hardwood burnt orange, mixed violet, other gray, with a legend on the map.
+- **Sales**: a stand page shows the sales it is part of and the timber income allocated to it.
+- **Forested wetlands** stay timber stands (hardwood with a note); the Wetland type is for open marsh and sloughs.
+
+## Common questions
+
+- **Last thinning year is wrong.** Edit it on the stand page, or let a thinning sale offer to update it when the sale is marked complete.
+- **Two stands should be one.** Edit the boundary of one with Add area to cover the other, then delete the spare.
+
+# Timber sales and settlements  (page: /timber-sales)
+
+## Recording a sale
+
+Create a sale with the buyer, contract date, harvest deadline, deposit, acres, and whether it is **lump sum** (one price, optional split payments) or **pay as cut** (stumpage rates per product). Products cover pine sawtimber, chip-n-saw, pulpwood, hardwood sawtimber and pulpwood, poles, veneer, crossties, and chips, priced per ton or per thousand board feet with a log scale. A delivered-price arrangement (mill price less cut and haul) is pay as cut with net rates and the Delivered net flag. Link the stands being cut.
+
+You can also **upload the contract**: the app reads it, suggests the terms and the matching stands, and you review everything before it saves.
+
+## Settlements
+
+Each logger check is a settlement: date, period, lines by product (tons or MBF, rate, amount), check number, and load count. Upload the settlement as a PDF, photo, or the logger's spreadsheet and the app reads it; spreadsheets collapse load-by-load rows into product totals. Rates that do not match the contract are flagged, not blocked. Settlements count directly as timber income.
+
+## Allocation across stands
+
+Income is spread across the linked stands **by acres** (default), by **manual** percentages you set, or **not at all**. A settlement can override the sale's method. The allocated amounts show on each stand page.
+
+## Common questions
+
+- **The check covers two sales.** Record two settlements, one per sale, splitting the lines.
+- **We were paid before cutting started.** Record it as a payment against a lump sum schedule, or as a settlement with a note.
+- **Marking a thinning complete:** the sale offers to update last thinning year on its stands.
+
+# Timber Scan  (page: /timber-scan)
+
+## What it does
+
+Timber Scan looks at a property with public land-cover data and proposes draft timber stands: where forest is, roughly what kind, and how many acres. You review each proposal, adjust the edges if needed, and accept the ones that are right. Nothing saves until you accept.
+
+## How to use it
+
+- Open a property page and tap Timber Scan.
+- Proposals draw in light dashed colors so they never look like saved stands. Tap one to see its suggested type and acres.
+- Accept, edit the boundary first, or dismiss. Accepted proposals become real stands with the type you confirm.
+
+## Good to know
+
+- The data behind it is a satellite classification at roughly 30 meter resolution. Edges are approximate and small openings disappear. Treat it as a head start, not a cruise.
+- Scans are clipped to the property boundary, so draw or import the boundary first.
+
+## Common questions
+
+- **It missed a young plantation.** Recently planted ground often classifies as open land. Draw that stand by hand.
+- **Can I rerun it?** Yes. Previous accepted stands stay; new proposals appear only where no stand exists.

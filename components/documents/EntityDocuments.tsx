@@ -1,16 +1,62 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  DOC_TYPES_BY_GROUP,
+  DOC_GROUP_LABELS,
+  DOC_TYPE_LABELS,
+  canPlotBoundary,
+  type DocGroup,
+  type DocType,
+} from "@/lib/documents";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
+import DocTypeChip from "./DocTypeChip";
+import ScanDocumentButton from "./ScanDocumentButton";
+import { classifyFile, uploadDocument, type ClassifySuggestion } from "./classify";
 
 function isImage(doc: DocumentRow): boolean {
   return (doc.content_type ?? "").startsWith("image/");
 }
 
+// Grouped <select> of every document type.
+export function DocTypeSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (t: DocType) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as DocType)}
+      className={
+        className ??
+        "rounded-lg border border-gray-300 px-2 py-1 text-xs focus:border-kelly-500 focus:outline-none"
+      }
+    >
+      {(Object.keys(DOC_TYPES_BY_GROUP) as DocGroup[]).map((g) => (
+        <optgroup key={g} label={DOC_GROUP_LABELS[g]}>
+          {DOC_TYPES_BY_GROUP[g].map((t) => (
+            <option key={t} value={t}>
+              {DOC_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
 // Photos and documents for any entity, stored in the private "documents"
 // bucket under <org>/<entity_type>/<uuid>-<filename>. Image files show as a
-// gallery; everything else as a file list.
+// gallery; everything else as a typed file list. Uploads get an AI type
+// SUGGESTION (amber) that the user accepts or overrides; until then the
+// row is saved as "other" so an unreviewed guess never becomes a fact.
 export default function EntityDocuments({
   orgId,
   entityType,
@@ -25,6 +71,8 @@ export default function EntityDocuments({
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Unconfirmed AI suggestions by document id.
+  const [suggestions, setSuggestions] = useState<Record<string, ClassifySuggestion>>({});
   const photoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,33 +106,48 @@ export default function EntityDocuments({
     load();
   }, [load]);
 
-  async function upload(files: FileList | null) {
+  async function upload(files: FileList | null, photos: boolean) {
     if (!files || files.length === 0) return;
     setBusy(true);
     setError(null);
     for (const file of Array.from(files)) {
-      const path = `${orgId}/${entityType}/${crypto.randomUUID()}-${file.name}`;
-      const { error: upErr } = await supabase.storage
-        .from("documents")
-        .upload(path, file, { contentType: file.type || undefined });
-      if (upErr) {
-        setError(`Could not upload ${file.name}: ${upErr.message}`);
+      // Photos skip classification (they are photos); documents get a
+      // suggestion that waits for the user.
+      const suggestion = photos ? null : await classifyFile(file);
+      const result = await uploadDocument(supabase, {
+        orgId,
+        entityType,
+        entityId,
+        file,
+        docType: "other",
+        title: suggestion?.title ?? null,
+        aiSuggestedType: suggestion?.doc_type ?? null,
+      });
+      if ("error" in result) {
+        setError(result.error);
         continue;
       }
-      const { error: insErr } = await supabase.from("documents").insert({
-        organization_id: orgId,
-        entity_type: entityType,
-        entity_id: entityId,
-        file_name: file.name,
-        storage_path: path,
-        content_type: file.type || null,
-        size_bytes: file.size,
-      });
-      if (insErr) setError(`Could not save ${file.name}: ${insErr.message}`);
+      if (suggestion && suggestion.doc_type !== "other") {
+        setSuggestions((s) => ({ ...s, [result.id]: suggestion }));
+      }
     }
     setBusy(false);
     if (photoInputRef.current) photoInputRef.current.value = "";
     if (fileInputRef.current) fileInputRef.current.value = "";
+    load();
+  }
+
+  async function setType(doc: DocumentRow, t: DocType) {
+    setSuggestions((s) => {
+      const next = { ...s };
+      delete next[doc.id];
+      return next;
+    });
+    const { error: err } = await supabase
+      .from("documents")
+      .update({ doc_type: t })
+      .eq("id", doc.id);
+    if (err) setError("Could not change the type. " + err.message);
     load();
   }
 
@@ -129,15 +192,20 @@ export default function EntityDocuments({
           capture="environment"
           multiple
           className="hidden"
-          onChange={(e) => upload(e.target.files)}
+          onChange={(e) => upload(e.target.files, true)}
         />
         <input
           ref={fileInputRef}
           type="file"
           multiple
           className="hidden"
-          onChange={(e) => upload(e.target.files)}
+          onChange={(e) => upload(e.target.files, false)}
         />
+        {busy ? (
+          <span className="self-center text-xs text-gray-500">
+            Uploading and reading the type...
+          </span>
+        ) : null}
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -174,22 +242,63 @@ export default function EntityDocuments({
 
       {files.length > 0 ? (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-          {files.map((doc) => (
-            <li key={doc.id} className="flex items-center justify-between gap-2 px-3 py-2">
-              <button
-                onClick={() => open(doc)}
-                className="truncate text-left text-sm font-medium text-kelly-700 hover:underline"
-              >
-                {doc.file_name}
-              </button>
-              <button
-                onClick={() => remove(doc)}
-                className="shrink-0 text-xs font-medium text-red-600 hover:underline"
-              >
-                Delete
-              </button>
-            </li>
-          ))}
+          {files.map((doc) => {
+            const suggestion = suggestions[doc.id];
+            const docType = (doc.doc_type ?? "other") as DocType;
+            return (
+              <li key={doc.id} className="space-y-1.5 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <DocTypeChip docType={docType} />
+                    <button
+                      onClick={() => open(doc)}
+                      className="truncate text-left text-sm font-medium text-kelly-700 hover:underline"
+                    >
+                      {doc.title || doc.file_name}
+                    </button>
+                    {doc.title && doc.title !== doc.file_name ? (
+                      <span className="truncate text-xs text-gray-400">{doc.file_name}</span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <DocTypeSelect value={docType} onChange={(t) => setType(doc, t)} />
+                    <button
+                      onClick={() => remove(doc)}
+                      className="shrink-0 text-xs font-medium text-red-600 hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                {suggestion ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5">
+                    <DocTypeChip docType={suggestion.doc_type} suggested />
+                    <span className="text-xs text-amber-900">
+                      AI suggests this type{suggestion.reason ? `: ${suggestion.reason}` : ""}.
+                      Confirm, or pick another with the type menu.
+                    </span>
+                    <button
+                      onClick={() => setType(doc, suggestion.doc_type)}
+                      className="rounded bg-kelly-500 px-2 py-0.5 text-xs font-semibold text-white hover:bg-kelly-600"
+                    >
+                      Accept
+                    </button>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-3">
+                  <ScanDocumentButton doc={doc} onChanged={load} compact />
+                  {canPlotBoundary(docType) ? (
+                    <Link
+                      href={`/documents/${doc.id}/plot`}
+                      className="text-xs font-medium text-kelly-700 hover:underline"
+                    >
+                      Plot boundary from this document
+                    </Link>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
 

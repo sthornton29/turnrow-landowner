@@ -11,8 +11,13 @@
 // that will change.
 
 import { annualRent, type LeaseLike, type YearAssumptions } from "@/lib/leaseLogic";
+import { loadGovInputs, projectForPaymentYear, type GovInputs } from "@/lib/gov/govData";
 
-export type IncomeType = "agricultural" | "hunting" | "timber";
+// "government" = the landowner's contractual share (terms.gov_payment_share_pct)
+// of projected ARC/PLC payments on leased base acres, attributed to the
+// PAYMENT year (program year Y pays October Y+1). At a 0% share nothing
+// enters the totals; informationalGovPayments() still reports the figure.
+export type IncomeType = "agricultural" | "hunting" | "timber" | "government";
 
 export interface IncomeLease extends LeaseLike {
   id: string;
@@ -51,6 +56,12 @@ export interface IncomeInputs {
   }>;
   taxPayments: Array<{ tax_statement_id: string; paid_date: string; amount: number }>;
   parcels: Array<{ id: string; property_id: string }>;
+  // Optional: FSA farms, base acres, elections, and global program data.
+  // Absent (older callers / tests) means no government payments.
+  gov?: GovInputs | null;
+  // property_id -> cropland acres proxy (property acres) for allocating a
+  // farm's payment across a lease's leased acres.
+  propertyAcres?: Array<{ id: string; acres: number | null }>;
 }
 
 export interface YearTotals {
@@ -63,10 +74,10 @@ export interface YearTotals {
   hasProjection: boolean;
 }
 
-function emptyTotals(): YearTotals {
+export function emptyTotals(): YearTotals {
   return {
-    expected: { agricultural: 0, hunting: 0, timber: 0 },
-    received: { agricultural: 0, hunting: 0, timber: 0 },
+    expected: { agricultural: 0, hunting: 0, timber: 0, government: 0 },
+    received: { agricultural: 0, hunting: 0, timber: 0, government: 0 },
     taxesDue: 0,
     taxesPaid: 0,
     hasProjection: false,
@@ -165,6 +176,88 @@ function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
   return entries;
 }
 
+// ---- Government payments (ARC/PLC on leased base acres) ----
+
+export interface GovShareRow {
+  leaseId: string;
+  propertyId: string;
+  paymentYear: number;
+  tenantAmount: number; // the whole projected payment attributable to the leased land
+  landownerAmount: number; // tenantAmount x gov_payment_share_pct / 100
+  sharePct: number;
+}
+
+// For one PAYMENT year: each active crop share / flex lease's share of the
+// projected net payments on the properties it leases. A lease covering
+// part of a property gets leased_acres / property acres of that
+// property's allocated payment (capped at 100%); leases without a
+// property acreage figure take the whole property allocation.
+export function govShareRows(inputs: IncomeInputs, paymentYear: number): GovShareRow[] {
+  if (!inputs.gov || inputs.gov.farms.length === 0) return [];
+  const projection = projectForPaymentYear(inputs.gov, paymentYear);
+  if (projection.netByProperty.size === 0) return [];
+  const acresOf = new Map((inputs.propertyAcres ?? []).map((p) => [p.id, p.acres ?? 0]));
+  const out: GovShareRow[] = [];
+  for (const lease of inputs.leases) {
+    if (lease.status === "expired" || lease.status === "terminated") continue;
+    if (lease.rent_structure !== "crop_share" && lease.rent_structure !== "flex") continue;
+    const startYear = Number((lease.start_date ?? "").slice(0, 4));
+    const endYear = Number((lease.end_date ?? "").slice(0, 4));
+    if (startYear && paymentYear < startYear) continue;
+    if (endYear && paymentYear > endYear) continue;
+    const sharePct = Number(lease.terms?.gov_payment_share_pct ?? 0) || 0;
+    for (const land of inputs.leaseLands.filter((l) => l.lease_id === lease.id)) {
+      const propertyNet = projection.netByProperty.get(land.property_id) ?? 0;
+      if (propertyNet <= 0) continue;
+      const propAcres = acresOf.get(land.property_id) ?? 0;
+      const fraction =
+        propAcres > 0 && land.leased_acres != null
+          ? Math.min(1, Math.max(0, land.leased_acres / propAcres))
+          : 1;
+      const tenantAmount = Math.round(propertyNet * fraction * 100) / 100;
+      if (tenantAmount <= 0) continue;
+      out.push({
+        leaseId: lease.id,
+        propertyId: land.property_id,
+        paymentYear,
+        tenantAmount,
+        landownerAmount: Math.round(tenantAmount * sharePct) / 100,
+        sharePct,
+      });
+    }
+  }
+  return out;
+}
+
+// The informational figure: what base acres on leased (and unleased) land
+// generate for the operator in a payment year, per property, regardless
+// of the landowner's share. Properties with no lease still count.
+export function informationalGovPayments(
+  inputs: IncomeInputs,
+  paymentYear: number
+): { total: number; byProperty: Map<string, number>; landownerTotal: number } {
+  if (!inputs.gov || inputs.gov.farms.length === 0) {
+    return { total: 0, byProperty: new Map(), landownerTotal: 0 };
+  }
+  const projection = projectForPaymentYear(inputs.gov, paymentYear);
+  let total = 0;
+  for (const v of projection.netByProperty.values()) total += v;
+  const landownerTotal = govShareRows(inputs, paymentYear).reduce((s, r) => s + r.landownerAmount, 0);
+  return {
+    total: Math.round(total * 100) / 100,
+    byProperty: projection.netByProperty,
+    landownerTotal: Math.round(landownerTotal * 100) / 100,
+  };
+}
+
+// Years with a government share worth listing: leases active in the
+// payment year with a nonzero share, for the current year and the next.
+function govYears(inputs: IncomeInputs): number[] {
+  if (!inputs.gov || inputs.gov.farms.length === 0) return [];
+  const now = new Date().getFullYear();
+  return [now - 1, now, now + 1];
+}
+
 // Expected vs received by year and income type.
 export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
   const map = new Map<number, YearTotals>();
@@ -172,6 +265,15 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
     if (!map.has(year)) map.set(year, emptyTotals());
     return map.get(year)!;
   };
+
+  for (const year of govYears(inputs)) {
+    for (const r of govShareRows(inputs, year)) {
+      if (r.landownerAmount <= 0) continue;
+      const totals = get(year);
+      totals.expected.government += r.landownerAmount;
+      totals.hasProjection = true;
+    }
+  }
 
   for (const e of effectiveExpectedEntries(inputs)) {
     const totals = get(e.year);
@@ -282,6 +384,9 @@ export function allocateToProperties(
     if (e.year !== year) continue;
     spread(e.leaseId, e.timberSaleId, "expected", e.amount);
   }
+  for (const r of govShareRows(inputs, year)) {
+    if (r.landownerAmount > 0) add(r.propertyId, "expected", r.landownerAmount);
+  }
   for (const p of inputs.payments) {
     if (Number(p.received_date.slice(0, 4)) !== year) continue;
     spread(p.lease_id, p.timber_sale_id, "received", p.amount);
@@ -324,6 +429,8 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     taxStatements,
     taxPayments,
     parcels,
+    propertyAcres,
+    gov,
   ] = await Promise.all([
     supabase
       .from("leases")
@@ -346,6 +453,8 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     supabase.from("tax_statements").select("id, parcel_id, tax_year, amount_due"),
     supabase.from("tax_payments").select("tax_statement_id, paid_date, amount"),
     supabase.from("parcels").select("id, property_id"),
+    supabase.from("properties").select("id, acres"),
+    loadGovInputs(supabase),
   ]);
   return {
     leases: leases.data ?? [],
@@ -359,5 +468,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     taxStatements: taxStatements.data ?? [],
     taxPayments: taxPayments.data ?? [],
     parcels: parcels.data ?? [],
+    propertyAcres: propertyAcres.data ?? [],
+    gov,
   };
 }

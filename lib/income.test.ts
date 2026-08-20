@@ -123,3 +123,52 @@ describe("allocateToProperties with projections", () => {
     expect(byProperty.get(UNASSIGNED)).toBeUndefined();
   });
 });
+
+// Government payments: the landowner's share of projected ARC/PLC on
+// leased base acres, attributed to the PAYMENT year (program year Y pays
+// in Y+1). A 0% share keeps totals untouched but still reports the
+// informational figure.
+import { govShareRows, informationalGovPayments } from "./income";
+
+describe("government payment share", () => {
+  const year = new Date().getFullYear();
+  const govInputs = () => ({
+    farms: [{ id: "f1", farm_number: "100", state: "AL", county: "Lawrence" }],
+    links: [{ fsa_farm_id: "f1", property_id: "p1", allocation_pct: 100 }],
+    baseAcres: [{ fsa_farm_id: "f1", commodity: "corn", base_acres: 100, plc_yield: 150 }],
+    elections: [],
+    commodities: [{ slug: "corn", name: "Corn", unit: "bushel" as const, statutory_reference_price: 4.1, national_loan_rate: 2.42, marketing_year_start_month: 9 }],
+    priceData: [{ commodity: "corn", program_year: year - 1, effective_reference_price: 4.42, mya_price_estimate: 4.1, mya_price_final: null, wasde_midpoint: null, source: "estimate" }],
+    configs: [],
+    benchmarks: [],
+  });
+  const lease = (sharePct: number) => ({
+    ...emptyInputs(),
+    leases: [{ id: "L", status: "active", lease_type: "agricultural", rent_structure: "crop_share" as const, start_date: `${year - 1}-01-01`, end_date: `${year + 2}-12-31`, terms: { landowner_share_pct: 25, gov_payment_share_pct: sharePct }, payment_schedule: [] } as never],
+    leaseLands: [{ lease_id: "L", property_id: "p1", leased_acres: 50 }],
+    propertyAcres: [{ id: "p1", acres: 100 }],
+    gov: govInputs(),
+  });
+
+  it("0% share: nothing in totals, informational figure still reported", () => {
+    const inputs = lease(0);
+    const totals = summarizeByYear(inputs).get(year);
+    expect(totals?.expected.government ?? 0).toBe(0);
+    const info = informationalGovPayments(inputs, year);
+    // PLC corn 100 ac x 150 x 0.32 = 4800 gross => 3859.68 net for the program year paying this year
+    expect(info.total).toBe(3859.68);
+    expect(info.landownerTotal).toBe(0);
+  });
+
+  it("a 50% share on half the property flows half of half into the payment year", () => {
+    const inputs = lease(50);
+    const rows = govShareRows(inputs, year);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tenantAmount).toBe(1929.84); // 50 of 100 acres
+    expect(rows[0].landownerAmount).toBe(964.92);
+    expect(summarizeByYear(inputs).get(year)?.expected.government).toBe(964.92);
+    expect(allocateToProperties(inputs, year).get("p1")?.expected).toBe(964.92);
+    // Nothing lands in the program year itself (it pays the following year).
+    expect(govShareRows(inputs, year - 1)).toHaveLength(0);
+  });
+});

@@ -5,6 +5,8 @@ import { NO_ENTITY } from "@/lib/entities";
 import {
   UNASSIGNED,
   allocateToProperties,
+  emptyTotals,
+  informationalGovPayments,
   loadIncomeInputs,
   summarizeByYear,
   type IncomeType,
@@ -18,6 +20,7 @@ const TYPE_LABELS: Record<IncomeType, string> = {
   agricultural: "Agricultural leases",
   hunting: "Hunting leases",
   timber: "Timber",
+  government: "Government payments (your share)",
 };
 
 export default async function IncomePage({
@@ -39,17 +42,12 @@ export default async function IncomePage({
   const years = Array.from(new Set([...byYear.keys(), currentYear])).sort();
   const selectedYear = Number(yearParam) || currentYear;
 
-  const totals = byYear.get(selectedYear) ?? {
-    expected: { agricultural: 0, hunting: 0, timber: 0 },
-    received: { agricultural: 0, hunting: 0, timber: 0 },
-    taxesDue: 0,
-    taxesPaid: 0,
-    hasProjection: false,
-  };
-  const totalExpected =
-    totals.expected.agricultural + totals.expected.hunting + totals.expected.timber;
-  const totalReceived =
-    totals.received.agricultural + totals.received.hunting + totals.received.timber;
+  const totals = byYear.get(selectedYear) ?? emptyTotals();
+  const sumTypes = (r: Record<IncomeType, number>) =>
+    r.agricultural + r.hunting + r.timber + r.government;
+  const totalExpected = sumTypes(totals.expected);
+  const totalReceived = sumTypes(totals.received);
+  const govInfo = informationalGovPayments(inputs, selectedYear);
 
   const byProperty = allocateToProperties(inputs, selectedYear);
   const propertyName = new Map((properties ?? []).map((p) => [p.id, p.name]));
@@ -111,12 +109,8 @@ export default async function IncomePage({
   // Chart data: expected vs received vs taxes paid per year
   const chartYears = years.map((y) => {
     const t = byYear.get(y);
-    const expected = t
-      ? t.expected.agricultural + t.expected.hunting + t.expected.timber
-      : 0;
-    const received = t
-      ? t.received.agricultural + t.received.hunting + t.received.timber
-      : 0;
+    const expected = t ? sumTypes(t.expected) : 0;
+    const received = t ? sumTypes(t.received) : 0;
     return { year: y, expected, received, taxes: t?.taxesPaid ?? 0 };
   });
   const maxValue = Math.max(
@@ -261,7 +255,19 @@ export default async function IncomePage({
             <tbody>
               {(Object.keys(TYPE_LABELS) as IncomeType[]).map((type) => (
                 <tr key={type} className="border-b border-gray-100 last:border-0">
-                  <td className="px-4 py-2">{TYPE_LABELS[type]}</td>
+                  <td className="px-4 py-2">
+                    {TYPE_LABELS[type]}
+                    {type === "government" && govInfo.total > 0 ? (
+                      <span className="block text-xs font-normal text-gray-500">
+                        Base acres on your land generate approximately{" "}
+                        {formatDollars(govInfo.total)}/yr to your tenant
+                        {totals.expected.government > 0 ? "" : " (no share under your leases)"}.{" "}
+                        <Link href="/gov-payments" className="text-kelly-700 hover:underline">
+                          Details
+                        </Link>
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-2 text-right tabular-nums">
                     {formatDollars(totals.expected[type])}
                   </td>

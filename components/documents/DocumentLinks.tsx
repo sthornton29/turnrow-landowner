@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { DocumentRow } from "@/types/db";
+import DocTypeChip from "./DocTypeChip";
 
 // Read-only clickable list of document rows fetched elsewhere (e.g. a
 // stand page showing its linked timber sale's contract). Opens each
@@ -10,7 +11,7 @@ import type { DocumentRow } from "@/types/db";
 export default function DocumentLinks({
   docs,
 }: {
-  docs: Pick<DocumentRow, "id" | "file_name" | "storage_path">[];
+  docs: Array<Pick<DocumentRow, "id" | "file_name" | "storage_path"> & { doc_type?: string | null }>;
 }) {
   const supabase = createClient();
 
@@ -23,15 +24,17 @@ export default function DocumentLinks({
 
   if (docs.length === 0) return null;
   return (
-    <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+    <span className="flex flex-wrap gap-x-3 gap-y-1">
       {docs.map((d) => (
-        <button
-          key={d.id}
-          onClick={() => open(d)}
-          className="text-xs font-medium text-kelly-700 hover:underline"
-        >
-          {d.file_name}
-        </button>
+        <span key={d.id} className="inline-flex items-center gap-1.5">
+          {d.doc_type && d.doc_type !== "other" ? <DocTypeChip docType={d.doc_type} /> : null}
+          <button
+            onClick={() => open(d)}
+            className="text-xs font-medium text-kelly-700 hover:underline"
+          >
+            {d.file_name}
+          </button>
+        </span>
       ))}
     </span>
   );

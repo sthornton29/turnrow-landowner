@@ -7,6 +7,7 @@ import EntityDocuments from "@/components/documents/EntityDocuments";
 import type { LandEntity } from "@/types/db";
 import EntityDangerZone from "./EntityDangerZone";
 import EntityEditor from "./EntityEditor";
+import GovPaymentsCard from "@/components/gov/GovPaymentsCard";
 
 export const metadata = { title: "Entity" };
 
@@ -79,6 +80,12 @@ export default async function EntityDetailPage({
           </div>
         </div>
       </div>
+
+      <GovPaymentsCard
+        supabase={supabase}
+        propertyIds={(properties ?? []).map((p) => p.id)}
+        title="Base acres and government payments across this entity"
+      />
 
       <section>
         <h2 className="mb-2 text-lg font-semibold text-gray-900">

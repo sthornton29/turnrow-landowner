@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AskEntryCard from "@/components/assistant/AskEntryCard";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import { bboxOf } from "@/lib/geo/normalize";
@@ -389,6 +390,8 @@ export default async function DashboardPage({
           <span className="text-kelly-600">&rarr;</span>
         </div>
       </Link>
+
+      <AskEntryCard />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Link

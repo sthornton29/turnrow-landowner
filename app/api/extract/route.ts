@@ -7,6 +7,13 @@ import {
   workbookToRows,
   type SettlementColumnMap,
 } from "@/lib/timberSettlement";
+import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
+import {
+  VAULT_KINDS,
+  VAULT_PROMPTS,
+  VAULT_TOOLS,
+  type VaultKind,
+} from "./vaultTools";
 
 // AI term extraction for lease and timber sale documents. Runs server-side
 // so the Anthropic API key never reaches the browser. The extraction is
@@ -434,6 +441,21 @@ export async function POST(request: Request) {
     );
   }
 
+  // Per-user hourly limit across every extraction kind (session client;
+  // the assistant_usage table is under the org's RLS).
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", user.id)
+    .single();
+  const limit = await checkRateLimit(supabase, {
+    userId: user.id,
+    orgId: profile?.organization_id ?? null,
+    kind: "extract",
+    limitPerHour: 60,
+  });
+  if (!limit.allowed) return rateLimited429("extract");
+
   const formData = await request.formData();
   const file = formData.get("file");
   const kind = String(formData.get("kind") ?? "lease");
@@ -454,11 +476,13 @@ export async function POST(request: Request) {
   // Tax statements, rent checks, and timber contracts can be phone
   // photos; leases are PDFs; logger/mill settlements arrive as PDFs,
   // photos, or Excel/CSV exports.
+  const isVaultKind = (VAULT_KINDS as readonly string[]).includes(kind);
   const allowsImages =
     kind === "tax" ||
     kind === "payment" ||
     kind === "timber" ||
-    kind === "timber_settlement";
+    kind === "timber_settlement" ||
+    isVaultKind;
   const allowed =
     kind === "timber_settlement"
       ? isPdf || isImage || isSpreadsheet
@@ -602,6 +626,47 @@ export async function POST(request: Request) {
   }
 
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+
+  // Document vault kinds: classification, per-type extraction, and the
+  // legal description parse. Same forced-tool contract; upstream error
+  // text is logged, never echoed to the browser.
+  if (isVaultKind) {
+    const vaultKind = kind as VaultKind;
+    const vtool = VAULT_TOOLS[vaultKind];
+    const vblock: Anthropic.ContentBlockParam = isPdf
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
+      : { type: "image", source: { type: "base64",
+          media_type: file.type as (typeof IMAGE_TYPES)[number], data: base64 } };
+    try {
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: vaultKind === "classify" ? 1024 : 8192,
+        tools: [vtool],
+        tool_choice: { type: "tool", name: vtool.name },
+        messages: [
+          { role: "user", content: [vblock, { type: "text", text: VAULT_PROMPTS[vaultKind] }] },
+        ],
+      });
+      const toolUse = response.content.find(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+      if (!toolUse) {
+        return NextResponse.json(
+          { error: "The model did not return an extraction. Try again or enter the details by hand." },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json({ extraction: toolUse.input, kind: vaultKind });
+    } catch (err) {
+      const status = err instanceof Anthropic.APIError ? err.status : undefined;
+      console.error("extract vault kind failed", vaultKind, status, err instanceof Error ? err.message : err);
+      return NextResponse.json(
+        { error: status ? `Extraction failed (${status}).` : "Extraction failed." },
+        { status: 502 }
+      );
+    }
+  }
+
   const tool =
     kind === "timber"
       ? TIMBER_TOOL

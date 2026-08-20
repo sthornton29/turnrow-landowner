@@ -1,0 +1,154 @@
+// npm run help:build: compiles the user-facing help into the app.
+//
+//  docs/help/*.md (front matter: title / route / group / order / updated /
+//  keywords) + docs/help/_limitations.md  =>
+//    1. docs/help/_digest.md              the help chat's knowledge payload
+//       (limitations up top, then every topic);
+//    2. lib/helpContent.generated.ts      the same content as a typed module
+//       bundled into the app (help drawer, /help, /api/support-chat), so
+//       nothing is fetched at runtime;
+//    3. COVERAGE CHECK: every route in components/layout/AppHeader.tsx and
+//       components/layout/MobileNav.tsx must resolve to a topic (longest
+//       route-prefix match). A page without help FAILS the build; the
+//       vitest suite (lib/help.test.ts) runs the same check.
+//
+// Runs automatically before `next build` (prebuild). Commit the generated
+// module so a skipped prebuild still ships current content.
+
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const helpDir = join(root, "docs", "help");
+
+function parseFrontMatter(raw, file) {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  if (!m) throw new Error(`${file}: missing front matter`);
+  const meta = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^(\w+):\s*(.*)$/);
+    if (kv) meta[kv[1]] = kv[2].trim();
+  }
+  for (const key of ["title", "route", "group", "order", "updated", "keywords"]) {
+    if (!meta[key]) throw new Error(`${file}: front matter is missing "${key}"`);
+  }
+  if (!/^\//.test(meta.route)) throw new Error(`${file}: route must start with /`);
+  if (!/^\d+$/.test(meta.order)) throw new Error(`${file}: order must be a number`);
+  return { meta, body: m[2].trim() };
+}
+
+const topicFiles = readdirSync(helpDir)
+  .filter((f) => f.endsWith(".md") && !f.startsWith("_"))
+  .sort();
+if (topicFiles.length === 0) {
+  console.error("docs/help has no topic files.");
+  process.exit(1);
+}
+const topics = topicFiles.map((f) => {
+  const { meta, body } = parseFrontMatter(readFileSync(join(helpDir, f), "utf8"), f);
+  if (/—/.test(body) || /—/.test(meta.title)) {
+    throw new Error(`${f}: em dash found; the app never uses em dashes`);
+  }
+  return {
+    slug: f.replace(/\.md$/, ""),
+    route: meta.route,
+    title: meta.title,
+    group: meta.group,
+    order: Number(meta.order),
+    updated: meta.updated,
+    keywords: meta.keywords,
+    body,
+  };
+});
+
+// One PRIMARY topic per route (the lowest order); extra topics on the
+// same route are "also on this page".
+const seen = new Map();
+for (const t of topics) {
+  const key = `${t.route}|${t.order}`;
+  if (seen.has(key)) {
+    console.error(`Two topics share route ${t.route} and order ${t.order}: ${seen.get(key)} and ${t.slug}`);
+    process.exit(1);
+  }
+  seen.set(key, t.slug);
+}
+
+// ---- Coverage: every nav route must resolve to a topic. ----
+const navSources = [
+  join(root, "components", "layout", "AppHeader.tsx"),
+  join(root, "components", "layout", "MobileNav.tsx"),
+];
+const appRoutes = new Set();
+for (const file of navSources) {
+  const src = readFileSync(file, "utf8");
+  for (const m of src.matchAll(/href:\s*"([^"]+)"/g)) appRoutes.add(m[1]);
+}
+const topicForRoute = (route) => {
+  let best = null;
+  for (const t of topics) {
+    const covers = route === t.route || route.startsWith(t.route + "/");
+    if (
+      covers &&
+      (best == null ||
+        t.route.length > best.route.length ||
+        (t.route.length === best.route.length && t.order < best.order))
+    ) {
+      best = t;
+    }
+  }
+  return best;
+};
+const uncovered = [...appRoutes].filter((r) => !topicForRoute(r));
+if (uncovered.length > 0) {
+  console.error("HELP COVERAGE FAILED: these routes have no help topic (add a docs/help file):");
+  for (const r of uncovered) console.error(`  ${r}`);
+  process.exit(1);
+}
+
+// ---- Stamp + outputs. ----
+let commit = "unknown";
+try {
+  commit = execSync("git rev-parse --short HEAD", { cwd: root }).toString().trim();
+} catch {
+  // shallow or missing git
+}
+const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version ?? "0.0.0";
+const generated = new Date().toISOString().slice(0, 10);
+const limitations = readFileSync(join(helpDir, "_limitations.md"), "utf8").trim();
+
+const ordered = [...topics].sort((a, b) => a.route.localeCompare(b.route) || a.order - b.order);
+const digest = [
+  "# Turnrow Landowner capabilities digest",
+  "",
+  `Generated ${generated}, version ${version}, build ${commit}. Compiled from docs/help; regenerate with npm run help:build.`,
+  "",
+  limitations,
+  "",
+  ...ordered.flatMap((t) => [`# ${t.title}  (page: ${t.route})`, "", t.body, ""]),
+].join("\n");
+writeFileSync(join(helpDir, "_digest.md"), digest);
+
+const moduleSrc = `// GENERATED by scripts/build-help.mjs. Do not edit. Run: npm run help:build
+/* eslint-disable */
+export interface HelpTopic {
+  slug: string;
+  route: string;
+  title: string;
+  group: string;
+  order: number;
+  updated: string;
+  keywords: string;
+  body: string;
+}
+export const HELP_GENERATED = ${JSON.stringify(generated)};
+export const HELP_VERSION = ${JSON.stringify(`${version}+${commit}`)};
+export const HELP_TOPICS: HelpTopic[] = ${JSON.stringify(ordered, null, 2)};
+export const HELP_DIGEST: string = ${JSON.stringify(digest)};
+`;
+writeFileSync(join(root, "lib", "helpContent.generated.ts"), moduleSrc);
+
+console.log(
+  `help:build OK: ${topics.length} topics, ${appRoutes.size} nav routes covered, digest ${Math.round(digest.length / 1024)} KB (${generated} ${commit})`
+);

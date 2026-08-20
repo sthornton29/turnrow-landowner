@@ -506,6 +506,25 @@ export default function LeaseForm({
                   Projections use a bonus estimate you enter per year on the lease page.
                 </p>
               </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Government payment share (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  max={100}
+                  value={terms.gov_payment_share_pct ?? ""}
+                  onChange={(e) => setTerm("gov_payment_share_pct", num(e.target.value))}
+                  placeholder="0"
+                  className={inputClass}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Share of ARC/PLC payments on the leased base acres that comes to
+                  you under this lease. Most leases leave them with the operator (0).
+                </p>
+              </div>
             </div>
           ) : null}
 
@@ -546,7 +565,26 @@ export default function LeaseForm({
                     onChange={(e) => setTerm("expense_share_pct", num(e.target.value))}
                     className={inputClass + ring("expense_share_pct")}
                   />
-                </div>
+                              <div className="sm:col-span-3">
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Government payment share (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  max={100}
+                  value={terms.gov_payment_share_pct ?? ""}
+                  onChange={(e) => setTerm("gov_payment_share_pct", num(e.target.value))}
+                  placeholder="0"
+                  className={inputClass}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Share of ARC/PLC payments on the leased base acres that comes to
+                  you under this lease. Most leases leave them with the operator (0).
+                </p>
+              </div>
+            </div>
               ) : null}
               <p className="text-xs text-gray-500 sm:col-span-3">
                 Projections use per-year assumptions (crop, acres, yield, price, shared

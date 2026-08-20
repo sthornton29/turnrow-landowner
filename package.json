@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "npm run help:build",
     "build": "next build",
+    "help:build": "node scripts/build-help.mjs",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run"

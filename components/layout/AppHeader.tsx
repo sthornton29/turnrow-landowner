@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import HelpDrawer from "@/components/help/HelpDrawer";
 
 const NAV = [
   { href: "/map", label: "Map" },
@@ -13,6 +14,9 @@ const NAV = [
   { href: "/leases", label: "Leases" },
   { href: "/taxes", label: "Property Taxes" },
   { href: "/income", label: "Income" },
+  { href: "/gov-payments", label: "Gov Payments" },
+  { href: "/documents", label: "Documents" },
+  { href: "/ask", label: "Ask" },
   { href: "/farm-activity", label: "Farm Data" },
   { href: "/import", label: "Import" },
 ];
@@ -77,6 +81,7 @@ export default function AppHeader() {
               </Link>
             );
           })}
+          <HelpDrawer />
           <Link
             href="/settings"
             aria-label="Settings"
@@ -100,11 +105,14 @@ export default function AppHeader() {
           </Link>
         </nav>
 
-        {/* Mobile: settings gear up top; main nav is the bottom tab bar */}
+        {/* Mobile: help and settings up top; main nav is the bottom tab bar */}
+        <div className="ml-auto flex items-center md:hidden">
+          <HelpDrawer />
+        </div>
         <Link
           href="/settings"
           aria-label="Settings"
-          className="ml-auto rounded-lg p-2 text-gray-500 md:hidden"
+          className="rounded-lg p-2 text-gray-500 md:hidden"
         >
           <svg
             viewBox="0 0 24 24"

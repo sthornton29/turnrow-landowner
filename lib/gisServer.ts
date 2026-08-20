@@ -17,9 +17,20 @@ export class GisError extends Error {
   }
 }
 
-async function fetchJson(url: string): Promise<Record<string, unknown>> {
+const DEFAULT_SERVICE_LABEL = "the county's GIS server";
+
+// Any public ArcGIS REST service (county parcels, the BLM PLSS grid).
+// serviceLabel names the server in user-facing errors; timeoutMs
+// defaults to the county value.
+async function fetchJson(
+  url: string,
+  opts: { timeoutMs?: number; serviceLabel?: string } = {}
+): Promise<Record<string, unknown>> {
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
+  const label = opts.serviceLabel ?? DEFAULT_SERVICE_LABEL;
+  const Label = label.charAt(0).toUpperCase() + label.slice(1);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetch(url, { signal: controller.signal });
@@ -27,28 +38,26 @@ async function fetchJson(url: string): Promise<Record<string, unknown>> {
     clearTimeout(timer);
     if (err instanceof Error && err.name === "AbortError") {
       throw new GisError(
-        "The county's GIS server did not respond within 15 seconds. It may be down or slow; try again in a few minutes."
+        `${Label} did not respond within ${Math.round(timeoutMs / 1000)} seconds. It may be down or slow; try again in a few minutes.`
       );
     }
-    throw new GisError("Could not reach the county's GIS server.");
+    throw new GisError(`Could not reach ${label}.`);
   }
   clearTimeout(timer);
   if (!response.ok) {
-    throw new GisError(
-      `The county's GIS server returned an error (HTTP ${response.status}).`
-    );
+    throw new GisError(`${Label} returned an error (HTTP ${response.status}).`);
   }
   let body: Record<string, unknown>;
   try {
     body = (await response.json()) as Record<string, unknown>;
   } catch {
-    throw new GisError("The county's GIS server returned an unreadable response.");
+    throw new GisError(`${Label} returned an unreadable response.`);
   }
   // ArcGIS reports errors inside a 200 response
   if (body && typeof body === "object" && "error" in body) {
     const err = body.error as { message?: string; code?: number };
     throw new GisError(
-      `The county's GIS server rejected the query${err?.message ? `: ${err.message}` : "."}`
+      `${Label} rejected the query${err?.message ? `: ${err.message}` : "."}`
     );
   }
   return body;
@@ -72,7 +81,7 @@ export async function fetchLayerInfo(serviceUrl: string, layerId: number) {
   };
 }
 
-function escapeSqlLiteral(value: string): string {
+export function escapeSqlLiteral(value: string): string {
   return value.replace(/'/g, "''");
 }
 
@@ -127,11 +136,45 @@ export function buildEntityWheres(
   return { broad, narrowed };
 }
 
-interface QueryOptions {
+export interface QueryOptions {
   serviceUrl: string;
   layerId: number;
   where: string;
   maxFeatures: number;
+  // Optional spatial filter: a WGS84 point or a [west, south, east, north]
+  // bbox, sent as an ArcGIS geometry with inSR 4326.
+  geometry?: GeoJSON.Point | [number, number, number, number];
+  spatialRel?: "esriSpatialRelIntersects" | "esriSpatialRelContains" | "esriSpatialRelWithin";
+  inSR?: number;
+  outFields?: string; // default "*"
+  timeoutMs?: number; // default 15000
+  serviceLabel?: string; // error copy; default "the county's GIS server"
+}
+
+function geometryParams(options: QueryOptions): Record<string, string> {
+  if (!options.geometry) return {};
+  const g = options.geometry;
+  const inSR = String(options.inSR ?? 4326);
+  if (Array.isArray(g)) {
+    return {
+      geometry: JSON.stringify({
+        xmin: g[0], ymin: g[1], xmax: g[2], ymax: g[3],
+        spatialReference: { wkid: Number(inSR) },
+      }),
+      geometryType: "esriGeometryEnvelope",
+      spatialRel: options.spatialRel ?? "esriSpatialRelIntersects",
+      inSR,
+    };
+  }
+  return {
+    geometry: JSON.stringify({
+      x: g.coordinates[0], y: g.coordinates[1],
+      spatialReference: { wkid: Number(inSR) },
+    }),
+    geometryType: "esriGeometryPoint",
+    spatialRel: options.spatialRel ?? "esriSpatialRelIntersects",
+    inSR,
+  };
 }
 
 interface RawFeature {
@@ -152,16 +195,20 @@ export async function queryLayerFeatures(
   for (let page = 0; page < 10; page++) {
     const params = new URLSearchParams({
       where: options.where,
-      outFields: "*",
+      outFields: options.outFields ?? "*",
       outSR: "4326",
       f: useGeoJson ? "geojson" : "json",
       resultOffset: String(offset),
       resultRecordCount: String(Math.min(options.maxFeatures + 1 - collected.length, 500)),
+      ...geometryParams(options),
     });
     const url = `${options.serviceUrl}/${options.layerId}/query?${params}`;
     let body: Record<string, unknown>;
     try {
-      body = await fetchJson(url);
+      body = await fetchJson(url, {
+        timeoutMs: options.timeoutMs,
+        serviceLabel: options.serviceLabel,
+      });
     } catch (err) {
       // Some layers reject f=geojson outright; retry the page as Esri JSON.
       if (useGeoJson && page === 0 && collected.length === 0) {

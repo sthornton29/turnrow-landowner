@@ -15,6 +15,7 @@ import { MapThumb } from "@/components/summary/Summary";
 import EntityPicker from "@/components/entities/EntityPicker";
 import MoveChildren from "@/components/properties/MoveChildren";
 import DeletePropertyButton from "@/components/properties/DeletePropertyButton";
+import GovPaymentsCard from "@/components/gov/GovPaymentsCard";
 
 export const metadata = { title: "Property" };
 
@@ -190,6 +191,8 @@ export default async function PropertyDetailPage({
         geometry={property.boundary_geojson}
         focus={`property:${property.id}`}
       />
+
+      <GovPaymentsCard supabase={supabase} propertyIds={[property.id]} />
 
       <section>
         <h2 className="mb-2 text-lg font-semibold text-gray-900">

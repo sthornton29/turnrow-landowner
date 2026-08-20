@@ -1,4 +1,5 @@
 import type { Geometry, MultiLineString, MultiPolygon } from "geojson";
+import type { DocType } from "@/lib/documents";
 
 // Row shapes as the app reads them (geometry comes from the *_geo views
 // as parsed GeoJSON).
@@ -269,6 +270,18 @@ export interface DocumentRow {
   size_bytes: number | null;
   uploaded_by: string | null;
   created_at: string;
+  // Document vault (migration 0020): taxonomy, reviewed AI extraction,
+  // and links to what the document describes or produced.
+  doc_type: DocType;
+  title: string | null;
+  extracted: Record<string, unknown> | null;
+  extracted_at: string | null;
+  extraction_reviewed: boolean;
+  ai_suggested_type: string | null;
+  linked_easement_id: string | null;
+  produced_boundary_type: string | null;
+  produced_boundary_id: string | null;
+  search_text: string | null;
 }
 
 // Every entity that can appear on the map or carry documents.

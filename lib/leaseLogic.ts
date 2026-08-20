@@ -68,6 +68,11 @@ export interface LeaseTerms {
   rma_config?: RmaBenchmarkConfig[] | null;
   custom_recipe?: PriceRecipe | null;
   pricing_clause?: string | null; // verbatim clause from extraction, prefills recipe setup
+  // Share (0-100) of the tenant's ARC/PLC payments on the leased base acres
+  // that flows to the landowner under the lease. Default 0: most leases
+  // leave program payments with the operator; the figure still shows as
+  // informational on the Government Payments page.
+  gov_payment_share_pct?: number | null;
   // hunting
   hunt_basis?: "lump_sum" | "per_acre" | null;
   amount?: number | null;

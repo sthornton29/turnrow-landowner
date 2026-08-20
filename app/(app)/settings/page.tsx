@@ -1,6 +1,7 @@
 import { requireOrg } from "@/lib/auth";
 import { signOut } from "@/app/(auth)/actions";
 import AdminGisClient from "@/app/(app)/admin/gis/AdminGisClient";
+import AdminProgramParams from "@/components/gov/AdminProgramParams";
 import { createInvite, deleteInvite } from "./actions";
 
 export const metadata = { title: "Settings" };
@@ -11,7 +12,7 @@ export default async function SettingsPage() {
   const { supabase, profile } = await requireOrg();
   const isOwner = profile.role === "owner";
 
-  const [{ data: members }, { data: invites }, { data: services }] =
+  const [{ data: members }, { data: invites }, { data: services }, { data: configs }, { data: commodities }, { data: prices }] =
     await Promise.all([
       supabase
         .from("profiles")
@@ -29,6 +30,15 @@ export default async function SettingsPage() {
             .select("*")
             .order("state")
             .order("county")
+        : Promise.resolve({ data: null }),
+      profile.is_platform_admin
+        ? supabase.from("program_year_config").select("*").order("crop_year")
+        : Promise.resolve({ data: null }),
+      profile.is_platform_admin
+        ? supabase.from("covered_commodities").select("*").order("name")
+        : Promise.resolve({ data: null }),
+      profile.is_platform_admin
+        ? supabase.from("arc_plc_price_data").select("*")
         : Promise.resolve({ data: null }),
     ]);
 
@@ -143,6 +153,25 @@ export default async function SettingsPage() {
             </h2>
           </div>
           <AdminGisClient initialServices={services ?? []} embedded />
+        </section>
+      ) : null}
+
+      {profile.is_platform_admin ? (
+        <section className="space-y-4 border-t border-gray-200 pt-6">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Admin: government payment program parameters
+            </h2>
+            <p className="mt-0.5 text-sm text-gray-600">
+              Global OBBBA values, published effective reference prices, and MYA
+              overrides used by every organization{"'"}s projections.
+            </p>
+          </div>
+          <AdminProgramParams
+            configs={configs ?? []}
+            commodities={commodities ?? []}
+            prices={prices ?? []}
+          />
         </section>
       ) : null}
 
