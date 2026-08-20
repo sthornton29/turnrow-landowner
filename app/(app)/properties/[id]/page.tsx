@@ -11,6 +11,7 @@ import { formatDollars } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import type { AssetType } from "@/types/db";
 import RowEditor from "@/components/lists/RowEditor";
+import FsaNumbersCard from "@/components/properties/FsaNumbersCard";
 import { MapThumb } from "@/components/summary/Summary";
 import EntityPicker from "@/components/entities/EntityPicker";
 import MoveChildren from "@/components/properties/MoveChildren";
@@ -187,6 +188,10 @@ export default async function PropertyDetailPage({
         </div>
       </div>
 
+      <FsaNumbersCard
+        propertyId={property.id}
+        numbers={(property.fsa_numbers as string[] | null) ?? []}
+      />
       <MapThumb
         geometry={property.boundary_geojson}
         focus={`property:${property.id}`}

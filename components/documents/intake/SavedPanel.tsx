@@ -70,6 +70,7 @@ export default function SavedPanel({
         `${parts.length ? parts.join(", ") : "No farms"}: ${rows} base acre row${rows === 1 ? "" : "s"} written` +
           (skipped.length > 0 ? `; could not match: ${skipped.join(", ")}` : "") +
           (failures.length > 0 ? `; failed: ${failures.join("; ")}` : "") +
+          linkSummary(results) +
           "."
       );
     } catch (e) {
@@ -141,4 +142,16 @@ export default function SavedPanel({
       </div>
     </div>
   );
+}
+
+// "linked to River Place, Home Place" or a nudge to add FSA numbers.
+function linkSummary(results: Array<{ farmNumber: string; linkedProperties: string[] }>): string {
+  const linked = [...new Set(results.flatMap((r) => r.linkedProperties))];
+  const unlinked = results.filter((r) => r.linkedProperties.length === 0).map((r) => r.farmNumber);
+  let out = "";
+  if (linked.length > 0) out += `; linked to ${linked.join(", ")}`;
+  if (unlinked.length > 0) {
+    out += `; farm${unlinked.length === 1 ? "" : "s"} ${unlinked.join(", ")} not linked to a property yet (add the FSA number on the property page or link it on Government Payments)`;
+  }
+  return out;
 }

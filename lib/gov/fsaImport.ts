@@ -193,6 +193,9 @@ export interface FsaImportResult {
   created: boolean
   baseAcresWritten: number
   skippedCommodities: string[]
+  // Names of the properties the farm was linked to (FSA numbers on the
+  // property matched the farm number, else the page it came from).
+  linkedProperties: string[]
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -241,13 +244,36 @@ export async function createOrUpdateFarmFromExtraction(
     created = true
   }
 
-  if (opts.propertyId) {
-    await supabase
+  // Link the farm to its land. Properties whose FSA numbers include this
+  // farm number win (several properties split the allocation evenly);
+  // otherwise the page the 156EZ was uploaded from, if any.
+  const linkedProperties: string[] = []
+  const { data: props } = await supabase
+    .from('properties')
+    .select('id, name, fsa_numbers')
+    .eq('organization_id', orgId)
+  const digits = farmNumber.replace(/\D/g, '')
+  const byNumber = ((props ?? []) as Array<{ id: string; name: string; fsa_numbers: string[] | null }>).filter(
+    (p) => (p.fsa_numbers ?? []).some((n) => String(n).replace(/\D/g, '') === digits && digits !== ''),
+  )
+  const targets = byNumber.length > 0
+    ? byNumber
+    : opts.propertyId
+      ? ((props ?? []) as Array<{ id: string; name: string }>).filter((p) => p.id === opts.propertyId)
+      : []
+  if (targets.length > 0) {
+    const share = Math.floor((100 / targets.length) * 100) / 100
+    const links = targets.map((p, i) => ({
+      organization_id: orgId,
+      fsa_farm_id: farmId,
+      property_id: p.id,
+      allocation_pct: i === targets.length - 1 ? Math.round((100 - share * (targets.length - 1)) * 100) / 100 : share,
+    }))
+    const { error } = await supabase
       .from('fsa_farm_properties')
-      .upsert(
-        { organization_id: orgId, fsa_farm_id: farmId, property_id: opts.propertyId, allocation_pct: 100 },
-        { onConflict: 'fsa_farm_id,property_id' },
-      )
+      .upsert(links, { onConflict: 'fsa_farm_id,property_id' })
+    if (error) throw new Error(error.message)
+    linkedProperties.push(...targets.map((p) => p.name))
   }
 
   const tractList = tracts(extracted.tract_numbers)
@@ -274,7 +300,7 @@ export async function createOrUpdateFarmFromExtraction(
       .upsert(rows, { onConflict: 'fsa_farm_id,commodity' })
     if (error) throw new Error(error.message)
   }
-  return { farmNumber, farmId, created, baseAcresWritten: rows.length, skippedCommodities: skipped }
+  return { farmNumber, farmId, created, baseAcresWritten: rows.length, skippedCommodities: skipped, linkedProperties }
 }
 
 // Every farm in a reviewed packet (either shape). Farms without a
