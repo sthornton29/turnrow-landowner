@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { takeHandoffFile } from "@/lib/fileHandoff";
+
+import { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatDollars } from "@/lib/format";
@@ -76,6 +79,19 @@ export default function TaxUploadClient({
       )
     );
   }
+
+  const searchParams = useSearchParams();
+  const handoffKey = searchParams.get("handoff");
+  useEffect(() => {
+    if (!handoffKey) return;
+    takeHandoffFile(handoffKey).then((f) => {
+      if (!f) return;
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      handleFiles(dt.files);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffKey]);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList) return;

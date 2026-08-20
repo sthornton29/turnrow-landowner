@@ -272,75 +272,73 @@ Tables:
   { farms: [...] } (one entry per distinct farm; legacy single-farm
   extractions still read); the review shows one card per farm with its
   base acres grid, and confirming offers to create or update every farm
-  at once. UNFILED DOCUMENTS (migration 0024): documents.entity_type gains
-  'organization' (entity_id = the organization id): an upload never
-  has to name a property first. The classify call now also receives
-  the owner's property list (names, counties, parcel and FSA numbers,
-  acres; capped at 200, re-serialized server-side) and returns
-  matched_properties (name, confidence, reason); lib/documentMatch.ts
-  scores an AI vote +70/+45/+20 by confidence, adds +40 when a hinted
-  county holds exactly one property, and bestGuess() pre-checks the one
-  clear leader (>= 30 and 15 ahead) when nothing reached the confident
-  bar. With nothing checked the document saves as Unfiled; /documents
-  shows an amber Unfiled section at the top, an Unfiled option in the
-  property filter, and Edit properties re-points the primary
-  attachment to the first property chosen (or back to Unfiled).
+  at once. AI-FIRST INTAKE (the one upload path, components/documents/intake/
+  IntakeFlow.tsx): drop the file, confirm what the AI found, save. ONE
+  forced-tool pass (/api/extract kind=intake, record_document_intake)
+  returns the proposed doc_type with confidence, a specialized_kind when
+  the file is really a lease / timber contract / timber settlement /
+  tax statement / rent payment, property_hints, matched_properties
+  (each citing its SIGNAL parcel|fsa|name|alias|county and the printed
+  value), matched_entity, and fields (the union of every per-type
+  schema, so EXTRACTED_FIELDS renders them unchanged). The call carries
+  the org's matching context: property names with county/state,
+  parcel numbers, FSA farm numbers, acres, and entity names with
+  confirmed entity_aliases. The intake reads the first 20 pages; a
+  156EZ packet longer than that gets the full chunked farm scan inside
+  the same request. DETERMINISTIC VERIFICATION (lib/documentMatch.ts
+  verifyMatches, unit tested in documentMatchVerify.test.ts): a parcel
+  claim must match parcelKey() of a parcel on that property, an FSA
+  claim a digits-only farm number on it, a name claim must appear on
+  the page, an alias claim must match (normalizeOwnerName /
+  ownerSimilarity) the entity that holds the property or one of its
+  aliases, county counts only when the property is the only one in
+  that county; anything that fails is DOWNGRADED (never shown as a
+  match), so no guess wears real confidence, and no match = the
+  property picker starts empty. The confirm screen (always shown; file
+  preview beside on desktop, above on mobile) has the type dropdown
+  preselected with a confidence hint, the properties multi-select with
+  verified matches pre-checked and their why lines, the entity line
+  when verified, the type's fields in the shared amber editor
+  (components/documents/ExtractedFieldsEditor.tsx, also used by
+  re-scans), a title, and an optional specific record; nothing saves
+  until Save writes the document, type, links, and reviewed fields
+  together. SavedPanel then offers Plot boundary (when applicable),
+  Create or update N FSA farms (156EZ), Open, Upload another.
+  CONTEXT-AWARE ENTRY: EntityDocuments opens the same flow with the
+  page's record as the default attachment (plus its property link);
+  when a verified match points elsewhere a non-blocking note ("this
+  deed appears to describe River Place") offers Switch or Attach to
+  both; when the AI agrees or finds nothing the context wins silently.
+  HANDOFF: a recognized specialized_kind shows a banner whose one tap
+  parks the File in IndexedDB (lib/fileHandoff.ts, one-time key, 10
+  minute TTL) and opens /leases/new, /timber-sales/new, /taxes/upload,
+  or /income (rent upload, also timber settlements) with ?handoff=key;
+  those clients pick the file up and run their existing extraction;
+  nothing is saved by the handoff. MANUAL PATH: a quiet "Enter details
+  manually instead" link on the upload and confirm screens switches to
+  the plain form (file kept; with proposals present it asks whether to
+  keep them as starting values); manual and AI never render side by
+  side. FAILURES (unreadable file, error, 429) drop into the manual
+  form with the file attached and a plain message; no retry loop.
+  Asset pages keep a quick Add photos button (gallery, no reading).
+  DELETE: Documents page rows and property pages offer Delete; a
+  document linked to several properties viewed through one of them
+  asks Remove (from this property only) or Delete everywhere;
+  otherwise confirm and delete the file and row. The older classify
+  kind and the per-type scan kinds remain for re-scanning saved rows.
+  UNFILED DOCUMENTS (migration 0024): documents.entity_type gains
+  'organization' (entity_id = the organization id); with nothing
+  checked the document saves as Unfiled; /documents shows an amber
+  Unfiled section at the top, an Unfiled option in the property
+  filter, and Edit properties re-points the primary attachment to the
+  first property chosen (or back to Unfiled).
   MULTI-PROPERTY DOCUMENTS (migration 0023): document_properties
   (org RLS, composite FK to properties, unique per document+property,
   backfilled from every property-attached document) lists EVERY
   property a document applies to; documents.entity_type/entity_id stay
-  the PRIMARY attachment (the first property chosen, or a non-property
-  record such as a lease or easement). The upload sheet on /documents
-  has two modes: AI upload (default; the classify call also returns
-  property_hints: counties, states, parcel numbers, owner and place
-  names, FSA farm numbers, acres, a legal description snippet, which
-  lib/documentMatch.ts scores against the org's properties and
-  parcels: parcel match +60, FSA farm +50, property name +30, county
-  +10 and state +2, acres within 10 percent +8; scores of 50 or more
-  are "confident" and pre-checked with an amber "Suggested from
-  document" tag and the reasons, weaker ones shown unchecked; unit
-  tested) and Manual upload (no AI call at all). Both use a property
-  multi-select (components/documents/PropertyMultiSelect.tsx, search
-  past eight properties) plus an optional specific record. Rows show
-  every linked property as chips with "Edit properties"; the property
-  filter and entity filter follow the links; a property page lists
-  documents attached directly or via links, uploads there can "Also
-  attach to other properties", and deleting a document linked to
-  other properties asks REMOVE (this property only; the primary
-  re-points to another linked property) or DELETE (the file, for all).
-  DOCUMENT VAULT (migration 0020): doc_type text not null default
-  'other' with a check over 27 types in seven groups (lib/documents.ts
-  is the single source of truth, unit-tested against the SQL list):
-  Title & ownership = deed_warranty, deed_quitclaim, deed_timber,
-  deed_mineral, title_insurance, title_opinion, closing_statement,
-  probate_estate; Surveys & legal = survey_plat, legal_description;
-  Encumbrances & debt = easement_deed, mortgage_dot, lien_release;
-  Government & conservation = fsa_156ez, fsa_map, crp_contract,
-  nrcs_conservation_plan, wetland_determination, hel_determination;
-  Valuation & management = appraisal, timber_cruise, management_plan,
-  soil_survey; Insurance & agreements = insurance_policy,
-  hunting_agreement, current_use_application; Other = other (every
-  pre-0020 row backfilled to other; /documents/retype re-types them in
-  bulk). Also title, extracted jsonb (the reviewed scan payload),
-  extracted_at, extraction_reviewed, ai_suggested_type (the
-  classifier's suggestion, kept until the user accepts or overrides),
-  linked_easement_id (composite FK to easements, set null on delete:
-  an easement deed points at the easement it describes),
-  produced_boundary_type + produced_boundary_id (the property or parcel
-  boundary a deed or plat PLOTTED, link only), and search_text
-  (lowercased file name + title + doc_type + extracted text,
-  maintained by a BEFORE INSERT/UPDATE trigger
-  private.documents_search_text(); a pg_trgm GIN index when the
-  extension is available, else ILIKE scans). Index (organization_id,
-  doc_type). GLOBAL plss_cache (no organization_id; BLM PLSS section
-  polygons keyed state|township|range|section|meridian with geojson
-  and attrs incl. acres; select to authenticated, service-role writes
-  only, the RMA cache flavor). assistant_usage (org RLS): one row per
-  AI call per user with kind in (assistant, support_chat,
-  support_contact, extract) for the hourly limits in
-  lib/rateLimit.ts (table-backed, in-memory fallback per server when
-  the table errors); limits: extract 60/h, assistant 30/h, help chat
-  20/h, support contact 5/h.
+  the PRIMARY attachment (the page's record, a chosen specific record,
+  else the first property); rows show linked properties as chips with
+  Edit properties; property filters follow the links.
 
 Phase 2 tables (all with the same org RLS + composite property FK):
 

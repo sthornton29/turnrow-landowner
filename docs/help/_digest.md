@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-20, version 0.1.0, build 0c40548. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-20, version 0.1.0, build 36859c3. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -79,23 +79,41 @@ The Dashboard shows total acres, property count, ag field and timber acres, and 
 
 ## The vault
 
-Every file you attach anywhere (property, parcel, lease, timber sale, easement, asset, entity, tax statement) lives in Documents, grouped by kind: Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, and Other. Filter by property, entity, or type, and search by name or by what was read out of the file. Each row opens the file and links to the thing it is attached to.
+Every file you attach anywhere (property, parcel, lease, timber sale, easement, asset, entity, tax statement) lives in Documents, grouped by kind: Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, and Other. Filter by property, entity, or type, and search by name or by what was read out of the file. Each row opens the file and links to the things it is attached to.
 
-## Uploading and typing
+## Uploading: drop, confirm, save
 
-Upload from a page's Documents section or from the Documents page (pick what to attach it to). On upload the app suggests the document type with an amber chip; accept it or choose another. Until you confirm, the file is filed under Other with the suggestion remembered. Older files uploaded before types existed sit under Other; the **Type untyped** screen lets you classify them all and apply in bulk.
+There is one way to add a document, and it starts with the file.
 
-## Scanning
+1. **Drop the file** (or choose it, or take a photo). No type to pick, no property to pick first.
+2. **Confirm what was found.** The app reads the document once and shows, beside a preview of the file: the type it believes it is (with how confident it is), the properties it thinks the document concerns with a one-line reason for each ("parcel 12-03-07 matches River Place"), the entity when a party name matches one of yours, and the key fields for that type (grantor and grantee, recording reference, the legal description, policy amounts, FSA farms and base acres, and so on). Fields the reader was unsure about are amber. Everything is editable. A document that covers land in several properties can be attached to all of them.
+3. **Save.** The file, its type, its attachments, and the reviewed fields are stored together. Then you get the next steps that fit the type: plot a boundary from a deed or plat, or create FSA farm records from a 156EZ.
 
-**Scan this document** reads the key fields for its type and shows them for your review, amber where it was unsure: grantor, grantee, dates, and recording reference for deeds, plus the legal description word for word; surveyor, date, and stated acres for plats; insurer, policy amount, date, and the exceptions list for title insurance; farm number, tracts, and the base acres table for an FSA-156EZ; tract, codes, and date for wetland and HEL determinations. Saved fields show on the row and on the attached page, and they are searchable. Confirming a 156EZ creates or updates the FSA farm and base acres used by Government Payments.
+Property matches are checked against your own records before they are shown: a parcel or farm number the reader cites has to actually be on that property, and a name has to actually be on the page. A claim that does not check out is dropped rather than shown with false confidence. When nothing matches, the property list simply starts empty; pick one or leave it and the document lands in **Unfiled**, where you can assign properties later from the row.
+
+**Uploading from a page** (a property, entity, stand, sale, or lease) attaches the document to that page by default. The reader still runs, and if its evidence points somewhere else you get a note ("this deed appears to describe River Place") with one tap to switch or to attach to both. When it agrees or finds nothing, the page wins quietly.
+
+**Leases, timber contracts and settlements, tax statements, and rent payments** have their own intake that reads the terms and files them in the right place. If you drop one of those here, the confirm screen offers to open it there in one tap; nothing is saved until you do.
+
+**Entering details by hand.** A quiet "Enter details manually instead" link sits on the upload and confirm screens. It switches to a plain form (type, properties, an optional record, title, and the type's fields), keeping your file. If the reader had already made suggestions, you choose whether to keep them as starting values. If a file cannot be read at all, you land on that form with a short message and the file attached; there is no dead end and no retry loop.
+
+Older files uploaded before types existed sit under Other; the **Type untyped** screen lets you classify them and apply in bulk.
+
+## Scanning again
+
+**Scan this document** on any row re-reads the key fields for its type and shows them for review, amber where unsure, before saving. Saved fields show on the row and on the attached page, and they are searchable. Confirming a 156EZ creates or updates the FSA farms and base acres used by Government Payments.
 
 ## Plot boundary
 
 Deeds, plats, and legal descriptions offer **Plot boundary**: the app reads the legal description and turns it into a boundary on the map. See the next topic.
 
+## Deleting
+
+**Delete** on a row removes the file and its record. A document attached to several properties asks whether to take it off just the property you are looking at or delete it everywhere. Deleting cannot be undone.
+
 ## Common questions
 
-- **Photos of a well or barn?** Those are documents too, attached to the asset, shown as a gallery.
+- **Photos of a well or barn?** Asset pages have an Add photos button for gallery photos; those are stored as-is without reading.
 - **Can I rename a file?** Give it a title; the original file name stays.
 - **Who can see my documents?** Only members of your organization.
 

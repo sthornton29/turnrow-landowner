@@ -3,97 +3,61 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import {
-  DOC_TYPES_BY_GROUP,
-  DOC_GROUP_LABELS,
-  DOC_TYPE_LABELS,
-  canPlotBoundary,
-  type DocGroup,
-  type DocType,
-} from "@/lib/documents";
+import { canPlotBoundary, type DocType } from "@/lib/documents";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 import DocTypeChip from "./DocTypeChip";
 import ScanDocumentButton from "./ScanDocumentButton";
 import {
-  classifyFile,
   deleteDocumentEverywhere,
   removeDocumentFromProperty,
   setDocumentProperties,
   uploadDocument,
-  largeFileWarning,
-  type ClassifySuggestion,
 } from "./classify";
 import PropertyMultiSelect, { type SelectableProperty } from "./PropertyMultiSelect";
+import IntakeFlow from "./intake/IntakeFlow";
+import { DocTypeSelect } from "./DocTypeSelect";
+
+export { DocTypeSelect };
 
 function isImage(doc: DocumentRow): boolean {
   return (doc.content_type ?? "").startsWith("image/");
 }
 
-// Grouped <select> of every document type.
-export function DocTypeSelect({
-  value,
-  onChange,
-  className,
-}: {
-  value: string;
-  onChange: (t: DocType) => void;
-  className?: string;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as DocType)}
-      className={
-        className ??
-        "rounded-lg border border-gray-300 px-2 py-1 text-xs focus:border-kelly-500 focus:outline-none"
-      }
-    >
-      {(Object.keys(DOC_TYPES_BY_GROUP) as DocGroup[]).map((g) => (
-        <optgroup key={g} label={DOC_GROUP_LABELS[g]}>
-          {DOC_TYPES_BY_GROUP[g].map((t) => (
-            <option key={t} value={t}>
-              {DOC_TYPE_LABELS[t]}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
-  );
-}
-
 // Photos and documents for any entity, stored in the private "documents"
 // bucket under <org>/<entity_type>/<uuid>-<filename>. Image files show as a
-// gallery; everything else as a typed file list. Uploads get an AI type
-// SUGGESTION (amber) that the user accepts or overrides; until then the
-// row is saved as "other" so an unreviewed guess never becomes a fact.
+// gallery; everything else as a typed file list. "Add document" opens
+// the AI-first intake flow with THIS record as the default attachment
+// (the AI may note when its evidence points elsewhere). Asset pages keep
+// a quick "Add photos" path for gallery photos (no reading).
 export default function EntityDocuments({
   orgId,
   entityType,
   entityId,
+  label,
 }: {
   orgId: string;
   entityType: DocumentEntityType;
   entityId: string;
+  label?: string; // what the intake shows as "Adding to ..."
 }) {
   const supabase = createClient();
   const [docs, setDocs] = useState<DocumentRow[]>([]);
   // document id -> every property it is linked to (migration 0023).
   const [linksByDoc, setLinksByDoc] = useState<Record<string, string[]>>({});
   const [allProperties, setAllProperties] = useState<SelectableProperty[]>([]);
-  // Upload-time "also attach to other properties" selection (property pages).
-  const [alsoProps, setAlsoProps] = useState<string[]>([]);
-  const [alsoOpen, setAlsoOpen] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
   const [editingProps, setEditingProps] = useState<string | null>(null);
   const [draftProps, setDraftProps] = useState<string[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const isProperty = entityType === "property";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  // Unconfirmed AI suggestions by document id.
-  const [suggestions, setSuggestions] = useState<Record<string, ClassifySuggestion>>({});
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // The property this record sits on (for the intake's default links).
+  const [contextPropertyId, setContextPropertyId] = useState<string | null>(
+    entityType === "property" ? entityId : null
+  );
+  const [contextLabel, setContextLabel] = useState<string>(label ?? "");
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -158,39 +122,47 @@ export default function EntityDocuments({
     load();
   }, [load]);
 
-  async function upload(files: FileList | null, photos: boolean) {
+  useEffect(() => {
+    if (entityType === "property" || entityType === "organization") return;
+    const table: Partial<Record<DocumentEntityType, string>> = {
+      parcel: "parcels", field: "fields", pasture: "pastures", wetland: "wetlands",
+      timber_stand: "timber_stands", road: "roads", easement: "easements", asset: "assets",
+    };
+    const t = table[entityType];
+    if (!t) return;
+    supabase
+      .from(t)
+      .select("property_id, name")
+      .eq("id", entityId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const row = data as { property_id?: string | null; name?: string | null } | null;
+        setContextPropertyId(row?.property_id ?? null);
+        if (!label && row?.name) setContextLabel(row.name);
+      });
+  }, [supabase, entityType, entityId, label]);
+
+  // Quick gallery photos (asset pages): stored as-is, typed other, no
+  // reading. Documents go through the intake flow.
+  async function uploadPhotos(files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
     setError(null);
     for (const file of Array.from(files)) {
-      const big = largeFileWarning(file);
-      if (big) setNotice(big);
-      // Photos skip classification (they are photos); documents get a
-      // suggestion that waits for the user.
-      const suggestion = photos ? null : await classifyFile(file);
       const result = await uploadDocument(supabase, {
         orgId,
         entityType,
         entityId,
         file,
         docType: "other",
-        title: suggestion?.title ?? null,
-        aiSuggestedType: suggestion?.doc_type ?? null,
-        propertyIds: isProperty ? alsoProps : [],
+        title: null,
+        aiSuggestedType: null,
+        propertyIds: [],
       });
-      if ("error" in result) {
-        setError(result.error);
-        continue;
-      }
-      if (suggestion && suggestion.doc_type !== "other") {
-        setSuggestions((s) => ({ ...s, [result.id]: suggestion }));
-      }
+      if ("error" in result) setError(result.error);
     }
     setBusy(false);
     if (photoInputRef.current) photoInputRef.current.value = "";
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    setAlsoProps([]);
-    setAlsoOpen(false);
     load();
   }
 
@@ -207,11 +179,6 @@ export default function EntityDocuments({
   }
 
   async function setType(doc: DocumentRow, t: DocType) {
-    setSuggestions((s) => {
-      const next = { ...s };
-      delete next[doc.id];
-      return next;
-    });
     const { error: err } = await supabase
       .from("documents")
       .update({ doc_type: t })
@@ -261,69 +228,69 @@ export default function EntityDocuments({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
-          onClick={() => photoInputRef.current?.click()}
-          disabled={busy}
-          className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600 disabled:opacity-60"
-        >
-          {busy ? "Uploading..." : "Add photo"}
-        </button>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={busy}
-          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          onClick={() => setIntakeOpen(true)}
+          className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600"
         >
           Add document
         </button>
-        <input
-          ref={photoInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          multiple
-          className="hidden"
-          onChange={(e) => upload(e.target.files, true)}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => upload(e.target.files, false)}
-        />
-        {busy ? (
-          <span className="self-center text-xs text-gray-500">
-            Uploading and reading the type...
-          </span>
-        ) : null}
-        {isProperty && allProperties.length > 1 ? (
-          <button
-            onClick={() => setAlsoOpen((v) => !v)}
-            className="self-center text-xs font-medium text-kelly-700 hover:underline"
-          >
-            {alsoProps.length > 0
-              ? `Also attaching to ${alsoProps.length} other propert${alsoProps.length === 1 ? "y" : "ies"}`
-              : "Also attach to other properties"}
-          </button>
+        {entityType === "asset" ? (
+          <>
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              disabled={busy}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              {busy ? "Uploading..." : "Add photos"}
+            </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              className="hidden"
+              onChange={(e) => uploadPhotos(e.target.files)}
+            />
+          </>
         ) : null}
       </div>
-      {isProperty && alsoOpen ? (
-        <div className="max-w-md rounded-lg border border-gray-200 bg-gray-50 p-2">
-          <p className="mb-1 text-xs text-gray-600">
-            The next upload attaches to this property and every property checked here.
-          </p>
-          <PropertyMultiSelect
-            properties={allProperties.filter((p) => p.id !== entityId)}
-            selected={alsoProps}
-            onChange={setAlsoProps}
-            compact
-          />
+
+      {intakeOpen ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
+          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl md:max-w-5xl md:rounded-2xl md:p-6">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Add a document</h2>
+                <p className="text-xs text-gray-500">Drop the file, confirm what was read, save. Nothing is stored until you confirm.</p>
+              </div>
+              <button
+                onClick={() => setIntakeOpen(false)}
+                aria-label="Close"
+                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <IntakeFlow
+              orgId={orgId}
+              context={{
+                entityType,
+                entityId,
+                label: contextLabel || "this record",
+                propertyId: contextPropertyId,
+              }}
+              onSaved={() => load()}
+              onClose={() => setIntakeOpen(false)}
+            />
+          </div>
         </div>
       ) : null}
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      {notice ? <p className="text-xs text-amber-800">{notice}</p> : null}
 
       {photos.length > 0 ? (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
@@ -358,7 +325,6 @@ export default function EntityDocuments({
       {files.length > 0 ? (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
           {files.map((doc) => {
-            const suggestion = suggestions[doc.id];
             const docType = (doc.doc_type ?? "other") as DocType;
             return (
               <li key={doc.id} className="space-y-1.5 px-3 py-2">
@@ -385,21 +351,6 @@ export default function EntityDocuments({
                     </button>
                   </div>
                 </div>
-                {suggestion ? (
-                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5">
-                    <DocTypeChip docType={suggestion.doc_type} suggested />
-                    <span className="text-xs text-amber-900">
-                      AI suggests this type{suggestion.reason ? `: ${suggestion.reason}` : ""}.
-                      Confirm, or pick another with the type menu.
-                    </span>
-                    <button
-                      onClick={() => setType(doc, suggestion.doc_type)}
-                      className="rounded bg-kelly-500 px-2 py-0.5 text-xs font-semibold text-white hover:bg-kelly-600"
-                    >
-                      Accept
-                    </button>
-                  </div>
-                ) : null}
                 {isProperty && (linksByDoc[doc.id]?.length ?? 0) > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 text-xs">
                     {(linksByDoc[doc.id] ?? []).map((pid) => (

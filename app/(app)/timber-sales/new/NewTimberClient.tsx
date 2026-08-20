@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { takeHandoffFile } from "@/lib/fileHandoff";
 import Link from "next/link";
 import { suggestStandIds } from "@/lib/timberMatch";
 import TimberSaleForm, {
@@ -24,6 +26,15 @@ export default function NewTimberClient({
   const [suggested, setSuggested] = useState<string[]>([]);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const handoffKey = searchParams.get("handoff");
+  useEffect(() => {
+    if (!handoffKey) return;
+    takeHandoffFile(handoffKey).then((f) => {
+      if (f) extract(f);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffKey]);
 
   async function extract(file: File) {
     setMode("extracting");

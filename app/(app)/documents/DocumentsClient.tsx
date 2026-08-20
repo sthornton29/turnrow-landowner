@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -15,25 +15,17 @@ import {
   type DocType,
 } from "@/lib/documents";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
-import {
-  bestGuess,
-  isConfident,
-  suggestProperties,
-  type MatchableParcel,
-  type MatchableProperty,
-  type PropertySuggestion,
-} from "@/lib/documentMatch";
+import type { MatchableParcel, MatchableProperty } from "@/lib/documentMatch";
 import DocTypeChip from "@/components/documents/DocTypeChip";
 import PropertyMultiSelect from "@/components/documents/PropertyMultiSelect";
 import ScanDocumentButton from "@/components/documents/ScanDocumentButton";
-import { DocTypeSelect } from "@/components/documents/EntityDocuments";
+import { DocTypeSelect } from "@/components/documents/DocTypeSelect";
+import IntakeFlow from "@/components/documents/intake/IntakeFlow";
 import {
-  classifyFile,
+  deleteDocumentEverywhere,
   openDocument,
+  removeDocumentFromProperty,
   setDocumentProperties,
-  uploadDocument,
-  largeFileWarning,
-  type ClassifySuggestion,
 } from "@/components/documents/classify";
 
 export interface AttachTarget {
@@ -43,19 +35,6 @@ export interface AttachTarget {
   href: string;
   propertyId: string | null;
 }
-
-// Non-property records a document can ALSO belong to (properties are a
-// multi-select of their own).
-const ATTACH_TYPES: Array<{ key: DocumentEntityType; label: string }> = [
-  { key: "parcel", label: "Parcel" },
-  { key: "field", label: "Ag field" },
-  { key: "timber_stand", label: "Timber stand" },
-  { key: "easement", label: "Easement" },
-  { key: "asset", label: "Asset" },
-  { key: "lease", label: "Lease" },
-  { key: "timber_sale", label: "Timber sale" },
-  { key: "entity", label: "Entity" },
-];
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none";
@@ -75,8 +54,6 @@ export default function DocumentsClient({
   properties,
   entities,
   links,
-  matchProperties,
-  matchParcels,
 }: {
   orgId: string;
   docs: DocumentRow[];
@@ -84,8 +61,10 @@ export default function DocumentsClient({
   properties: Array<{ id: string; name: string; entityId: string | null; county: string | null; state: string | null }>;
   entities: Array<{ id: string; name: string }>;
   links: DocPropertyLink[]; // document_properties (migration 0023)
-  matchProperties: MatchableProperty[];
-  matchParcels: MatchableParcel[];
+  // Kept for the page's props shape; the intake flow loads its own
+  // matching context.
+  matchProperties?: MatchableProperty[];
+  matchParcels?: MatchableParcel[];
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -256,6 +235,7 @@ export default function DocumentsClient({
                 target={null}
                 propertyIds={[]}
                 properties={properties}
+                filterPropertyId={null}
                 onChanged={() => router.refresh()}
               />
             ))}
@@ -289,6 +269,7 @@ export default function DocumentsClient({
                     target={targetByKey.get(`${d.entity_type}:${d.entity_id}`) ?? null}
                     propertyIds={propsFor(d)}
                     properties={properties}
+                    filterPropertyId={propertyFilter && propertyFilter !== UNFILED_FILTER ? propertyFilter : null}
                     onChanged={() => router.refresh()}
                   />
                 ))}
@@ -299,18 +280,30 @@ export default function DocumentsClient({
       ))}
 
       {uploadOpen ? (
-        <UploadSheet
-          orgId={orgId}
-          targets={targets}
-          properties={properties}
-          matchProperties={matchProperties}
-          matchParcels={matchParcels}
-          onClose={() => setUploadOpen(false)}
-          onUploaded={() => {
-            setUploadOpen(false);
-            router.refresh();
-          }}
-        />
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
+          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl md:max-w-5xl md:rounded-2xl md:p-6">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Add a document</h2>
+                <p className="text-xs text-gray-500">Drop the file, confirm what was read, save. Nothing is stored until you confirm.</p>
+              </div>
+              <button
+                onClick={() => setUploadOpen(false)}
+                aria-label="Close"
+                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <IntakeFlow
+              orgId={orgId}
+              onSaved={() => router.refresh()}
+              onClose={() => setUploadOpen(false)}
+            />
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -321,12 +314,16 @@ function DocumentRowView({
   target,
   propertyIds,
   properties,
+  filterPropertyId,
   onChanged,
 }: {
   doc: DocumentRow;
   target: AttachTarget | null;
   propertyIds: string[];
   properties: Array<{ id: string; name: string; county: string | null; state: string | null }>;
+  // When the list is filtered to one property, deleting a document
+  // linked to others offers "remove from this property only".
+  filterPropertyId: string | null;
   onChanged: () => void;
 }) {
   const supabase = createClient();
@@ -341,6 +338,43 @@ function DocumentRowView({
   async function setType(t: DocType) {
     await supabase.from("documents").update({ doc_type: t }).eq("id", doc.id);
     setChangingType(false);
+    onChanged();
+  }
+
+  // Delete semantics mirror the property page: linked to several
+  // properties and viewed through one of them -> remove from this
+  // property only, or delete the file everywhere; otherwise confirm
+  // and delete everywhere (file and row).
+  async function remove() {
+    const others = filterPropertyId ? propertyIds.filter((p) => p !== filterPropertyId) : [];
+    if (filterPropertyId && propertyIds.includes(filterPropertyId) && others.length > 0) {
+      const choice = window.prompt(
+        `${doc.file_name} is also attached to ${others.length} other propert${others.length === 1 ? "y" : "ies"}.\n` +
+          `Type REMOVE to take it off ${nameOf(filterPropertyId)} only, or DELETE to delete the file for all ${propertyIds.length} properties.`,
+        "REMOVE"
+      );
+      if (!choice) return;
+      const c = choice.trim().toUpperCase();
+      if (c === "DELETE") {
+        const err = await deleteDocumentEverywhere(supabase, doc);
+        if (err) setPropError("Could not delete. " + err);
+      } else if (c === "REMOVE") {
+        const err = await removeDocumentFromProperty(supabase, doc, filterPropertyId, propertyIds);
+        if (err) setPropError("Could not remove. " + err);
+      } else {
+        return;
+      }
+      onChanged();
+      return;
+    }
+    const where =
+      propertyIds.length > 1 ? ` It is attached to ${propertyIds.length} properties; this deletes it everywhere.` : "";
+    if (!window.confirm(`Delete ${doc.file_name}?${where} This cannot be undone.`)) return;
+    const err = await deleteDocumentEverywhere(supabase, doc);
+    if (err) {
+      setPropError("Could not delete. " + err);
+      return;
+    }
     onChanged();
   }
 
@@ -459,287 +493,13 @@ function DocumentRowView({
               Plot boundary
             </Link>
           ) : null}
-        </div>
-      </div>
-      <ScanDocumentButton doc={doc} onChanged={onChanged} compact />
-    </li>
-  );
-}
-
-type UploadMode = "ai" | "manual";
-
-function UploadSheet({
-  orgId,
-  targets,
-  properties,
-  matchProperties,
-  matchParcels,
-  onClose,
-  onUploaded,
-}: {
-  orgId: string;
-  targets: AttachTarget[];
-  properties: Array<{ id: string; name: string; county: string | null; state: string | null }>;
-  matchProperties: MatchableProperty[];
-  matchParcels: MatchableParcel[];
-  onClose: () => void;
-  onUploaded: () => void;
-}) {
-  const supabase = createClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [mode, setMode] = useState<UploadMode>("ai");
-  const [file, setFile] = useState<File | null>(null);
-  const [propertyIds, setPropertyIds] = useState<string[]>([]);
-  const [extraOn, setExtraOn] = useState(false);
-  const [attachType, setAttachType] = useState<DocumentEntityType>("parcel");
-  const [attachId, setAttachId] = useState("");
-  const [docType, setDocType] = useState<DocType>("other");
-  const [title, setTitle] = useState("");
-  const [suggestion, setSuggestion] = useState<ClassifySuggestion | null>(null);
-  const [propSuggestions, setPropSuggestions] = useState<PropertySuggestion[]>([]);
-  const [classifying, setClassifying] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const options = targets.filter((t) => t.entityType === attachType);
-
-  async function pickFile(f: File | null) {
-    setFile(f);
-    setSuggestion(null);
-    setPropSuggestions([]);
-    if (!f || mode === "manual") return;
-    setClassifying(true);
-    // The model sees the owner's property list (names, counties, parcel
-    // and FSA numbers, acres) so it can name the property outright; the
-    // page-level hints still score independently.
-    const context = matchProperties.map((mp) => ({
-      name: mp.name,
-      county: mp.county,
-      state: mp.state,
-      parcel_numbers: matchParcels.filter((pc) => pc.property_id === mp.id).map((pc) => pc.parcel_number),
-      fsa_numbers: mp.fsa_numbers ?? [],
-      acres: mp.acres,
-    }));
-    const s = await classifyFile(f, context);
-    setClassifying(false);
-    if (s) {
-      setSuggestion(s);
-      if (!title && s.title) setTitle(s.title);
-      const sugg = suggestProperties(s.property_hints, matchProperties, matchParcels, s.matched_properties);
-      setPropSuggestions(sugg);
-      // Confident matches come pre-checked; otherwise the one clear
-      // best guess is; weaker ones are shown but left for the user.
-      const confident = sugg.filter(isConfident).map((x) => x.propertyId);
-      const guess = confident.length === 0 ? bestGuess(sugg) : null;
-      const pre = confident.length > 0 ? confident : guess ? [guess.propertyId] : [];
-      if (pre.length > 0) {
-        setPropertyIds((cur) => [...new Set([...cur, ...pre])]);
-      }
-    }
-  }
-
-  const extraChosen = extraOn && attachId !== "";
-  // No gate on properties: a document with nothing chosen saves as
-  // Unfiled and can be assigned from its row any time.
-  const canSave = !!file;
-  const willBeUnfiled = !!file && propertyIds.length === 0 && !extraChosen;
-
-  async function save() {
-    if (!file || !canSave) return;
-    setBusy(true);
-    setError(null);
-    // Primary attachment: a specific record if picked, else the first
-    // chosen property, else Unfiled (entity_type organization).
-    const primary = extraChosen
-      ? { entityType: attachType, entityId: attachId }
-      : propertyIds.length > 0
-        ? { entityType: "property" as DocumentEntityType, entityId: propertyIds[0] }
-        : { entityType: "organization" as DocumentEntityType, entityId: orgId };
-    const result = await uploadDocument(supabase, {
-      orgId,
-      entityType: primary.entityType,
-      entityId: primary.entityId,
-      file,
-      docType,
-      title: title.trim() || null,
-      aiSuggestedType: suggestion?.doc_type ?? null,
-      propertyIds,
-    });
-    setBusy(false);
-    if ("error" in result) {
-      setError(result.error);
-      return;
-    }
-    onUploaded();
-  }
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 md:items-center">
-      <div className="max-h-[90%] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl md:max-w-lg md:rounded-xl">
-        <div className="flex items-start justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Upload a document</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded-full p-1 text-gray-400 hover:bg-gray-100">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <button onClick={remove} className="font-medium text-red-600 hover:underline">
+            Delete
           </button>
         </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-1.5">
-          {(
-            [
-              ["ai", "AI upload", "Reads the file to suggest the type and the properties it belongs to"],
-              ["manual", "Manual upload", "No reading; you pick everything"],
-            ] as Array<[UploadMode, string, string]>
-          ).map(([m, label, hint]) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => {
-                setMode(m);
-                if (m === "manual") {
-                  setSuggestion(null);
-                  setPropSuggestions([]);
-                }
-              }}
-              className={
-                "rounded-lg border px-3 py-2 text-left " +
-                (mode === m
-                  ? "border-kelly-500 bg-kelly-50 text-pine-900"
-                  : "border-gray-300 text-gray-700 hover:bg-gray-50")
-              }
-            >
-              <span className="block text-sm font-medium">{label}</span>
-              <span className="block text-[11px] leading-tight text-gray-500">{hint}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 space-y-3">
-          <div>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              {file ? file.name : "Choose a PDF or photo"}
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              className="hidden"
-              onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-          {mode === "manual" ? (
-            <p className="text-xs text-gray-500">Manual upload: the file is not read by AI.</p>
-          ) : null}
-          {largeFileWarning(file) ? (
-            <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">{largeFileWarning(file)}</p>
-          ) : null}
-          {classifying ? (
-            <p className="text-xs text-gray-500">Reading the document to suggest a type and properties...</p>
-          ) : null}
-          {suggestion && suggestion.doc_type !== docType ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5">
-              <DocTypeChip docType={suggestion.doc_type} suggested />
-              <span className="text-xs text-amber-900">
-                AI suggests this type{suggestion.reason ? `: ${suggestion.reason}` : ""}.
-              </span>
-              <button
-                onClick={() => setDocType(suggestion.doc_type)}
-                className="rounded bg-kelly-500 px-2 py-0.5 text-xs font-semibold text-white hover:bg-kelly-600"
-              >
-                Use it
-              </button>
-            </div>
-          ) : null}
-          {suggestion && propSuggestions.length === 0 && mode === "ai" ? (
-            <p className="text-xs text-gray-500">
-              Nothing on the page matched a property by parcel, farm number, name, or county; pick the properties below.
-            </p>
-          ) : null}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Document type</label>
-            <DocTypeSelect value={docType} onChange={setDocType} className={inputClass} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Title (optional)</label>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder="e.g. 2019 warranty deed, Smith to Jones" />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Properties this document applies to
-              {propertyIds.length > 0 ? (
-                <span className="ml-1.5 text-xs font-normal text-gray-500">{propertyIds.length} selected</span>
-              ) : null}
-            </label>
-            <PropertyMultiSelect
-              properties={properties}
-              selected={propertyIds}
-              onChange={setPropertyIds}
-              suggestions={propSuggestions}
-            />
-            {propSuggestions.length > 0 ? (
-              <p className="mt-1 text-[11px] text-amber-900">
-                Amber rows were suggested from the document. Confident matches are pre-checked; confirm or change them.
-              </p>
-            ) : null}
-          </div>
-          <div>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={extraOn}
-                onChange={(e) => {
-                  setExtraOn(e.target.checked);
-                  if (!e.target.checked) setAttachId("");
-                }}
-                className="h-4 w-4 accent-kelly-500"
-              />
-              Also belongs to a specific record (parcel, lease, easement...)
-            </label>
-            {extraOn ? (
-              <div className="mt-1.5 grid grid-cols-2 gap-2">
-                <select
-                  value={attachType}
-                  onChange={(e) => {
-                    setAttachType(e.target.value as DocumentEntityType);
-                    setAttachId("");
-                  }}
-                  className={inputClass}
-                >
-                  {ATTACH_TYPES.map((t) => (
-                    <option key={t.key} value={t.key}>{t.label}</option>
-                  ))}
-                </select>
-                <select value={attachId} onChange={(e) => setAttachId(e.target.value)} className={inputClass}>
-                  <option value="">Choose...</option>
-                  {options.map((o) => (
-                    <option key={o.id} value={o.id}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-          </div>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          {willBeUnfiled ? (
-            <p className="text-xs text-amber-900">
-              No property chosen: it will be saved as Unfiled; assign properties any time from the row.
-            </p>
-          ) : null}
-          <div className="flex gap-2">
-            <button
-              onClick={save}
-              disabled={busy || !canSave}
-              className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600 disabled:opacity-60"
-            >
-              {busy ? "Uploading..." : "Upload"}
-            </button>
-            <button onClick={onClose} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
-              Cancel
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+      {propError && !editingProps ? <p className="text-xs text-red-600">{propError}</p> : null}
+      <ScanDocumentButton doc={doc} onChanged={onChanged} compact />
+    </li>
   );
 }

@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DocType } from "@/lib/documents";
-import type { AiPropertyMatch, PropertyHints } from "@/lib/documentMatch";
+import type { AiEntityMatch, AiPropertyMatch, PropertyHints } from "@/lib/documentMatch";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 
 export interface ClassifySuggestion {
@@ -62,6 +62,80 @@ export async function classifyFile(
     };
   } catch {
     return null;
+  }
+}
+
+// The one-pass intake result (kind=intake): type, key fields, and
+// association claims the client verifies before showing as found.
+export interface IntakeResult {
+  doc_type: DocType;
+  confidence: string | null;
+  title: string | null;
+  reason: string | null;
+  specialized_kind: string | null;
+  property_hints: PropertyHints | null;
+  matched_properties: AiPropertyMatch[];
+  matched_entity: AiEntityMatch | null;
+  fields: Record<string, unknown>;
+  unsure_fields: string[];
+  pages_scanned?: number;
+  total_pages?: number;
+  chunks?: number;
+}
+
+export interface IntakeContext {
+  properties: ClassifyContextProperty[];
+  entities: Array<{ name: string; aliases: string[] }>;
+}
+
+// Runs the intake pass. Returns { result } or { error } (never throws):
+// the flow drops into the manual form on any error, including 429.
+export async function intakeFile(
+  file: File,
+  context: IntakeContext
+): Promise<{ result: IntakeResult } | { error: string }> {
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("kind", "intake");
+    fd.append(
+      "context",
+      JSON.stringify({
+        properties: context.properties.slice(0, 200),
+        entities: context.entities.slice(0, 200),
+      })
+    );
+    const res = await fetch("/api/extract", { method: "POST", body: fd });
+    const body = (await res.json().catch(() => ({}))) as {
+      extraction?: Partial<IntakeResult>;
+      error?: string;
+    };
+    if (res.status === 429) {
+      return { error: body.error ?? "The reader is busy for a few minutes. Fill in the details by hand, or try again later." };
+    }
+    if (!res.ok || !body.extraction || !body.extraction.doc_type) {
+      return { error: body.error ?? "We could not read this file. Fill in the details by hand." };
+    }
+    const x = body.extraction;
+    return {
+      result: {
+        doc_type: x.doc_type as DocType,
+        confidence: typeof x.confidence === "string" ? x.confidence : null,
+        title: x.title ?? null,
+        reason: x.reason ?? null,
+        specialized_kind: typeof x.specialized_kind === "string" ? x.specialized_kind : null,
+        property_hints: x.property_hints ?? null,
+        matched_properties: Array.isArray(x.matched_properties) ? x.matched_properties : [],
+        matched_entity: x.matched_entity ?? null,
+        fields: (x.fields && typeof x.fields === "object" ? x.fields : {}) as Record<string, unknown>,
+        unsure_fields: Array.isArray(x.unsure_fields) ? x.unsure_fields.map(String) : [],
+        pages_scanned: typeof x.pages_scanned === "number" ? x.pages_scanned : undefined,
+        total_pages: typeof x.total_pages === "number" ? x.total_pages : undefined,
+        chunks: typeof x.chunks === "number" ? x.chunks : undefined,
+      },
+    };
+  } catch {
+    return { error: "We could not read this file. Fill in the details by hand." };
   }
 }
 
@@ -146,6 +220,9 @@ export async function uploadDocument(
     // Every property the document applies to (migration 0023). When the
     // primary entity is a property it is included automatically.
     propertyIds?: string[];
+    // Reviewed extracted fields from the intake confirm screen (saved as
+    // already reviewed, with scan_kind for the row's Extracted block).
+    extracted?: Record<string, unknown> | null;
   }
 ): Promise<{ id: string } | { error: string }> {
   const path = `${args.orgId}/${args.entityType}/${crypto.randomUUID()}-${args.file.name}`;
@@ -164,6 +241,13 @@ export async function uploadDocument(
       doc_type: args.docType,
       title: args.title,
       ai_suggested_type: args.aiSuggestedType,
+      ...(args.extracted
+        ? {
+            extracted: args.extracted,
+            extracted_at: new Date().toISOString(),
+            extraction_reviewed: true,
+          }
+        : {}),
     })
     .select("id")
     .single();

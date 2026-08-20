@@ -669,46 +669,77 @@ export async function POST(request: Request) {
         : { type: "image", source: { type: "base64",
             media_type: file.type as (typeof IMAGE_TYPES)[number], data: base64 } };
     let promptText = VAULT_PROMPTS[vaultKind];
-    if (vaultKind === "classify") {
+    if (vaultKind === "classify" || vaultKind === "intake") {
+      // The owner's matching context: property names with county,
+      // normalized parcel numbers, FSA farm numbers, acres; and (intake)
+      // entity names with confirmed aliases. The model names matches off
+      // these lists and cites the signal; the client verifies every
+      // claim deterministically before showing it as found.
       const rawContext = formData.get("context");
-      if (typeof rawContext === "string" && rawContext.length < 200_000) {
+      if (typeof rawContext === "string" && rawContext.length < 300_000) {
         try {
           const parsed = JSON.parse(rawContext) as unknown;
-          if (Array.isArray(parsed)) {
-            const lines = parsed.slice(0, 200).flatMap((item) => {
-              if (!item || typeof item !== "object") return [];
-              const o = item as Record<string, unknown>;
-              const name = typeof o.name === "string" ? o.name.trim().slice(0, 120) : "";
-              if (!name) return [];
-              const strs = (v: unknown) =>
-                Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 40).map((x) => String(x).slice(0, 60)) : [];
-              const parts = [
-                typeof o.county === "string" && o.county ? `${o.county} County` : null,
-                typeof o.state === "string" && o.state ? o.state : null,
-                typeof o.acres === "number" ? `${Math.round(o.acres * 10) / 10} acres` : null,
-                strs(o.parcel_numbers).length ? `parcels ${strs(o.parcel_numbers).join(", ")}` : null,
-                strs(o.fsa_numbers).length ? `FSA farms ${strs(o.fsa_numbers).join(", ")}` : null,
-              ].filter(Boolean);
-              return [`- "${name}"${parts.length ? `: ${parts.join("; ")}` : ""}`];
-            });
-            if (lines.length > 0) {
-              promptText +=
-                "\n\nThe owner's properties are:\n" +
-                lines.join("\n") +
-                "\n\nIn matched_properties, name which of THESE properties the document most likely concerns (by parcel numbers, FSA farm numbers, county, acreage, owner or tract names). Use the names exactly as listed; never invent a name; leave it empty when nothing ties the document to a listed property.";
-            }
+          const propsRaw: unknown[] = Array.isArray(parsed)
+            ? parsed
+            : parsed && typeof parsed === "object" && Array.isArray((parsed as { properties?: unknown }).properties)
+              ? ((parsed as { properties: unknown[] }).properties)
+              : [];
+          const entsRaw: unknown[] =
+            parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray((parsed as { entities?: unknown }).entities)
+              ? ((parsed as { entities: unknown[] }).entities)
+              : [];
+          const strs = (v: unknown) =>
+            Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 40).map((x) => String(x).slice(0, 60)) : [];
+          const lines = propsRaw.slice(0, 200).flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const o = item as Record<string, unknown>;
+            const name = typeof o.name === "string" ? o.name.trim().slice(0, 120) : "";
+            if (!name) return [];
+            const parts = [
+              typeof o.county === "string" && o.county ? `${o.county} County` : null,
+              typeof o.state === "string" && o.state ? o.state : null,
+              typeof o.acres === "number" ? `${Math.round(o.acres * 10) / 10} acres` : null,
+              strs(o.parcel_numbers).length ? `parcels ${strs(o.parcel_numbers).join(", ")}` : null,
+              strs(o.fsa_numbers).length ? `FSA farms ${strs(o.fsa_numbers).join(", ")}` : null,
+            ].filter(Boolean);
+            return [`- "${name}"${parts.length ? `: ${parts.join("; ")}` : ""}`];
+          });
+          const entLines = entsRaw.slice(0, 200).flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const o = item as Record<string, unknown>;
+            const name = typeof o.name === "string" ? o.name.trim().slice(0, 120) : "";
+            if (!name) return [];
+            const aliases = strs(o.aliases);
+            return [`- "${name}"${aliases.length ? ` (also recorded as ${aliases.join("; ")})` : ""}`];
+          });
+          if (lines.length > 0) {
+            promptText +=
+              "\n\nThe owner's properties are:\n" +
+              lines.join("\n") +
+              "\n\nIn matched_properties, name which of THESE properties the document concerns (by parcel numbers, FSA farm numbers, the property's name, an owner/party name, or county). Use the names exactly as listed; never invent a name; leave it empty when nothing ties the document to a listed property.";
+          }
+          if (vaultKind === "intake" && entLines.length > 0) {
+            promptText +=
+              "\n\nThe owner's entities (how title is held) are:\n" +
+              entLines.join("\n") +
+              "\n\nIn matched_entity, name the listed entity whose name or alias appears as a party on the page, or null.";
           }
         } catch {
-          // Malformed context: classify without it.
+          // Malformed context: proceed without it.
         }
       }
     }
-    const runTool = async (bytes: Buffer, text: string): Promise<Record<string, unknown>> => {
+    const runTool = async (
+      bytes: Buffer,
+      text: string,
+      toolOverride?: Anthropic.Tool
+    ): Promise<Record<string, unknown>> => {
+      const useTool = toolOverride ?? vtool;
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: vaultKind === "classify" ? 1536 : 8192,
-        tools: [vtool],
-        tool_choice: { type: "tool", name: vtool.name },
+        tools: [useTool],
+        tool_choice: { type: "tool", name: useTool.name },
         messages: [{ role: "user", content: [blockFor(bytes), { type: "text", text }] }],
       });
       const toolUse = response.content.find(
@@ -717,9 +748,60 @@ export async function POST(request: Request) {
       if (!toolUse) throw new Error("no tool use");
       return toolUse.input as Record<string, unknown>;
     };
+    // Every 90-page chunk of a 156EZ packet, two at a time, merged by
+    // farm number. Shared by the fsa_156ez kind and the intake pass.
+    const scanFsaPacket = async (): Promise<Record<string, unknown>> => {
+      const chunks = await splitPdf(fileBytes, { maxPages: 90, maxBytes: 25 * 1024 * 1024 });
+      const total = await pageCount(fileBytes);
+      const results: Array<Record<string, unknown>> = new Array(chunks.length);
+      let next = 0;
+      const fsaPrompt = VAULT_PROMPTS.fsa_156ez;
+      const worker = async () => {
+        while (next < chunks.length) {
+          const i = next++;
+          const r = await runTool(
+            chunks[i],
+            fsaPrompt + (chunks.length > 1 ? ` (These are pages of part ${i + 1} of ${chunks.length} of one packet.)` : ""),
+            VAULT_TOOLS.fsa_156ez
+          );
+          r.pages_scanned = Math.ceil(total / chunks.length);
+          r.total_pages = total;
+          results[i] = r;
+        }
+      };
+      await Promise.all([worker(), worker()]);
+      const merged = mergeFsaExtractions(results) as unknown as Record<string, unknown>;
+      merged.pages_scanned = total;
+      merged.total_pages = total;
+      merged.chunks = chunks.length;
+      return merged;
+    };
     try {
       let extraction: Record<string, unknown>;
-      if (!isPdf) {
+      if (vaultKind === "intake") {
+        // One pass on the first 20 pages (a photo goes in whole). A
+        // 156EZ packet longer than that gets the full chunked farm scan
+        // inside the same request so the user still sees one pass.
+        if (!isPdf) {
+          extraction = await runTool(fileBytes, promptText);
+        } else {
+          const first = await firstPages(fileBytes, 20);
+          extraction = await runTool(first.bytes, promptText);
+          extraction.pages_scanned = first.pages;
+          extraction.total_pages = first.total;
+          if (extraction.doc_type === "fsa_156ez" && first.total > first.pages) {
+            const packet = await scanFsaPacket();
+            const fields = (extraction.fields ?? {}) as Record<string, unknown>;
+            fields.farms = packet.farms ?? [];
+            extraction.fields = fields;
+            extraction.pages_scanned = packet.pages_scanned;
+            extraction.chunks = packet.chunks;
+            const unsure = Array.isArray(extraction.unsure_fields) ? (extraction.unsure_fields as unknown[]).map(String) : [];
+            const more = Array.isArray(packet.unsure_fields) ? (packet.unsure_fields as unknown[]).map(String) : [];
+            extraction.unsure_fields = [...new Set([...unsure, ...more])];
+          }
+        }
+      } else if (!isPdf) {
         extraction = await runTool(fileBytes, promptText);
       } else if (vaultKind === "classify") {
         const first = await firstPages(fileBytes, 20);
@@ -727,27 +809,7 @@ export async function POST(request: Request) {
         extraction.pages_scanned = first.pages;
         extraction.total_pages = first.total;
       } else if (vaultKind === "fsa_156ez") {
-        const chunks = await splitPdf(fileBytes, { maxPages: 90, maxBytes: 25 * 1024 * 1024 });
-        const total = await pageCount(fileBytes);
-        const results: Array<Record<string, unknown>> = new Array(chunks.length);
-        let next = 0;
-        const worker = async () => {
-          while (next < chunks.length) {
-            const i = next++;
-            const r = await runTool(
-              chunks[i],
-              promptText + (chunks.length > 1 ? ` (These are pages of part ${i + 1} of ${chunks.length} of one packet.)` : "")
-            );
-            r.pages_scanned = Math.ceil(total / chunks.length);
-            r.total_pages = total;
-            results[i] = r;
-          }
-        };
-        await Promise.all([worker(), worker()]);
-        extraction = mergeFsaExtractions(results) as unknown as Record<string, unknown>;
-        extraction.pages_scanned = total;
-        extraction.total_pages = total;
-        extraction.chunks = chunks.length;
+        extraction = await scanFsaPacket();
       } else {
         const first = await firstPages(fileBytes, 90);
         extraction = await runTool(first.bytes, promptText);

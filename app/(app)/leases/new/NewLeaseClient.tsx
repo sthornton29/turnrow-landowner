@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { takeHandoffFile } from "@/lib/fileHandoff";
 import Link from "next/link";
 import LeaseForm, { type LeasePrefill } from "@/components/leases/LeaseForm";
 import type { MatchableParcel, MatchableProperty } from "@/lib/leaseLand";
@@ -24,6 +26,17 @@ export default function NewLeaseClient({
   const [unsure, setUnsure] = useState<string[]>([]);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [extractError, setExtractError] = useState<string | null>(null);
+  // A file handed over from the document intake (?handoff=key) runs
+  // through the same extraction as a file chosen here.
+  const searchParams = useSearchParams();
+  const handoffKey = searchParams.get("handoff");
+  useEffect(() => {
+    if (!handoffKey) return;
+    takeHandoffFile(handoffKey).then((f) => {
+      if (f) extract(f);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffKey]);
 
   async function extract(file: File) {
     setMode("extracting");

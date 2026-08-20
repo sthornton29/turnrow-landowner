@@ -327,7 +327,133 @@ export const LEGAL_DESCRIPTION_TOOL: Anthropic.Tool = {
   },
 };
 
+
+// One-pass INTAKE for the AI-first upload flow: type, the type's key
+// fields, property and entity association claims (each citing the
+// signal that drove it so the client-side verifier can check it), and
+// whether a specialized flow (lease, timber, tax, rent) should take
+// over. Field keys are the union of the per-type tools above so the
+// confirm screen renders them through EXTRACTED_FIELDS unchanged.
+export const SPECIALIZED_KINDS = [
+  "lease", "timber_contract", "timber_settlement", "tax_statement", "rent_payment",
+] as const;
+
+export const INTAKE_TOOL: Anthropic.Tool = {
+  name: "record_document_intake",
+  description:
+    "Read a landowner's document once: classify it, pull its key fields, and say which of the owner's properties or entities it concerns, citing the fact on the page that ties it there. Use null for anything not stated; never invent names, numbers, or matches.",
+  input_schema: {
+    type: "object",
+    properties: {
+      doc_type: { type: "string", enum: [...DOC_TYPES], description: "The best-fitting type; 'other' when none fits" },
+      confidence: { type: "string", enum: ["high", "medium", "low"] },
+      title: nullable("string", "A short human title, e.g. 'Warranty deed, Smith to Jones, 2014'"),
+      reason: { type: "string", description: "One sentence on why this type" },
+      specialized_kind: {
+        type: ["string", "null"],
+        enum: [...SPECIALIZED_KINDS, null],
+        description:
+          "Set when the document is really a lease (farm or hunting lease agreement), a timber sale contract, a timber settlement / load summary from a logger or mill, a property tax statement or bill, or a rent or crop share check / payment statement. These have their own intake flows. Null otherwise.",
+      },
+      property_hints: (CLASSIFY_TOOL.input_schema as { properties: Record<string, unknown> }).properties.property_hints,
+      matched_properties: {
+        type: "array",
+        description:
+          "Which of the OWNER'S LISTED PROPERTIES (given in the prompt) this document concerns. Use listed names exactly. Each match must cite ONE signal and the exact value on the page that drove it. Empty when nothing ties the document to a listed property.",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "One of the listed property names, exactly" },
+            confidence: { type: "string", enum: ["high", "medium", "low"] },
+            signal: {
+              type: "string",
+              enum: ["parcel", "fsa", "name", "alias", "county"],
+              description: "parcel = a parcel number on the page matches one listed for the property; fsa = an FSA farm number matches; name = the property's name appears; alias = an owner/grantor/grantee name matches the property's entity or a listed alias; county = only the county matches",
+            },
+            value: { type: "string", description: "The exact value on the page that drove the match (the parcel number, farm number, or name as printed)" },
+            reason: { type: "string", description: "One short sentence" },
+          },
+          required: ["name", "confidence", "signal", "value", "reason"],
+          additionalProperties: false,
+        },
+      },
+      matched_entity: {
+        type: ["object", "null"],
+        description: "The owner's LISTED ENTITY (LLC, trust, person) the document concerns, when a party name on the page matches an entity name or alias. Null otherwise.",
+        properties: {
+          name: { type: "string", description: "One of the listed entity names, exactly" },
+          value: { type: "string", description: "The party name as printed on the page" },
+          reason: { type: "string" },
+        },
+        required: ["name", "value", "reason"],
+        additionalProperties: false,
+      },
+      fields: {
+        type: "object",
+        description: "Key fields for the chosen type. Fill only the keys that apply to doc_type; leave the rest null. Dates YYYY-MM-DD; names exactly as written.",
+        properties: {
+          grantor: nullable("string", "Deeds: grantor(s) exactly as written"),
+          grantee: nullable("string", "Deeds: grantee(s) exactly as written"),
+          execution_date: nullable("string", "Deeds: date signed"),
+          recording_date: nullable("string", "Deeds: date recorded"),
+          recording_ref: nullable("string", "Deeds, plats: book/page or instrument number as stamped"),
+          consideration: nullable("number", "Deeds: consideration in dollars if stated"),
+          county: nullable("string", "County of recording or of the land (without the word County)"),
+          state: nullable("string", "Two-letter state"),
+          parcel_refs: nullable("string", "Parcel / PIN numbers referenced, comma separated"),
+          legal_description: nullable("string", "Deeds, plats, descriptions: the FULL legal description VERBATIM, every call and exception"),
+          surveyor: nullable("string", "Plats: surveyor or firm and license number"),
+          survey_date: nullable("string", "Plats: survey date"),
+          stated_acres: nullable("number", "Plats, descriptions: acreage stated"),
+          insurer: nullable("string", "Title insurance: insurer or attorney/firm"),
+          policy_number: nullable("string", "Title insurance: policy or file number"),
+          policy_amount: nullable("number", "Title insurance: amount of insurance in dollars"),
+          policy_date: nullable("string", "Title insurance: policy or opinion date"),
+          exceptions: {
+            type: "array",
+            description: "Title insurance: Schedule B exceptions in order (empty for other types)",
+            items: {
+              type: "object",
+              properties: {
+                item: nullable("string", "Item number or letter"),
+                description: { type: "string", description: "The exception text, condensed but complete" },
+              },
+              required: ["item", "description"],
+              additionalProperties: false,
+            },
+          },
+          farms: (FSA_156EZ_TOOL.input_schema as { properties: Record<string, unknown> }).properties.farms,
+          tract: nullable("string", "Determinations: tract and farm numbers as printed"),
+          determination_codes: nullable("string", "Determinations: labels/codes with acres"),
+          determination_date: nullable("string", "Determinations: date"),
+          notes: nullable("string", "Determinations: anything the owner must act on"),
+          parties: nullable("string", "Other documents: parties or issuer"),
+          document_date: nullable("string", "Other documents: document date"),
+          amount: nullable("number", "Other documents: headline dollar amount"),
+          reference: nullable("string", "Other documents: policy, contract, or file number"),
+          summary: nullable("string", "Other documents: two or three sentences on what it is and what to track"),
+        },
+        required: [
+          "grantor", "grantee", "execution_date", "recording_date", "recording_ref", "consideration",
+          "county", "state", "parcel_refs", "legal_description", "surveyor", "survey_date",
+          "stated_acres", "insurer", "policy_number", "policy_amount", "policy_date", "exceptions",
+          "farms", "tract", "determination_codes", "determination_date", "notes", "parties",
+          "document_date", "amount", "reference", "summary",
+        ],
+        additionalProperties: false,
+      },
+      unsure_fields: unsure,
+    },
+    required: [
+      "doc_type", "confidence", "title", "reason", "specialized_kind", "property_hints",
+      "matched_properties", "matched_entity", "fields", "unsure_fields",
+    ],
+    additionalProperties: false,
+  },
+};
+
 export const VAULT_KINDS = [
+  "intake",
   "classify",
   "deed",
   "survey",
@@ -340,6 +466,7 @@ export const VAULT_KINDS = [
 export type VaultKind = (typeof VAULT_KINDS)[number];
 
 export const VAULT_TOOLS: Record<VaultKind, Anthropic.Tool> = {
+  intake: INTAKE_TOOL,
   classify: CLASSIFY_TOOL,
   deed: DEED_TOOL,
   survey: SURVEY_TOOL,
@@ -351,6 +478,8 @@ export const VAULT_TOOLS: Record<VaultKind, Anthropic.Tool> = {
 };
 
 export const VAULT_PROMPTS: Record<VaultKind, string> = {
+  intake:
+    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and suggest a short title. 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. List uncertain field names in unsure_fields.",
   classify:
     "Classify this document for a rural landowner's records. Look at the heading, the first page, and any recording stamps. Pick exactly one type; 'other' when nothing fits. Suggest a short title.",
   deed:

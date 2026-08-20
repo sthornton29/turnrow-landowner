@@ -6,6 +6,7 @@
 // Suggestions are pre-checked in the upload form only when confident;
 // the user always confirms. Unit-tested in documentMatch.test.ts.
 
+import { normalizeOwnerName, ownerSimilarity } from "./ownerNames";
 
 export interface PropertyHints {
   counties?: string[] | null;
@@ -43,6 +44,22 @@ export interface PropertySuggestion {
 export interface AiPropertyMatch {
   name: string;
   confidence: "high" | "medium" | "low" | string;
+  reason?: string | null;
+  // Intake claims cite the signal and the printed value that drove
+  // them, so verifyMatches can check each one against the org's data.
+  signal?: "parcel" | "fsa" | "name" | "alias" | "county" | string | null;
+  value?: string | null;
+}
+
+export interface MatchableEntity {
+  id: string;
+  name: string;
+  aliases: string[];
+}
+
+export interface AiEntityMatch {
+  name: string;
+  value?: string | null;
   reason?: string | null;
 }
 
@@ -233,4 +250,146 @@ export function bestGuess(suggestions: PropertySuggestion[]): PropertySuggestion
   const next = sorted[1];
   if (next && top.score - next.score < 15) return null;
   return top;
+}
+
+
+// ---------------------------------------------------------------------
+// Deterministic verification of the intake pass's association claims.
+// The model may SAY "parcel 12-03 matches River Place"; it is shown as
+// found only when that parcel really sits on River Place in our data.
+// A claim that fails verification is downgraded (reported, never
+// shown as a match), so a wrong guess never wears real confidence.
+// ---------------------------------------------------------------------
+
+export interface VerifiedMatches {
+  verified: PropertySuggestion[];
+  downgraded: Array<{ name: string; signal: string; reason: string }>;
+  entity: { entityId: string; why: string } | null;
+}
+
+const NAME_SIMILARITY = 0.75;
+
+function normName(s: string | null | undefined): string {
+  return normalizeOwnerName(s ?? "").normalized;
+}
+
+// Does a party name as printed match a property/entity name or alias?
+function partyMatches(printed: string, candidates: string[]): string | null {
+  const a = normName(printed);
+  if (!a) return null;
+  for (const c of candidates) {
+    const b = normName(c);
+    if (!b) continue;
+    if (a === b || ownerSimilarity(a, b) >= NAME_SIMILARITY) return c;
+  }
+  return null;
+}
+
+export function verifyMatches(
+  claims: AiPropertyMatch[] | null | undefined,
+  hints: PropertyHints | null | undefined,
+  properties: MatchableProperty[],
+  parcels: MatchableParcel[],
+  entities: MatchableEntity[] = [],
+  entityClaim: AiEntityMatch | null | undefined = null,
+  propertyEntity: Record<string, string | null> = {}
+): VerifiedMatches {
+  const verified = new Map<string, PropertySuggestion>();
+  const downgraded: VerifiedMatches["downgraded"] = [];
+  const counties = new Set((hints?.counties ?? []).map(normCounty).filter(Boolean));
+  const states = new Set((hints?.states ?? []).map(normState).filter(Boolean));
+  const pageNames = [
+    ...(hints?.owner_names ?? []),
+    ...(hints?.place_names ?? []),
+  ];
+  const pageParcels = new Set((hints?.parcel_numbers ?? []).map(parcelKey).filter(Boolean));
+  const pageFsa = new Set((hints?.fsa_farm_numbers ?? []).map(normFsa).filter(Boolean));
+
+  const uniqueInCounty = (p: MatchableProperty): boolean => {
+    const pc = normCounty(p.county);
+    if (!pc || !counties.has(pc)) return false;
+    const inCounty = properties.filter((q) => {
+      if (normCounty(q.county) !== pc) return false;
+      if (states.size === 0) return true;
+      const qs = normState(q.state);
+      return !qs || states.has(qs);
+    });
+    return inCounty.length === 1 && inCounty[0].id === p.id;
+  };
+
+  const add = (p: MatchableProperty, score: number, why: string) => {
+    const cur = verified.get(p.id);
+    if (cur) {
+      cur.score += score;
+      if (!cur.reasons.includes(why)) cur.reasons.push(why);
+    } else {
+      verified.set(p.id, { propertyId: p.id, score, reasons: [why] });
+    }
+  };
+
+  for (const claim of claims ?? []) {
+    if (!claim || typeof claim.name !== "string") continue;
+    const p = properties.find((x) => norm(x.name) === norm(claim.name));
+    const signal = String(claim.signal ?? "").toLowerCase();
+    const value = String(claim.value ?? "").trim();
+    const reason = (claim.reason ?? "").trim();
+    if (!p) {
+      downgraded.push({ name: claim.name, signal, reason: "Not one of your properties" });
+      continue;
+    }
+    if (signal === "parcel") {
+      const key = parcelKey(value);
+      const hit = key ? parcels.find((pc) => pc.property_id === p.id && parcelKey(pc.parcel_number) === key) : undefined;
+      // Fallback: any parcel number read off the page that sits on this property.
+      const hit2 = hit ?? parcels.find((pc) => pc.property_id === p.id && pageParcels.has(parcelKey(pc.parcel_number)));
+      if (hit2) add(p, SCORE.parcel + 20, `parcel ${hit2.parcel_number} matches ${p.name}`);
+      else downgraded.push({ name: p.name, signal, reason: `Parcel "${value || "?"}" is not recorded on ${p.name}` });
+      continue;
+    }
+    if (signal === "fsa") {
+      const f = normFsa(value);
+      const pFsa = (p.fsa_numbers ?? []).map(normFsa);
+      const hit = (f && pFsa.includes(f)) ? f : pFsa.find((x) => pageFsa.has(x));
+      if (hit) add(p, SCORE.fsa + 20, `FSA farm ${hit} is recorded on ${p.name}`);
+      else downgraded.push({ name: p.name, signal, reason: `FSA farm "${value || "?"}" is not recorded on ${p.name}` });
+      continue;
+    }
+    if (signal === "name") {
+      const text = [value, ...pageNames, hints?.legal_description_snippet ?? ""].join(" \n ");
+      if (nameMentioned(p.name, text)) add(p, CONFIDENT_SCORE + 5, `"${p.name}" is named in the document`);
+      else downgraded.push({ name: p.name, signal, reason: `"${p.name}" does not appear on the page` });
+      continue;
+    }
+    if (signal === "alias") {
+      const entId = propertyEntity[p.id] ?? null;
+      const ent = entId ? entities.find((e) => e.id === entId) : undefined;
+      const candidates = ent ? [ent.name, ...ent.aliases] : [];
+      const printed = value || "";
+      const hit = printed ? partyMatches(printed, candidates) : null;
+      const hit2 = hit ?? pageNames.map((n) => partyMatches(n, candidates)).find(Boolean) ?? null;
+      if (hit2 && ent) add(p, CONFIDENT_SCORE + 5, `${printed || "a party"} matches ${ent.name}, which holds ${p.name}`);
+      else downgraded.push({ name: p.name, signal, reason: `"${printed || "?"}" does not match the entity that holds ${p.name}` });
+      continue;
+    }
+    // county (or unknown signal): only the unique-in-county rule counts.
+    if (uniqueInCounty(p)) add(p, CONFIDENT_SCORE, `The only property in ${p.county} County`);
+    else downgraded.push({ name: p.name, signal: signal || "county", reason: reason || "County alone is not enough" });
+  }
+
+  // Entity: verified by entity name or alias against the printed party.
+  let entity: VerifiedMatches["entity"] = null;
+  if (entityClaim && typeof entityClaim.name === "string") {
+    const ent = entities.find((e) => norm(e.name) === norm(entityClaim.name));
+    if (ent) {
+      const printed = (entityClaim.value ?? "").trim();
+      const hit =
+        (printed ? partyMatches(printed, [ent.name, ...ent.aliases]) : null) ??
+        pageNames.map((n) => partyMatches(n, [ent.name, ...ent.aliases])).find(Boolean) ??
+        null;
+      if (hit) entity = { entityId: ent.id, why: `${printed || "A party"} matches ${hit === ent.name ? ent.name : `alias "${hit}" of ${ent.name}`}` };
+    }
+  }
+
+  const out = [...verified.values()].sort((a, b) => b.score - a.score || a.propertyId.localeCompare(b.propertyId));
+  return { verified: out, downgraded, entity };
 }

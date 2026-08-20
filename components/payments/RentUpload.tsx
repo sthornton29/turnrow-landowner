@@ -1,5 +1,8 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { takeHandoffFile } from "@/lib/fileHandoff";
+
 // "Upload rent received": check images and settlement PDFs in, reviewed
 // payment rows out. Extraction (claude-sonnet-4-6 via /api/extract
 // kind=payment) suggests the payer's tenant, that tenant's lease, and
@@ -203,6 +206,19 @@ export default function RentUpload({
     for (const line of proposal.lines) allocations[line.expectedId] = String(line.amount);
     return { ...item, allocations };
   }
+
+  const searchParams = useSearchParams();
+  const handoffKey = searchParams.get("handoff");
+  useEffect(() => {
+    if (!handoffKey) return;
+    takeHandoffFile(handoffKey).then((f) => {
+      if (!f) return;
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      handleFiles(dt.files);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffKey]);
 
   async function handleFiles(files: FileList | null) {
     if (!files) return;
