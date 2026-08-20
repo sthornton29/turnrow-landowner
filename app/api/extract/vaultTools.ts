@@ -11,6 +11,12 @@ const nullable = (type: "string" | "number" | "integer", description: string) =>
   description,
 });
 
+const strings = (description: string) => ({
+  type: "array" as const,
+  items: { type: "string" as const },
+  description,
+});
+
 const unsure = {
   type: "array" as const,
   items: { type: "string" as const },
@@ -28,8 +34,31 @@ export const CLASSIFY_TOOL: Anthropic.Tool = {
       confidence: { type: "string", enum: ["high", "medium", "low"] },
       title: nullable("string", "A short human title for the document, e.g. 'Warranty deed, Smith to Jones, 2014'"),
       reason: { type: "string", description: "One sentence on why" },
+      property_hints: {
+        type: "object",
+        description:
+          "Plain facts read off the page that help match the document to the owner's properties. Empty arrays when nothing is stated; never guess.",
+        properties: {
+          counties: strings("Counties named (without the word County)"),
+          states: strings("States named, two-letter when possible"),
+          parcel_numbers: strings("Parcel / PIN / tax map numbers exactly as printed"),
+          owner_names: strings("Owner, grantor, grantee, or insured names as printed"),
+          place_names: strings("Tract, farm, place, road, creek, or subdivision names mentioned"),
+          fsa_farm_numbers: strings("FSA farm numbers (and tract numbers) as printed"),
+          acres: nullable("number", "Total acres stated for the land described, if any"),
+          legal_description_snippet: nullable(
+            "string",
+            "The first 300 characters of the legal description, verbatim, if one appears"
+          ),
+        },
+        required: [
+          "counties", "states", "parcel_numbers", "owner_names", "place_names",
+          "fsa_farm_numbers", "acres", "legal_description_snippet",
+        ],
+        additionalProperties: false,
+      },
     },
-    required: ["doc_type", "confidence", "title", "reason"],
+    required: ["doc_type", "confidence", "title", "reason", "property_hints"],
     additionalProperties: false,
   },
 };

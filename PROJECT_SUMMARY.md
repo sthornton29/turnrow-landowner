@@ -9,8 +9,9 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
-1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql, and
-   0022_assistant.sql in Supabase, in that order, BEFORE the deploy
+1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
+   0022_assistant.sql, and 0023_document_properties.sql in Supabase,
+   in that order, BEFORE the deploy
    goes live (the Documents page reads documents.doc_type and the
    government payments pages read the fsa_* tables; a deploy without
    the migrations breaks those pages).
@@ -235,6 +236,29 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  MULTI-PROPERTY DOCUMENTS (migration 0023): document_properties
+  (org RLS, composite FK to properties, unique per document+property,
+  backfilled from every property-attached document) lists EVERY
+  property a document applies to; documents.entity_type/entity_id stay
+  the PRIMARY attachment (the first property chosen, or a non-property
+  record such as a lease or easement). The upload sheet on /documents
+  has two modes: AI upload (default; the classify call also returns
+  property_hints: counties, states, parcel numbers, owner and place
+  names, FSA farm numbers, acres, a legal description snippet, which
+  lib/documentMatch.ts scores against the org's properties and
+  parcels: parcel match +60, FSA farm +50, property name +30, county
+  +10 and state +2, acres within 10 percent +8; scores of 50 or more
+  are "confident" and pre-checked with an amber "Suggested from
+  document" tag and the reasons, weaker ones shown unchecked; unit
+  tested) and Manual upload (no AI call at all). Both use a property
+  multi-select (components/documents/PropertyMultiSelect.tsx, search
+  past eight properties) plus an optional specific record. Rows show
+  every linked property as chips with "Edit properties"; the property
+  filter and entity filter follow the links; a property page lists
+  documents attached directly or via links, uploads there can "Also
+  attach to other properties", and deleting a document linked to
+  other properties asks REMOVE (this property only; the primary
+  re-points to another linked property) or DELETE (the file, for all).
   DOCUMENT VAULT (migration 0020): doc_type text not null default
   'other' with a check over 27 types in seven groups (lib/documents.ts
   is the single source of truth, unit-tested against the SQL list):

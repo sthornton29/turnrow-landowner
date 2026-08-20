@@ -284,6 +284,16 @@ export interface DocumentRow {
   search_text: string | null;
 }
 
+// A document can apply to several properties (migration 0023);
+// documents.entity_type/entity_id stays the primary attachment.
+export interface DocumentPropertyRow {
+  id: string;
+  organization_id: string;
+  document_id: string;
+  property_id: string;
+  created_at: string;
+}
+
 // Every entity that can appear on the map or carry documents.
 export type EntityType =
   | "property"

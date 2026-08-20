@@ -12,10 +12,10 @@ export default async function DocumentsPage() {
   const { supabase, profile } = await requireOrg();
   const [
     docs, properties, parcels, fields, pastures, wetlands, stands, roads,
-    easements, assets, leases, sales, entities, tenants, taxStatements,
+    easements, assets, leases, sales, entities, tenants, taxStatements, links,
   ] = await Promise.all([
     supabase.from("documents").select("*").order("created_at", { ascending: false }),
-    supabase.from("properties").select("id, name, entity_id").order("name"),
+    supabase.from("properties").select("id, name, entity_id, county, state, fsa_numbers, acres").order("name"),
     supabase.from("parcels").select("id, parcel_number, property_id"),
     supabase.from("fields").select("id, name, property_id"),
     supabase.from("pastures").select("id, name, property_id"),
@@ -29,6 +29,7 @@ export default async function DocumentsPage() {
     supabase.from("entities").select("id, name").order("name"),
     supabase.from("tenants").select("id, name"),
     supabase.from("tax_statements").select("id, parcel_id, tax_year"),
+    supabase.from("document_properties").select("document_id, property_id"),
   ]);
 
   type Row = { id: string; name?: string | null; property_id?: string | null };
@@ -95,8 +96,24 @@ export default async function DocumentsPage() {
         id: p.id,
         name: p.name,
         entityId: p.entity_id ?? null,
+        county: p.county ?? null,
+        state: p.state ?? null,
       }))}
       entities={(entities.data ?? []).map((e) => ({ id: e.id, name: e.name }))}
+      links={(links.data ?? []) as Array<{ document_id: string; property_id: string }>}
+      matchProperties={(properties.data ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        county: p.county ?? null,
+        state: p.state ?? null,
+        fsa_numbers: (p.fsa_numbers as string[] | null) ?? null,
+        acres: p.acres === null || p.acres === undefined ? null : Number(p.acres),
+      }))}
+      matchParcels={(parcels.data ?? []).map((pc) => ({
+        id: pc.id,
+        property_id: pc.property_id,
+        parcel_number: pc.parcel_number,
+      }))}
     />
   );
 }

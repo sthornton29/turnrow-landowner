@@ -14,7 +14,15 @@ import {
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 import DocTypeChip from "./DocTypeChip";
 import ScanDocumentButton from "./ScanDocumentButton";
-import { classifyFile, uploadDocument, type ClassifySuggestion } from "./classify";
+import {
+  classifyFile,
+  deleteDocumentEverywhere,
+  removeDocumentFromProperty,
+  setDocumentProperties,
+  uploadDocument,
+  type ClassifySuggestion,
+} from "./classify";
+import PropertyMultiSelect, { type SelectableProperty } from "./PropertyMultiSelect";
 
 function isImage(doc: DocumentRow): boolean {
   return (doc.content_type ?? "").startsWith("image/");
@@ -68,7 +76,16 @@ export default function EntityDocuments({
 }) {
   const supabase = createClient();
   const [docs, setDocs] = useState<DocumentRow[]>([]);
+  // document id -> every property it is linked to (migration 0023).
+  const [linksByDoc, setLinksByDoc] = useState<Record<string, string[]>>({});
+  const [allProperties, setAllProperties] = useState<SelectableProperty[]>([]);
+  // Upload-time "also attach to other properties" selection (property pages).
+  const [alsoProps, setAlsoProps] = useState<string[]>([]);
+  const [alsoOpen, setAlsoOpen] = useState(false);
+  const [editingProps, setEditingProps] = useState<string | null>(null);
+  const [draftProps, setDraftProps] = useState<string[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const isProperty = entityType === "property";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Unconfirmed AI suggestions by document id.
@@ -83,7 +100,40 @@ export default function EntityDocuments({
       .eq("entity_type", entityType)
       .eq("entity_id", entityId)
       .order("created_at", { ascending: false });
-    const rows = (data as DocumentRow[]) ?? [];
+    let rows = (data as DocumentRow[]) ?? [];
+    if (isProperty) {
+      // Documents linked to this property through document_properties
+      // (primary attachment elsewhere), merged and deduped.
+      const { data: linkRows } = await supabase
+        .from("document_properties")
+        .select("document_id")
+        .eq("property_id", entityId);
+      const ids = (linkRows ?? []).map((l) => l.document_id as string).filter((id) => !rows.some((r) => r.id === id));
+      if (ids.length > 0) {
+        const { data: more } = await supabase.from("documents").select("*").in("id", ids);
+        rows = [...rows, ...((more as DocumentRow[]) ?? [])].sort((a, b) =>
+          b.created_at.localeCompare(a.created_at)
+        );
+      }
+      const docIds = rows.map((r) => r.id);
+      const [{ data: allLinks }, { data: props }] = await Promise.all([
+        docIds.length > 0
+          ? supabase.from("document_properties").select("document_id, property_id").in("document_id", docIds)
+          : Promise.resolve({ data: [] as Array<{ document_id: string; property_id: string }> }),
+        supabase.from("properties").select("id, name, county, state").order("name"),
+      ]);
+      const byDoc: Record<string, string[]> = {};
+      for (const l of (allLinks ?? []) as Array<{ document_id: string; property_id: string }>) {
+        byDoc[l.document_id] = [...(byDoc[l.document_id] ?? []), l.property_id];
+      }
+      for (const r of rows) {
+        const set = new Set(byDoc[r.id] ?? []);
+        if (r.entity_type === "property") set.add(r.entity_id);
+        byDoc[r.id] = [...set];
+      }
+      setLinksByDoc(byDoc);
+      setAllProperties((props as SelectableProperty[]) ?? []);
+    }
     setDocs(rows);
 
     // Signed thumbnails for images (bucket is private)
@@ -100,7 +150,7 @@ export default function EntityDocuments({
     } else {
       setThumbs({});
     }
-  }, [supabase, entityType, entityId]);
+  }, [supabase, entityType, entityId, isProperty]);
 
   useEffect(() => {
     load();
@@ -122,6 +172,7 @@ export default function EntityDocuments({
         docType: "other",
         title: suggestion?.title ?? null,
         aiSuggestedType: suggestion?.doc_type ?? null,
+        propertyIds: isProperty ? alsoProps : [],
       });
       if ("error" in result) {
         setError(result.error);
@@ -134,6 +185,20 @@ export default function EntityDocuments({
     setBusy(false);
     if (photoInputRef.current) photoInputRef.current.value = "";
     if (fileInputRef.current) fileInputRef.current.value = "";
+    setAlsoProps([]);
+    setAlsoOpen(false);
+    load();
+  }
+
+  async function saveProps(doc: DocumentRow) {
+    setError(null);
+    if (draftProps.length === 0) {
+      setError("Keep at least one property, or delete the document.");
+      return;
+    }
+    const err = await setDocumentProperties(supabase, doc, draftProps);
+    if (err) setError("Could not change the properties. " + err);
+    setEditingProps(null);
     load();
   }
 
@@ -159,9 +224,31 @@ export default function EntityDocuments({
   }
 
   async function remove(doc: DocumentRow) {
+    const linked = linksByDoc[doc.id] ?? [];
+    const others = isProperty ? linked.filter((p) => p !== entityId) : [];
+    if (others.length > 0) {
+      // Linked to other properties too: remove here, or delete for all.
+      const choice = window.prompt(
+        `${doc.file_name} is also attached to ${others.length} other propert${others.length === 1 ? "y" : "ies"}.\n` +
+          `Type REMOVE to take it off this property only, or DELETE to delete the file for all ${linked.length} properties.`,
+        "REMOVE"
+      );
+      if (!choice) return;
+      if (choice.trim().toUpperCase() === "DELETE") {
+        const err = await deleteDocumentEverywhere(supabase, doc);
+        if (err) setError("Could not delete. " + err);
+      } else if (choice.trim().toUpperCase() === "REMOVE") {
+        const err = await removeDocumentFromProperty(supabase, doc, entityId, linked);
+        if (err) setError("Could not remove. " + err);
+      } else {
+        return;
+      }
+      load();
+      return;
+    }
     if (!window.confirm(`Delete ${doc.file_name}?`)) return;
-    await supabase.storage.from("documents").remove([doc.storage_path]);
-    await supabase.from("documents").delete().eq("id", doc.id);
+    const err = await deleteDocumentEverywhere(supabase, doc);
+    if (err) setError("Could not delete. " + err);
     load();
   }
 
@@ -206,7 +293,30 @@ export default function EntityDocuments({
             Uploading and reading the type...
           </span>
         ) : null}
+        {isProperty && allProperties.length > 1 ? (
+          <button
+            onClick={() => setAlsoOpen((v) => !v)}
+            className="self-center text-xs font-medium text-kelly-700 hover:underline"
+          >
+            {alsoProps.length > 0
+              ? `Also attaching to ${alsoProps.length} other propert${alsoProps.length === 1 ? "y" : "ies"}`
+              : "Also attach to other properties"}
+          </button>
+        ) : null}
       </div>
+      {isProperty && alsoOpen ? (
+        <div className="max-w-md rounded-lg border border-gray-200 bg-gray-50 p-2">
+          <p className="mb-1 text-xs text-gray-600">
+            The next upload attaches to this property and every property checked here.
+          </p>
+          <PropertyMultiSelect
+            properties={allProperties.filter((p) => p.id !== entityId)}
+            selected={alsoProps}
+            onChange={setAlsoProps}
+            compact
+          />
+        </div>
+      ) : null}
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
@@ -283,6 +393,61 @@ export default function EntityDocuments({
                     >
                       Accept
                     </button>
+                  </div>
+                ) : null}
+                {isProperty && (linksByDoc[doc.id]?.length ?? 0) > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    {(linksByDoc[doc.id] ?? []).map((pid) => (
+                      <Link
+                        key={pid}
+                        href={`/properties/${pid}`}
+                        className={
+                          "rounded-full px-2 py-0.5 font-medium " +
+                          (pid === entityId
+                            ? "bg-kelly-100 text-pine-900"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200")
+                        }
+                      >
+                        {allProperties.find((p) => p.id === pid)?.name ?? "Property"}
+                      </Link>
+                    ))}
+                    <button
+                      onClick={() => {
+                        if (editingProps === doc.id) {
+                          setEditingProps(null);
+                        } else {
+                          setDraftProps(linksByDoc[doc.id] ?? []);
+                          setEditingProps(doc.id);
+                        }
+                      }}
+                      className="font-medium text-kelly-700 hover:underline"
+                    >
+                      {editingProps === doc.id ? "Close" : "Edit properties"}
+                    </button>
+                  </div>
+                ) : null}
+                {editingProps === doc.id ? (
+                  <div className="max-w-md space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 p-2">
+                    <PropertyMultiSelect
+                      properties={allProperties}
+                      selected={draftProps}
+                      onChange={setDraftProps}
+                      compact
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => saveProps(doc)}
+                        className="rounded bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+                      >
+                        Save properties
+                      </button>
+                      <button
+                        onClick={() => setEditingProps(null)}
+                        className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-white"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center gap-3">

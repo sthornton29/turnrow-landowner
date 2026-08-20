@@ -640,7 +640,7 @@ export async function POST(request: Request) {
     try {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
-        max_tokens: vaultKind === "classify" ? 1024 : 8192,
+        max_tokens: vaultKind === "classify" ? 1536 : 8192,
         tools: [vtool],
         tool_choice: { type: "tool", name: vtool.name },
         messages: [
