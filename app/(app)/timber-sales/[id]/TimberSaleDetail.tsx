@@ -340,7 +340,7 @@ export default function TimberSaleDetail({
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div>
         <Link href="/timber-sales" className="text-sm text-gray-500 hover:underline">
           &larr; Timber sales

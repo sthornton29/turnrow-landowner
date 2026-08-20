@@ -43,7 +43,7 @@ export default async function SettingsPage() {
     ]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-8 p-4 md:p-6">
       <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
 
       {/* ------------------------------------------------------ Members */}

@@ -16,7 +16,7 @@ export default async function RetypePage() {
     .eq("doc_type", "other")
     .order("created_at", { ascending: false });
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <p className="text-sm text-gray-500">
         <Link href="/documents" className="hover:underline">&larr; Documents</Link>
       </p>

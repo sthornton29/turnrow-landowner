@@ -36,7 +36,7 @@ export default async function RoadSummaryPage({
     .single();
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
       <SummaryHeader
         typeLabel={road.road_type ? ROAD_TYPE_LABELS[road.road_type] : "Road"}
         name={road.name}

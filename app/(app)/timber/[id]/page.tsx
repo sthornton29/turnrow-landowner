@@ -122,7 +122,7 @@ export default async function TimberStandSummaryPage({
   );
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
       <SummaryHeader
         typeLabel={
           stand.stand_type

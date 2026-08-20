@@ -244,7 +244,7 @@ export default function AdminGisClient({
   }
 
   return (
-    <div className={embedded ? "space-y-5" : "mx-auto max-w-4xl space-y-5 p-4 md:p-6"}>
+    <div className={embedded ? "space-y-5" : "mx-auto max-w-5xl space-y-5 p-4 md:p-6"}>
       <div>
         {embedded ? null : (
           <h1 className="text-xl font-semibold text-gray-900">County GIS services</h1>

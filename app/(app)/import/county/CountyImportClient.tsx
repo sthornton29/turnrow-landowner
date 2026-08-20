@@ -720,7 +720,7 @@ export default function CountyImportClient({
 
   if (services.length === 0) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+      <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
         <h1 className="text-xl font-semibold text-gray-900">
           Import from county records
         </h1>

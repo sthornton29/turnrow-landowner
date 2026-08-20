@@ -573,7 +573,7 @@ export default function PlotClient({
   const canContinueFrom2 = !!plotted;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <p className="flex flex-wrap items-center gap-1 text-sm text-gray-500">
         <Link href="/documents" className="hover:underline">Documents</Link>
         <span>/</span>

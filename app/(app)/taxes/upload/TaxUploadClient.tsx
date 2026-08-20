@@ -274,7 +274,7 @@ export default function TaxUploadClient({
     isUnsure(item, key) ? " border-amber-400 ring-2 ring-amber-100" : "";
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <div>
         <Link href="/taxes" className="text-sm text-gray-500 hover:underline">
           &larr; Taxes
