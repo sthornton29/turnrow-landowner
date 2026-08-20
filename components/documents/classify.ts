@@ -83,6 +83,56 @@ export function largeFileWarning(file: File | null | undefined): string | null {
   return `${file.name} is ${mb} MB. It will upload, but scans read long PDFs in parts and classification looks at the first 20 pages; splitting packets under about 100 pages gives the best results.`;
 }
 
+// Files over 6 MB go through Supabase's RESUMABLE upload protocol (tus,
+// 6 MB chunks), which is what Storage expects for large objects; the
+// plain upload call stays for small files. Returns an error message or
+// null.
+const RESUMABLE_THRESHOLD = 6 * 1024 * 1024;
+
+export async function uploadToStorage(
+  supabase: SupabaseClient,
+  path: string,
+  file: File
+): Promise<string | null> {
+  if (file.size <= RESUMABLE_THRESHOLD) {
+    const { error } = await supabase.storage
+      .from("documents")
+      .upload(path, file, { contentType: file.type || undefined });
+    return error ? error.message : null;
+  }
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) return "Not signed in.";
+  const { Upload } = await import("tus-js-client");
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  return new Promise<string | null>((resolve) => {
+    const upload = new Upload(file, {
+      endpoint: `${base}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${token}`,
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+        "x-upsert": "false",
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      metadata: {
+        bucketName: "documents",
+        objectName: path,
+        contentType: file.type || "application/octet-stream",
+        cacheControl: "3600",
+      },
+      chunkSize: RESUMABLE_THRESHOLD, // Supabase requires exactly 6 MB chunks
+      onError: (err) => resolve(err.message || "Upload failed."),
+      onSuccess: () => resolve(null),
+    });
+    upload.findPreviousUploads().then((previous) => {
+      if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
+      upload.start();
+    });
+  });
+}
+
 export async function uploadDocument(
   supabase: SupabaseClient,
   args: {
@@ -99,10 +149,8 @@ export async function uploadDocument(
   }
 ): Promise<{ id: string } | { error: string }> {
   const path = `${args.orgId}/${args.entityType}/${crypto.randomUUID()}-${args.file.name}`;
-  const { error: upErr } = await supabase.storage
-    .from("documents")
-    .upload(path, args.file, { contentType: args.file.type || undefined });
-  if (upErr) return { error: uploadErrorCopy(args.file.name, upErr.message) };
+  const upErr = await uploadToStorage(supabase, path, args.file);
+  if (upErr) return { error: uploadErrorCopy(args.file.name, upErr) };
   const { data, error: insErr } = await supabase
     .from("documents")
     .insert({
