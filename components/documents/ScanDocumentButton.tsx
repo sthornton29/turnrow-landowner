@@ -90,16 +90,12 @@ export default function ScanDocumentButton({
     setBusy(true);
     setError(null);
     try {
-      const { data: signed, error: sErr } = await supabase.storage
-        .from("documents")
-        .createSignedUrl(doc.storage_path, 300);
-      if (sErr || !signed?.signedUrl) throw new Error("Could not open the file.");
-      const blob = await (await fetch(signed.signedUrl)).blob();
-      const file = new File([blob], doc.file_name, {
-        type: doc.content_type ?? blob.type,
-      });
+      // Scan by storage path: the server fetches the file itself, so
+      // large packets never pass through the request body limit.
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("storage_path", doc.storage_path);
+      fd.append("file_name", doc.file_name);
+      fd.append("content_type", doc.content_type ?? "application/pdf");
       fd.append("kind", kind);
       const res = await fetch("/api/extract", { method: "POST", body: fd });
       const body = (await res.json()) as { extraction?: Record<string, unknown>; error?: string };

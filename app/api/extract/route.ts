@@ -21,7 +21,8 @@ import {
 // so the Anthropic API key never reaches the browser. The extraction is
 // returned to the client for human review; nothing is saved here.
 
-export const maxDuration = 120;
+// Long FSA packets scan in several chunks; Vercel Pro allows up to 300 s.
+export const maxDuration = 300;
 
 const LEASE_TOOL: Anthropic.Tool = {
   name: "record_lease_extraction",
@@ -459,8 +460,24 @@ export async function POST(request: Request) {
   if (!limit.allowed) return rateLimited429("extract");
 
   const formData = await request.formData();
-  const file = formData.get("file");
+  let file = formData.get("file");
   const kind = String(formData.get("kind") ?? "lease");
+  // Already-stored documents are scanned BY PATH: the server pulls the
+  // file from storage under the caller's session (RLS applies), so a
+  // 60 MB packet never has to travel through the 4.5 MB request body
+  // limit of the function.
+  const storagePath = String(formData.get("storage_path") ?? "");
+  if (!(file instanceof File) && storagePath) {
+    const { data: blob, error: dlErr } = await supabase.storage
+      .from("documents")
+      .download(storagePath);
+    if (dlErr || !blob) {
+      return NextResponse.json({ error: "Could not read that file from storage." }, { status: 404 });
+    }
+    file = new File([blob], String(formData.get("file_name") ?? "document"), {
+      type: String(formData.get("content_type") ?? "") || blob.type || "application/pdf",
+    });
+  }
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
   }
