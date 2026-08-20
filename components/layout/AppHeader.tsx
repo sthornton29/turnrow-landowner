@@ -37,7 +37,7 @@ export default function AppHeader() {
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-gray-200 bg-white">
-      <div className="mx-auto flex h-full max-w-7xl items-center gap-4 px-4">
+      <div className="flex h-full w-full items-center gap-4 px-4">
         {/* Brand: the horizontal logo stands alone (T mark on mobile).
             Tapping it goes home, which is the map now. */}
         <Link href="/map" className="flex shrink-0 items-center">
