@@ -74,7 +74,7 @@ describe("document taxonomy", () => {
   it("review forms carry table columns where tables are declared", () => {
     for (const fields of Object.values(EXTRACTED_FIELDS)) {
       for (const f of fields) {
-        if (f.input === "table") expect(f.columns?.length).toBeGreaterThan(0);
+        if (f.input === "table" || f.input === "farms") expect(f.columns?.length).toBeGreaterThan(0);
         else expect(f.columns).toBeUndefined();
       }
     }
@@ -103,6 +103,14 @@ describe("extracted highlights", () => {
         base_acres: [{ commodity: "Corn", base_acres: 100.5 }, { commodity: "Soybeans", base_acres: 50 }],
       })
     ).toEqual(["Farm: 1234", "310.0 cropland acres", "150.5 base acres (2 commodities)"]);
+    expect(
+      extractedHighlights("fsa_156ez", {
+        farms: [
+          { farm_number: "1234", base_acres: [{ commodity: "Corn", base_acres: 100 }] },
+          { farm_number: "1235", base_acres: [{ commodity: "Wheat", base_acres: 20.5 }] },
+        ],
+      })
+    ).toEqual(["2 farms: 1234, 1235", "120.5 base acres (2 commodities)"]);
   });
 
   it("returns nothing for empty extractions and skips blank values", () => {

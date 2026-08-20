@@ -155,34 +155,50 @@ export const TITLE_INSURANCE_TOOL: Anthropic.Tool = {
 export const FSA_156EZ_TOOL: Anthropic.Tool = {
   name: "record_fsa_156ez_extraction",
   description:
-    "Record an FSA-156EZ (Abbreviated 156 Farm Record): farm number, county, tracts, acres, and the base acres table. Use null for anything not shown.",
+    "Record every farm in an FSA-156EZ (Abbreviated 156 Farm Record) document or packet: one entry per distinct farm number with its county, tracts, acres, and base acres table. Use null for anything not shown.",
   input_schema: {
     type: "object",
     properties: {
-      farm_number: nullable("string", "FSA farm number exactly as printed"),
-      county: nullable("string", "Administrative county (without the word County)"),
-      state: nullable("string", "Two-letter state"),
-      tract_numbers: nullable("string", "Tract numbers, comma separated"),
-      farmland_acres: nullable("number", "Farmland acres"),
-      cropland_acres: nullable("number", "Cropland acres"),
-      dcp_cropland_acres: nullable("number", "DCP cropland acres"),
-      base_acres: {
+      farms: {
         type: "array",
-        description: "One row per crop in the base acres table (farm level, not per tract, when both appear)",
+        description:
+          "One entry per DISTINCT farm number in the pages provided. A packet prints one farm per page group; merge the pages of the same farm into one entry. Never invent a farm.",
         items: {
           type: "object",
           properties: {
-            commodity: { type: "string", description: "Crop name as printed, e.g. CORN, SOYBEANS, WHEAT, SEED COTTON, PEANUTS" },
-            base_acres: nullable("number", "Base acres"),
-            plc_yield: nullable("number", "PLC yield"),
+            farm_number: nullable("string", "FSA farm number exactly as printed"),
+            county: nullable("string", "Administrative county (without the word County)"),
+            state: nullable("string", "Two-letter state"),
+            tract_numbers: nullable("string", "Tract numbers, comma separated"),
+            farmland_acres: nullable("number", "Farmland acres"),
+            cropland_acres: nullable("number", "Cropland acres"),
+            dcp_cropland_acres: nullable("number", "DCP cropland acres"),
+            base_acres: {
+              type: "array",
+              description: "One row per crop in the farm-level base acres table (farm level, not per tract, when both appear)",
+              items: {
+                type: "object",
+                properties: {
+                  commodity: { type: "string", description: "Crop name as printed, e.g. CORN, SOYBEANS, WHEAT, SEED COTTON, PEANUTS" },
+                  base_acres: nullable("number", "Base acres"),
+                  plc_yield: nullable("number", "PLC yield"),
+                },
+                required: ["commodity", "base_acres", "plc_yield"],
+                additionalProperties: false,
+              },
+            },
+            page_hint: nullable("string", "Which pages this farm appeared on, e.g. 'pages 3-4'"),
           },
-          required: ["commodity", "base_acres", "plc_yield"],
+          required: [
+            "farm_number", "county", "state", "tract_numbers", "farmland_acres",
+            "cropland_acres", "dcp_cropland_acres", "base_acres", "page_hint",
+          ],
           additionalProperties: false,
         },
       },
       unsure_fields: unsure,
     },
-    required: ["base_acres", "unsure_fields"],
+    required: ["farms", "unsure_fields"],
     additionalProperties: false,
   },
 };
@@ -344,7 +360,7 @@ export const VAULT_PROMPTS: Record<VaultKind, string> = {
   title_insurance:
     "Extract this title insurance policy or title opinion. Record the insurer, amount, date, and EVERY Schedule B exception in order, keeping recording references. Use null for anything absent. List every field you are unsure about in unsure_fields.",
   fsa_156ez:
-    "Extract this FSA-156EZ farm record. Record the farm number, county, tract numbers, farmland/cropland/DCP cropland acres, and the farm-level base acres table with PLC yields exactly as printed. Use null for anything absent. List every field you are unsure about in unsure_fields.",
+    "Extract EVERY farm in these FSA-156EZ pages (a packet holds several farms, one per page group; pages of the same farm number belong to one entry). For each farm record the farm number, county, tract numbers, farmland/cropland/DCP cropland acres, and the farm-level base acres table with PLC yields exactly as printed. Use null for anything absent. Name unsure fields as farms[i].field in unsure_fields.",
   determination:
     "Extract this wetland or highly erodible land determination. Record the tract, the determination codes with their acres, the date, and anything the owner must act on. Use null for anything absent. List every field you are unsure about in unsure_fields.",
   generic:

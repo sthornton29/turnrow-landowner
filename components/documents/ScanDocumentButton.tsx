@@ -7,8 +7,8 @@ import type { DocumentRow } from "@/types/db";
 import Link from "next/link";
 import DocumentReview, { ExtractedSummary } from "./DocumentReview";
 import {
-  createOrUpdateFarmFromExtraction,
-  type Fsa156Extraction,
+  createOrUpdateFarmsFromExtraction,
+  normalizeFsaExtraction,
 } from "@/lib/gov/fsaImport";
 
 // "Scan this document": fetches the stored file, runs the per-type
@@ -38,40 +38,48 @@ export default function ScanDocumentButton({
   async function handleConfirmed(scanKind: ScanKind, extracted: Record<string, unknown>) {
     onConfirmed?.(scanKind, extracted);
     if (scanKind !== "fsa_156ez") return;
-    const farmNumber = String(extracted.farm_number ?? "").trim();
-    if (!farmNumber) {
+    const farms = normalizeFsaExtraction(extracted);
+    const numbers = farms.map((f) => String(f.farm_number ?? "").trim()).filter(Boolean);
+    if (numbers.length === 0) {
       setFarmResult("No farm number was read, so no FSA farm was created. Add it on Government Payments.");
       return;
     }
+    const label =
+      numbers.length === 1
+        ? `FSA farm ${numbers[0]}`
+        : `${numbers.length} FSA farms (${numbers.join(", ")})`;
     if (
       !window.confirm(
-        `Create or update FSA farm ${farmNumber} and its base acres from this scan? You can edit everything on Government Payments afterward.`
+        `Create or update ${label} and the base acres from this scan? You can edit everything on Government Payments afterward.`
       )
     ) {
       return;
     }
-    try {
-      const result = await createOrUpdateFarmFromExtraction(
-        supabase,
-        doc.organization_id,
-        extracted as unknown as Fsa156Extraction,
-        {
-          sourceDocumentId: doc.id,
-          propertyId: doc.entity_type === "property" ? doc.entity_id : undefined,
-        }
-      );
-      setFarmResult(
-        `${result.created ? "Created" : "Updated"} FSA farm ${farmNumber}: ${result.baseAcresWritten} base acre row${result.baseAcresWritten === 1 ? "" : "s"} written` +
-          (result.skippedCommodities.length > 0
-            ? `; could not match: ${result.skippedCommodities.join(", ")}`
-            : "") +
-          "."
-      );
-    } catch (e) {
-      setFarmResult(
-        "Could not save the FSA farm: " + (e instanceof Error ? e.message : "unknown error")
-      );
-    }
+    const { results, failures } = await createOrUpdateFarmsFromExtraction(
+      supabase,
+      doc.organization_id,
+      extracted,
+      {
+        sourceDocumentId: doc.id,
+        propertyId: doc.entity_type === "property" ? doc.entity_id : undefined,
+      }
+    );
+    const created = results.filter((r) => r.created).length;
+    const updated = results.length - created;
+    const rows = results.reduce((a, r) => a + r.baseAcresWritten, 0);
+    const skipped = [...new Set(results.flatMap((r) => r.skippedCommodities))];
+    const parts = [
+      created > 0 ? `created ${created}` : null,
+      updated > 0 ? `updated ${updated}` : null,
+    ].filter(Boolean);
+    setFarmResult(
+      `FSA farms ${parts.join(", ") || "unchanged"}; ${rows} base acre row${rows === 1 ? "" : "s"} written` +
+        (skipped.length > 0 ? `; could not match: ${skipped.join(", ")}` : "") +
+        (failures.length > 0
+          ? `; failed: ${failures.map((f) => `${f.farmNumber} (${f.error})`).join(", ")}`
+          : "") +
+        "."
+    );
   }
 
   const existing = (doc.extracted ?? null) as Record<string, unknown> | null;

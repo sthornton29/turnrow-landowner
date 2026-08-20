@@ -11,7 +11,7 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
    0022_assistant.sql, 0023_document_properties.sql, and
-   0024_unfiled_documents.sql in Supabase,
+   0024_unfiled_documents.sql, then 0025_storage_limits.sql (documents bucket to 200 MB; also raise the project-wide Storage upload limit in the dashboard) in Supabase,
    in that order, BEFORE the deploy
    goes live (the Documents page reads documents.doc_type and the
    government payments pages read the fsa_* tables; a deploy without
@@ -237,7 +237,20 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
-  UNFILED DOCUMENTS (migration 0024): documents.entity_type gains
+  LARGE DOCUMENTS AND 156EZ PACKETS (migration 0025): the documents
+  bucket accepts 200 MB files (the dashboard's project-wide limit still
+  applies); a storage-limit failure shows a fix-it message and files
+  over 30 MB get a non-blocking heads-up. /api/extract accepts PDFs up
+  to 100 MB and splits long ones with pdf-lib (app/api/extract/
+  pdfChunks.ts): classification reads the first 20 pages, single-record
+  scans the first 90 (pages_scanned/total_pages recorded and an unsure
+  note when truncated), and FSA-156EZ reads EVERY 90-page chunk (two at
+  a time) and merges farms by farm number (mergeFsaExtractions in
+  lib/gov/fsaImport.ts, unit tested). The 156EZ extraction is now
+  { farms: [...] } (one entry per distinct farm; legacy single-farm
+  extractions still read); the review shows one card per farm with its
+  base acres grid, and confirming offers to create or update every farm
+  at once. UNFILED DOCUMENTS (migration 0024): documents.entity_type gains
   'organization' (entity_id = the organization id): an upload never
   has to name a property first. The classify call now also receives
   the owner's property list (names, counties, parcel and FSA numbers,

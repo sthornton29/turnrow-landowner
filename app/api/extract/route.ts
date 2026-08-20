@@ -8,6 +8,8 @@ import {
   type SettlementColumnMap,
 } from "@/lib/timberSettlement";
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
+import { firstPages, pageCount, splitPdf } from "./pdfChunks";
+import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
 import {
   VAULT_KINDS,
   VAULT_PROMPTS,
@@ -502,8 +504,15 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (file.size > 30 * 1024 * 1024) {
-    return NextResponse.json({ error: "File is too large (30 MB max)." }, { status: 400 });
+  // PDFs may be long scans (a 156EZ packet, a deed book run); the vault
+  // branch splits them into page chunks. Photos and spreadsheets stay
+  // at 30 MB.
+  const sizeCap = isPdf && isVaultKind ? 100 * 1024 * 1024 : 30 * 1024 * 1024;
+  if (file.size > sizeCap) {
+    return NextResponse.json(
+      { error: isPdf && isVaultKind ? "File is too large (100 MB max). Split the PDF and scan the parts." : "File is too large (30 MB max)." },
+      { status: 400 }
+    );
   }
 
   const client = new Anthropic();
@@ -625,22 +634,23 @@ export async function POST(request: Request) {
     }
   }
 
-  const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+  const fileBytes = Buffer.from(await file.arrayBuffer());
+  const base64 = fileBytes.toString("base64");
 
   // Document vault kinds: classification, per-type extraction, and the
   // legal description parse. Same forced-tool contract; upstream error
-  // text is logged, never echoed to the browser.
+  // text is logged, never echoed to the browser. Long PDFs are split
+  // into page chunks (pdfChunks.ts): classification reads the first 20
+  // pages, single-record scans the first 90 (and say so), and 156EZ
+  // packets read EVERY chunk and merge farms by farm number.
   if (isVaultKind) {
     const vaultKind = kind as VaultKind;
     const vtool = VAULT_TOOLS[vaultKind];
-    const vblock: Anthropic.ContentBlockParam = isPdf
-      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
-      : { type: "image", source: { type: "base64",
-          media_type: file.type as (typeof IMAGE_TYPES)[number], data: base64 } };
-    // Classification may carry the owner's property list (name, county,
-    // state, parcel and FSA numbers, acres) so the model can name which
-    // of THOSE properties the document concerns; capped and re-serialized
-    // server-side so nothing unexpected reaches the prompt.
+    const blockFor = (bytes: Buffer): Anthropic.ContentBlockParam =>
+      isPdf
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: bytes.toString("base64") } }
+        : { type: "image", source: { type: "base64",
+            media_type: file.type as (typeof IMAGE_TYPES)[number], data: base64 } };
     let promptText = VAULT_PROMPTS[vaultKind];
     if (vaultKind === "classify") {
       const rawContext = formData.get("context");
@@ -676,27 +686,70 @@ export async function POST(request: Request) {
         }
       }
     }
-    try {
+    const runTool = async (bytes: Buffer, text: string): Promise<Record<string, unknown>> => {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: vaultKind === "classify" ? 1536 : 8192,
         tools: [vtool],
         tool_choice: { type: "tool", name: vtool.name },
-        messages: [
-          { role: "user", content: [vblock, { type: "text", text: promptText }] },
-        ],
+        messages: [{ role: "user", content: [blockFor(bytes), { type: "text", text }] }],
       });
       const toolUse = response.content.find(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
       );
-      if (!toolUse) {
+      if (!toolUse) throw new Error("no tool use");
+      return toolUse.input as Record<string, unknown>;
+    };
+    try {
+      let extraction: Record<string, unknown>;
+      if (!isPdf) {
+        extraction = await runTool(fileBytes, promptText);
+      } else if (vaultKind === "classify") {
+        const first = await firstPages(fileBytes, 20);
+        extraction = await runTool(first.bytes, promptText);
+        extraction.pages_scanned = first.pages;
+        extraction.total_pages = first.total;
+      } else if (vaultKind === "fsa_156ez") {
+        const chunks = await splitPdf(fileBytes, { maxPages: 90, maxBytes: 25 * 1024 * 1024 });
+        const total = await pageCount(fileBytes);
+        const results: Array<Record<string, unknown>> = new Array(chunks.length);
+        let next = 0;
+        const worker = async () => {
+          while (next < chunks.length) {
+            const i = next++;
+            const r = await runTool(
+              chunks[i],
+              promptText + (chunks.length > 1 ? ` (These are pages of part ${i + 1} of ${chunks.length} of one packet.)` : "")
+            );
+            r.pages_scanned = Math.ceil(total / chunks.length);
+            r.total_pages = total;
+            results[i] = r;
+          }
+        };
+        await Promise.all([worker(), worker()]);
+        extraction = mergeFsaExtractions(results) as unknown as Record<string, unknown>;
+        extraction.pages_scanned = total;
+        extraction.total_pages = total;
+        extraction.chunks = chunks.length;
+      } else {
+        const first = await firstPages(fileBytes, 90);
+        extraction = await runTool(first.bytes, promptText);
+        extraction.pages_scanned = first.pages;
+        extraction.total_pages = first.total;
+        if (first.total > first.pages) {
+          const unsure = Array.isArray(extraction.unsure_fields) ? (extraction.unsure_fields as unknown[]).map(String) : [];
+          unsure.push(`Only the first ${first.pages} of ${first.total} pages were read`);
+          extraction.unsure_fields = unsure;
+        }
+      }
+      return NextResponse.json({ extraction, kind: vaultKind });
+    } catch (err) {
+      if (err instanceof Error && err.message === "no tool use") {
         return NextResponse.json(
           { error: "The model did not return an extraction. Try again or enter the details by hand." },
           { status: 502 }
         );
       }
-      return NextResponse.json({ extraction: toolUse.input, kind: vaultKind });
-    } catch (err) {
       const status = err instanceof Anthropic.APIError ? err.status : undefined;
       console.error("extract vault kind failed", vaultKind, status, err instanceof Error ? err.message : err);
       return NextResponse.json(

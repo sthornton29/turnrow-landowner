@@ -32,6 +32,7 @@ import {
   openDocument,
   setDocumentProperties,
   uploadDocument,
+  largeFileWarning,
   type ClassifySuggestion,
 } from "@/components/documents/classify";
 
@@ -630,6 +631,9 @@ function UploadSheet({
           </div>
           {mode === "manual" ? (
             <p className="text-xs text-gray-500">Manual upload: the file is not read by AI.</p>
+          ) : null}
+          {largeFileWarning(file) ? (
+            <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">{largeFileWarning(file)}</p>
           ) : null}
           {classifying ? (
             <p className="text-xs text-gray-500">Reading the document to suggest a type and properties...</p>

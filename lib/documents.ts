@@ -1,3 +1,4 @@
+import { normalizeFsaExtraction } from "@/lib/gov/fsaImport";
 import { formatAcres, formatDollars } from "@/lib/format";
 
 // Single source of truth for the document vault: the doc_type taxonomy
@@ -185,7 +186,7 @@ export function canPlotBoundary(docType: DocType): boolean {
 export interface ExtractedFieldDef {
   key: string;
   label: string;
-  input: "text" | "number" | "date" | "textarea" | "table";
+  input: "text" | "number" | "date" | "textarea" | "table" | "farms";
   columns?: Array<{ key: string; label: string }>;
 }
 
@@ -227,17 +228,12 @@ export const EXTRACTED_FIELDS: Record<ScanKind, ExtractedFieldDef[]> = {
     },
   ],
   fsa_156ez: [
-    { key: "farm_number", label: "FSA farm number", input: "text" },
-    { key: "county", label: "County", input: "text" },
-    { key: "state", label: "State", input: "text" },
-    { key: "tract_numbers", label: "Tract numbers", input: "text" },
-    { key: "farmland_acres", label: "Farmland acres", input: "number" },
-    { key: "cropland_acres", label: "Cropland acres", input: "number" },
-    { key: "dcp_cropland_acres", label: "DCP cropland acres", input: "number" },
+    // A 156EZ document or packet holds one or more farms; the review
+    // renders one card per farm (scalars + its base acres grid).
     {
-      key: "base_acres",
-      label: "Base acres",
-      input: "table",
+      key: "farms",
+      label: "Farms in this document",
+      input: "farms",
       columns: [
         { key: "commodity", label: "Commodity" },
         { key: "base_acres", label: "Base acres" },
@@ -313,18 +309,24 @@ export function extractedHighlights(
       break;
     }
     case "fsa_156ez": {
-      push("Farm", str(extracted.farm_number));
-      const crop = num(extracted.cropland_acres);
-      if (crop !== null) out.push(`${formatAcres(crop)} cropland acres`);
-      const base = Array.isArray(extracted.base_acres) ? extracted.base_acres : [];
-      const total = base.reduce(
-        (sum: number, r: unknown) =>
-          sum + (num((r as Record<string, unknown>)?.base_acres) ?? 0),
-        0
-      );
-      if (base.length > 0) {
-        out.push(`${formatAcres(total)} base acres (${base.length} commodit${base.length === 1 ? "y" : "ies"})`);
+      const farms = normalizeFsaExtraction(extracted);
+      const numbers = farms.map((f) => String(f.farm_number ?? "").trim()).filter(Boolean);
+      if (farms.length > 1) {
+        out.push(`${farms.length} farms: ${numbers.slice(0, 6).join(", ")}${numbers.length > 6 ? "..." : ""}`);
+      } else {
+        push("Farm", numbers[0] ?? null);
+        const crop = num(farms[0]?.cropland_acres);
+        if (crop !== null) out.push(`${formatAcres(crop)} cropland acres`);
       }
+      let total = 0;
+      let rows = 0;
+      for (const f of farms) {
+        for (const r of f.base_acres ?? []) {
+          total += num(r.base_acres) ?? 0;
+          rows += 1;
+        }
+      }
+      if (rows > 0) out.push(`${formatAcres(total)} base acres (${rows} commodit${rows === 1 ? "y" : "ies"})`);
       break;
     }
     case "determination": {

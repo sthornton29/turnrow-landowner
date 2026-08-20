@@ -20,6 +20,7 @@ import {
   removeDocumentFromProperty,
   setDocumentProperties,
   uploadDocument,
+  largeFileWarning,
   type ClassifySuggestion,
 } from "./classify";
 import PropertyMultiSelect, { type SelectableProperty } from "./PropertyMultiSelect";
@@ -88,6 +89,7 @@ export default function EntityDocuments({
   const isProperty = entityType === "property";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   // Unconfirmed AI suggestions by document id.
   const [suggestions, setSuggestions] = useState<Record<string, ClassifySuggestion>>({});
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +163,8 @@ export default function EntityDocuments({
     setBusy(true);
     setError(null);
     for (const file of Array.from(files)) {
+      const big = largeFileWarning(file);
+      if (big) setNotice(big);
       // Photos skip classification (they are photos); documents get a
       // suggestion that waits for the user.
       const suggestion = photos ? null : await classifyFile(file);
@@ -319,6 +323,7 @@ export default function EntityDocuments({
       ) : null}
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {notice ? <p className="text-xs text-amber-800">{notice}</p> : null}
 
       {photos.length > 0 ? (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">

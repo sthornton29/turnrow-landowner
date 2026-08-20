@@ -65,6 +65,24 @@ export async function classifyFile(
   }
 }
 
+// Storage-limit failures get a fix-it message instead of the raw error.
+export function uploadErrorCopy(fileName: string, message: string): string {
+  if (/exceeded the maximum allowed size/i.test(message) || /payload too large/i.test(message)) {
+    return `${fileName} is larger than the storage limit. Raise the limit in Supabase (Storage > Settings) or split the PDF; scans work best under 100 pages per file.`;
+  }
+  return `Could not upload ${fileName}: ${message}`;
+}
+
+const LARGE_FILE_BYTES = 30 * 1024 * 1024;
+
+// Non-blocking heads-up for big files (they upload; scans read them in
+// page chunks, and the first pages decide the classification).
+export function largeFileWarning(file: File | null | undefined): string | null {
+  if (!file || file.size <= LARGE_FILE_BYTES) return null;
+  const mb = Math.round(file.size / (1024 * 1024));
+  return `${file.name} is ${mb} MB. It will upload, but scans read long PDFs in parts and classification looks at the first 20 pages; splitting packets under about 100 pages gives the best results.`;
+}
+
 export async function uploadDocument(
   supabase: SupabaseClient,
   args: {
@@ -84,7 +102,7 @@ export async function uploadDocument(
   const { error: upErr } = await supabase.storage
     .from("documents")
     .upload(path, args.file, { contentType: args.file.type || undefined });
-  if (upErr) return { error: `Could not upload ${args.file.name}: ${upErr.message}` };
+  if (upErr) return { error: uploadErrorCopy(args.file.name, upErr.message) };
   const { data, error: insErr } = await supabase
     .from("documents")
     .insert({
