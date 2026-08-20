@@ -12,7 +12,10 @@ export interface ChunkOptions {
 }
 
 const DEFAULT_MAX_PAGES = 90;
-const DEFAULT_MAX_BYTES = 25 * 1024 * 1024;
+// Anthropic caps a request at 32 MB AFTER base64 (x1.33), so raw PDF
+// bytes per call stay under 18 MB.
+const DEFAULT_MAX_BYTES = 18 * 1024 * 1024;
+export const MODEL_PDF_MAX_BYTES = DEFAULT_MAX_BYTES;
 
 export async function pageCount(buffer: Buffer | Uint8Array): Promise<number> {
   const doc = await PDFDocument.load(buffer, { ignoreEncryption: true });
@@ -54,15 +57,25 @@ export async function splitPdf(
 }
 
 // First N pages only (classification, single-record scans).
+// First n pages, halving n until the slice fits the model's byte cap
+// (scanned packets run several MB per page).
 export async function firstPages(
   buffer: Buffer | Uint8Array,
-  n: number
+  n: number,
+  maxBytes: number = DEFAULT_MAX_BYTES
 ): Promise<{ bytes: Buffer; pages: number; total: number }> {
   const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
   const total = src.getPageCount();
-  if (total <= n) return { bytes: Buffer.from(buffer), pages: total, total };
-  const part = await PDFDocument.create();
-  const pages = await part.copyPages(src, Array.from({ length: n }, (_, i) => i));
-  for (const p of pages) part.addPage(p);
-  return { bytes: Buffer.from(await part.save({ useObjectStreams: true })), pages: n, total };
+  if (total <= n && buffer.byteLength <= maxBytes) {
+    return { bytes: Buffer.from(buffer), pages: total, total };
+  }
+  let count = Math.min(n, total);
+  for (;;) {
+    const part = await PDFDocument.create();
+    const pages = await part.copyPages(src, Array.from({ length: count }, (_, i) => i));
+    for (const p of pages) part.addPage(p);
+    const bytes = Buffer.from(await part.save({ useObjectStreams: true }));
+    if (bytes.byteLength <= maxBytes || count === 1) return { bytes, pages: count, total };
+    count = Math.max(1, Math.floor(count / 2));
+  }
 }

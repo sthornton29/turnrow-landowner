@@ -8,7 +8,7 @@ import {
   type SettlementColumnMap,
 } from "@/lib/timberSettlement";
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
-import { firstPages, pageCount, splitPdf } from "./pdfChunks";
+import { MODEL_PDF_MAX_BYTES, firstPages, pageCount, splitPdf } from "./pdfChunks";
 import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
 import {
   VAULT_KINDS,
@@ -751,7 +751,7 @@ export async function POST(request: Request) {
     // Every 90-page chunk of a 156EZ packet, two at a time, merged by
     // farm number. Shared by the fsa_156ez kind and the intake pass.
     const scanFsaPacket = async (): Promise<Record<string, unknown>> => {
-      const chunks = await splitPdf(fileBytes, { maxPages: 90, maxBytes: 25 * 1024 * 1024 });
+      const chunks = await splitPdf(fileBytes, { maxPages: 90, maxBytes: MODEL_PDF_MAX_BYTES });
       const total = await pageCount(fileBytes);
       const results: Array<Record<string, unknown>> = new Array(chunks.length);
       let next = 0;
@@ -832,7 +832,14 @@ export async function POST(request: Request) {
       const status = err instanceof Anthropic.APIError ? err.status : undefined;
       console.error("extract vault kind failed", vaultKind, status, err instanceof Error ? err.message : err);
       return NextResponse.json(
-        { error: status ? `Extraction failed (${status}).` : "Extraction failed." },
+        {
+          error:
+            status === 413
+              ? "This file is too large for the reader in one piece. Split the PDF into smaller parts, or enter the details by hand."
+              : status
+                ? `Extraction failed (${status}).`
+                : "Extraction failed.",
+        },
         { status: 502 }
       );
     }
