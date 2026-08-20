@@ -7,11 +7,11 @@ import type {
   PropertyGeo,
   RoadGeo,
   TimberStandGeo,
-  UtilityEasementGeo,
+  EasementGeo,
   WetlandGeo,
 } from "@/types/db";
 
-export type MapMode = "view" | "draw" | "edit" | "place" | "split" | "pivot";
+export type MapMode = "view" | "draw" | "edit" | "place" | "split" | "pivot" | "circle";
 
 export interface SelectedFeature {
   entityType: EntityType;
@@ -26,7 +26,7 @@ export type AnyGeoRow =
   | WetlandGeo
   | TimberStandGeo
   | RoadGeo
-  | UtilityEasementGeo
+  | EasementGeo
   | AssetGeo;
 
 export interface LayerVisibility {
@@ -37,10 +37,9 @@ export interface LayerVisibility {
   wetland: boolean;
   timber_stand: boolean;
   road: boolean;
-  utility_easement: boolean;
+  easement: boolean;
   asset: boolean;
 }
 
-// What the user chose from the Add menu; decides the draw mode and which
-// save dialog opens when the geometry is finished.
-export type AddKind = "boundary" | "road" | "asset_line" | "asset_point";
+// Pick-first draw sessions: what the Add menu chose (components/map/
+// DrawTypePicker.tsx) fixes the draw tool, draft color, and save form.

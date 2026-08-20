@@ -11,6 +11,7 @@ import {
   cleanDetails,
 } from "@/lib/assetTypes";
 import EntityDocuments from "@/components/documents/EntityDocuments";
+import { circleUpdateForDetails } from "@/lib/geo/circle";
 import type { AssetGeo, AssetType } from "@/types/db";
 
 const inputClass =
@@ -50,6 +51,11 @@ export default function AssetDetail({
     };
     const text = (key: string) => String(raw[key] ?? "").trim() || null;
 
+    const details = cleanDetails(
+      assetType,
+      raw as Record<string, FormDataEntryValue>,
+      asset.details ?? {}
+    );
     const { error: err } = await supabase
       .from("assets")
       .update({
@@ -61,17 +67,27 @@ export default function AssetDetail({
         estimated_value: num("estimated_value"),
         parent_asset_id: def.canLinkToWell ? text("parent_asset_id") : null,
         notes: text("notes"),
-        details: cleanDetails(
-          assetType,
-          raw as Record<string, FormDataEntryValue>,
-          asset.details ?? {}
-        ),
+        details,
       })
       .eq("id", asset.id);
 
+    // Circle footprints sync two ways: a new diameter typed here
+    // regenerates the map polygon (the circle editor writes the same
+    // diameter_ft when dragged).
+    const circle = err ? null : circleUpdateForDetails(asset.details ?? {}, details);
+    const gErr = circle
+      ? (
+          await supabase.rpc("set_geometry", {
+            p_entity_type: "asset",
+            p_entity_id: asset.id,
+            p_geojson: circle.polygon,
+          })
+        ).error
+      : null;
+
     setBusy(false);
-    if (err) {
-      setError("Could not save. " + err.message);
+    if (err || gErr) {
+      setError("Could not save. " + (err?.message ?? gErr?.message ?? ""));
       return;
     }
     setMessage("Saved.");

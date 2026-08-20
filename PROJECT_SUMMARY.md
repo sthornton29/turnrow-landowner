@@ -1,10 +1,10 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-20 (utility easements became polygon boundaries,
-migration 0017; timber sale contracts and logger settlements with AI
-extraction, allocation across stands, migration 0018; one Settings
-page; map-first landing; logo-only banner; Taxes renamed Property
-Taxes; print item exclusions)
+Last updated: 2026-08-20 (easements expanded to the full landowner set
+with line-or-polygon geometry, relationship, expiration, and category
+styling, migration 0019; pick-first drawing (choose the type, then
+draw); asset placement as pin, drawn outline, or parametric circle
+with grain bin diameter sync)
 
 ## What this product is
 
@@ -37,8 +37,11 @@ and Postgres row level security guarantees each org sees only its own data.
   clauses, lease land matching, timber scan raster pipeline, price
   expressions, RMA parsing, lease pricing, crop matching, tenant data
   aggregation, lease logic, income projections, pivot geometry,
-  easement line-to-polygon buffering, timber settlement spreadsheet
-  collapse + MBF/Doyle handling, timber allocation math)
+  easement catalog (every type styled and categorized, legend
+  presence, legacy-row migration), circle footprints (area, rim-drag
+  round trip, details round trip, diameter sync, sq ft vs acres
+  formatting), timber settlement spreadsheet collapse + MBF/Doyle
+  handling, timber allocation math)
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -103,30 +106,65 @@ Tables:
   toggle), property detail section, dashboard acres tile, and a
   /pastures/[id] summary page. FUTURE AREA: no grazing management
   features yet (deliberate).
-- utility_easements (created as lines in 0016, POLYGON BOUNDARIES since
-  migration 0017): powerline/pipeline/other corridors, ALWAYS labeled
-  "easement" (a pipeline easement is the utility's corridor, never the
-  farm's own underground irrigation pipe asset). organization_id,
-  property_id NULLABLE (easements cross property lines; property
-  deletion DETACHES via set null, a deliberate departure from roads'
-  cascade), name, easement_type check, holder, recorded_ref, notes,
-  MultiPolygon boundary with the same generated acres column as every
-  land type. Migration 0017 converted existing centerlines by
-  buffering to half their width_ft (geography buffer, true ground
-  feet; null widths used a 50 ft default, got a visible note appended,
-  and were listed in migration NOTICEs) then dropped the line columns
-  (geom, width_ft, length_feet, miles). lib/geo/easementBuffer.ts
-  mirrors the buffering rule for unit tests. RLS, geo view,
-  set_geometry polygon branch + documents 'utility_easement' (easement
-  deeds are exactly the documents landowners lose; the summary page
-  says so). Drawn via the BOUNDARY dialog's "Easement" type with
-  inline fields (type, holder, recorded ref, notes; session-persistent
-  like the timber fields; property optional), multi-area supported;
-  map layer (persisted toggle): translucent per-type strips (fill
-  0.18) with dashed outlines, powerline red #dc2626 long-dash,
-  pipeline safety orange #f97316 dot-dash, other gray, per-type
-  legend swatches; click panel and /easements/[id] show acres, holder,
-  recorded ref, documents.
+- easements (migration 0019; born as utility_easements in 0016 as
+  lines, polygons in 0017, renamed and expanded in 0019 with data
+  kept): every recorded right someone else holds over the land, or
+  that the owner holds over a neighbor. ALWAYS labeled "easement" in
+  UI text (never "utility easement"; a pipeline easement is the
+  company's corridor, never the farm's own underground irrigation
+  pipe asset). Columns: organization_id, property_id NULLABLE
+  (easements cross property lines; property deletion DETACHES via set
+  null), name, easement_type check over 14 types in five style
+  categories (lib/easements.ts is the single source of truth, unit
+  tested against the SQL list): utility = powerline, pipeline,
+  waterline_sewer, telecom_fiber; access/transport = access_row
+  (private ingress/egress), public_road_row, railroad; water =
+  drainage, flowage (TVA/Corps reservoir flooding rights); conservation
+  (land trust or NRCS WRE/ALE style, often large polygons); neutral =
+  cemetery_access, construction_temp, solar_wind, other.
+  relationship = burdens_this_property (default; migrated rows got it)
+  | benefits_this_property (an access easement the owner HOLDS over a
+  neighbor; geometry outside the owner's boundary is expected).
+  holder, recorded_ref, expiration_date (null = permanent/indefinite;
+  temporary construction and term easements set it), width_ft
+  (informational on LINE easements, never auto-buffered; draw the
+  polygon for the strip), elevation_ft (flowage contour), program and
+  restrictions (conservation holder/program detail and restrictions
+  notes), notes. GEOMETRY IS LINE OR POLYGON PER EASEMENT: boundary
+  MultiPolygon with the generated acres column, OR geom
+  MultiLineString with generated length_feet/miles (the roads
+  formula), with a check that both are never set; set_geometry's
+  'easement' branch takes either GeoJSON (polygons win when present,
+  the other column is nulled) and returns acres or miles. easements_geo
+  exposes boundary_geojson and geom_geojson; the app reads whichever
+  is set. documents entity_type 'utility_easement' rows were rewritten
+  to 'easement' (storage paths already written under
+  <org>/utility_easement/ stay valid; storage RLS keys on the org
+  segment). SEVERED MINERAL RIGHTS ARE NOT AN EASEMENT and are
+  deliberately absent: a future "encumbrances" area will hold mineral
+  severances, liens, and the like. Map styling is BY CATEGORY, not per
+  type (14 colors would be noise), built once in
+  components/map/easementLayers.ts and shared by the live map and the
+  print renderer: utility keeps the pre-0019 red/orange treatments
+  (powerline red long-dash, pipeline safety-orange dot-dash, waterline
+  and telecom fine dots); access/transport brown #92400e / tan #b45309
+  with distinct dashes and railroad a tie pattern (a second wide
+  short-dash line over the rail line); water blue #2563eb dashed, with
+  flowage polygons a stronger translucent fill; conservation
+  magenta-violet #a21caf as a canvas HATCH over a faint fill (checked
+  against mixed-timber deep violet #7c3aed: a hue step apart AND hatch
+  vs solid, so they never read the same); cemetery/construction/solar/
+  other gray variants. Line easements draw wider than polygon outlines
+  and carry a wide invisible hit layer. The live legend and the PDF
+  legend list only categories present in view (plus a Railroad row
+  when one exists); the click panel, /easements/[id], and RowEditor
+  show the exact type and every field (length for lines, acres for
+  polygons). Drawn via the pick-first flow (Add > Draw > Easement >
+  Line or Area) with the save form already set to Easement: type
+  select, relationship toggle with a "drawn outside your boundary is
+  expected" hint for benefits, holder, recorded ref, expiration, width
+  (lines only), flowage elevation (flowage only), program and
+  restrictions (conservation only), notes, property optional.
 - wetlands (migration 0015): same pattern as pastures, for OPEN
   wetlands only (marsh, sloughs, duck holes, WRP/easement ground;
   labels and dialog help text say so). Forested bottomland remains a
@@ -579,11 +617,13 @@ Functions and views:
     ag fields (kelly green), pastures (warm tan), wetlands (steel
     blue), timber stands (per-type fills, see TIMBER STANDS below),
     roads (white line over dark green casing, labels along the line),
-    utility easements (see the table entry: translucent red/orange/gray
-    strips with per-type dashed outlines and legend), and
+    easements (see the table entry: category-styled translucent fills
+    and dashed outlines, conservation hatch, railroad ties, line
+    easements on the same layers, category legend), and
     assets (dark green circle markers with a per-type letter, dashed light
-    blue lines for pipe/fence, faint outline for footprints, light blue
-    pivot coverage shapes). PRINT BUTTON (top right): a print setup
+    blue lines for pipe/fence, light blue fill + outline for drawn and
+    circle footprints with the letter marker at the centroid, light
+    blue pivot coverage shapes). PRINT BUTTON (top right): a print setup
     mode overlays a Letter-aspect frame (portrait/landscape, default
     landscape) and the user pans/zooms freely underneath it; the frame
     IS the printed extent (WYSIWYG). The panel has independent
@@ -597,7 +637,8 @@ Functions and views:
     preserveDrawingBuffer capture) and assembles the PDF client-side
     with jsPDF (components/map/printPdf.ts): map within margins, title
     and date, a legend of only the checked layers with swatches
-    matching the map styles (timber types, crops, easement types),
+    matching the map styles (timber types, crops, easement categories
+    with hatch and railroad-tie swatches),
     a scale bar from the render's real ground distance, a north
     indicator, the Turnrow lockup (rasterized brand SVG with text
     fallback), and the Mapbox/OpenStreetMap attribution line. Progress
@@ -622,28 +663,55 @@ Functions and views:
     Click
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
-    mobile). The Add menu offers: Boundary (polygon draw; save as field,
-    parcel, property, or timber stand), Road/pipe/fence (line draw),
-    Asset pin (crosshair placement mode: pan to line up, DRAG the
-    crosshair itself anywhere on the map (generous touch target), or My
-    location via GPS; Place here confirms wherever it sits; moving a
-    pin reuses the same mode), and Irrigation
-    pivot (crosshair places the center, then the parametric editor
-    opens directly; Save asks for name + property, suggested
-    from the center's location, and inserts the pivot with its
-    parameters and derived polygon in one step). The line dialog's
-    kinds are Road, Pipe (yours), and Fence (with a hint that utility
-    easements are boundaries now); the boundary dialog's types are Ag
-    field, Pasture, Wetland, Parcel, Property, Timber, and Easement.
-    When the type is Easement it expands in place with easement type
-    (powerline/pipeline/other), holder, recorded ref, and notes,
-    property optional (easements cross property lines), all
-    session-persistent. When the
-    boundary dialog's type is Timber, it expands in place with stand
-    type (required, five types), species (prefills "Loblolly pine" on
-    a pine pick, never stomping a typed value), year established, and
-    notes, all persisting across multi-area sessions; the stand saves
-    complete in one step. Every save
+    mobile). The Add menu offers three entries: DRAW, ASSET, and
+    Irrigation pivot. PICK FIRST, THEN DRAW: Draw opens a type picker
+    (components/map/DrawTypePicker.tsx, a two-column grid with color
+    swatches, bottom sheet on phones): Property boundary, Parcel, Ag
+    field, Timber stand, Pasture, Wetland, Road, Easement (then a
+    second tap: Line or Area), Fence, Underground pipe. Picking fixes
+    the type for the session: the right tool loads (polygon vs line),
+    the mapbox-gl-draw draft layers are recolored to that type's map
+    color (components/map/drawColors.ts captures the theme's original
+    paint values and restores them when the session ends), and the
+    save form (NewBoundaryDialog with fixedType, or NewLineDialog with
+    fixedKind) opens already set to the type with its inline fields
+    visible from the start (timber stand type/species/year/notes,
+    easement fields). Changing type = finish or cancel and start a
+    new session. Multi-area sessions, the persistent (css-hidden) form
+    state, Discard shape vs session Cancel, and Escape all carry over
+    unchanged; the file import's per-feature type assignment is
+    untouched. ASSET opens a placement picker
+    (components/map/AssetPlacePicker.tsx): asset type select plus Pin
+    (crosshair placement: pan to line up, DRAG the crosshair itself
+    anywhere on the map, or My location via GPS; Place here confirms
+    wherever it sits; moving a pin reuses the same mode), Draw
+    outline (polygon footprint drawn in the asset look; shops, barns,
+    ponds), or Circle (center by crosshair, then a parametric
+    mini-editor: draggable white center handle, blue rim handle, a
+    typed Diameter input, live sq ft / acres; Save asks name +
+    property suggested from the center). Grain bins lead with Circle
+    ("Suggested", preselected); every other type starts on Pin with
+    Circle available last. CIRCLE FOOTPRINTS are parametric like
+    pivots (lib/geo/circle.ts, unit tested): details carry
+    footprint_shape = 'circle', center_lon/lat (mapManaged on every
+    asset type), and diameter_ft; the polygon is derived and
+    regenerated, never vertex-edited (the click panel's Edit circle
+    reopens the editor; Circle footprint starts one for any non-pivot
+    asset, using its pin as the center). For grain bins diameter_ft IS
+    the bin's spec field, synced TWO WAYS: dragging or typing in the
+    editor writes diameter_ft, and typing diameter_ft on the asset
+    page regenerates the circle polygon through set_geometry
+    (circleUpdateForDetails). Outline-drawn and circle assets render
+    as their shape (light blue fill and outline) with the type letter
+    marker at the centroid for low-zoom recognition (rowsToFC pushes a
+    point feature for every polygon asset, the pivot P trick
+    generalized); pins are unchanged; the click panel shows the
+    footprint as square feet under half an acre, else acres, with the
+    circle's diameter. Irrigation pivot (crosshair places the center,
+    then the parametric coverage editor opens directly; Save asks for
+    name + property, suggested from the center's location, and inserts
+    the pivot with its parameters and derived polygon in one step);
+    pivot coverage circles are their own thing and unchanged. Every save
     dialog preselects the property whose boundary contains the drawn
     geometry (same lib/geo/propertyMatch.ts logic as the file import)
     with a "Suggested from location" chip that clears if the user picks
@@ -1070,6 +1138,14 @@ Functions and views:
 - No em dashes anywhere in UI text or generated documents.
 - The fields land type is ALWAYS "Ag Fields" / "ag field" in UI text;
   database identifiers stay fields. Pastures are a separate land type.
+- Easements are "easements" in UI text (never "utility easements");
+  the map styles them by category, panels and pages show the exact
+  type. Severed mineral rights are not an easement (future
+  encumbrances area).
+- Drawing is pick-first: the user chooses what they are drawing, then
+  the tool, draft color, and save form follow. Parametric shapes
+  (pivot coverage, circle footprints) are edited through their editor,
+  never by vertices.
 - Numbers with commas; acres to 1 decimal (lib/format.ts formatAcres);
   dollars with commas and 2 decimals (formatDollars).
 - Every future AI extraction must be shown for user review before saving.
@@ -1164,4 +1240,20 @@ Functions and views:
   offer, allocated income on stand pages, rent-upload timber routing
   into the same review); and print item exclusions (tap-to-toggle
   ghosting, property chips, Choose items drawer, per-session).
+  Described above.
+- Post-Phase 6i (DONE, 2026-08-20, migration 0019): utility easements
+  became EASEMENTS (table renamed, data kept): 14 types in five style
+  categories, relationship (burdens/benefits this property),
+  expiration date, informational width, flowage elevation,
+  conservation program/restrictions, line OR polygon geometry with
+  computed length or acres, category styling shared between the live
+  map and the PDF (conservation hatch checked against mixed timber,
+  railroad ties, flowage fill), category legends; PICK-FIRST DRAWING
+  (Add > Draw > type picker, easement line/area sub-pick, draft drawn
+  in the type's color, save form preset with inline fields, session
+  type fixed); and ASSET PLACEMENT as Pin, Draw outline, or Circle
+  (parametric center + diameter in details, grain bin diameter_ft
+  synced two ways with the asset form, letter markers at footprint
+  centroids, footprint sq ft / acres in the panel). Unit tests for
+  the easement catalog and migration and for circle geometry/sync.
   Described above.

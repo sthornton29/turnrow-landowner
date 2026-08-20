@@ -7,11 +7,16 @@ import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   ASSET_TYPES,
   CONDITION_LABELS,
-  EASEMENT_TYPE_LABELS,
   ROAD_TYPE_LABELS,
   STAND_TYPE_LABELS,
 } from "@/lib/assetTypes";
-import type { AssetGeo, EntityType, ParcelGeo, RoadGeo } from "@/types/db";
+import {
+  EASEMENT_RELATIONSHIP_LABELS,
+  EASEMENT_TYPE_LABELS,
+} from "@/lib/easements";
+import { circleFromDetails, formatFootprint } from "@/lib/geo/circle";
+import turfArea from "@turf/area";
+import type { AssetGeo, EasementGeo, EntityType, ParcelGeo, RoadGeo } from "@/types/db";
 import type { AnyGeoRow } from "./types";
 
 export const ENTITY_TABLE: Record<EntityType, string> = {
@@ -22,7 +27,7 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   wetland: "wetlands",
   timber_stand: "timber_stands",
   road: "roads",
-  utility_easement: "utility_easements",
+  easement: "easements",
   asset: "assets",
 };
 
@@ -34,14 +39,14 @@ const TYPE_LABEL: Record<EntityType, string> = {
   wetland: "Wetland",
   timber_stand: "Timber stand",
   road: "Road",
-  utility_easement: "Utility easement",
+  easement: "Easement",
   asset: "Asset",
 };
 
 export interface EditField {
   key: string;
   label: string;
-  input: "text" | "number" | "select" | "textarea";
+  input: "text" | "number" | "select" | "textarea" | "date";
   options?: Record<string, string>;
   required?: boolean;
   // Comma-separated text input saved as a Postgres text[] (FSA numbers).
@@ -88,7 +93,7 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "road_type", label: "Road type", input: "select", options: ROAD_TYPE_LABELS },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
-  utility_easement: [
+  easement: [
     { key: "name", label: "Name", input: "text", required: true },
     {
       key: "easement_type",
@@ -97,8 +102,20 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
       options: EASEMENT_TYPE_LABELS,
       required: true,
     },
-    { key: "holder", label: "Holder (utility/company)", input: "text" },
+    {
+      key: "relationship",
+      label: "Relationship",
+      input: "select",
+      options: EASEMENT_RELATIONSHIP_LABELS,
+      required: true,
+    },
+    { key: "holder", label: "Holder (utility, company, neighbor)", input: "text" },
     { key: "recorded_ref", label: "Recorded ref (book/page)", input: "text" },
+    { key: "expiration_date", label: "Expires (blank = permanent)", input: "date" },
+    { key: "width_ft", label: "Width (ft, informational)", input: "number" },
+    { key: "elevation_ft", label: "Flowage elevation (ft)", input: "number" },
+    { key: "program", label: "Program / holder detail (conservation)", input: "text" },
+    { key: "restrictions", label: "Restrictions (conservation)", input: "textarea" },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   asset: [
@@ -139,7 +156,7 @@ export function detailPagePath(entityType: EntityType, id: string): string {
     wetland: "/wetlands",
     timber_stand: "/timber",
     road: "/roads",
-    utility_easement: "/easements",
+    easement: "/easements",
     asset: "/assets",
   };
   return `${base[entityType]}/${id}`;
@@ -173,13 +190,38 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     push("Last burn", r.last_burn_year);
   } else if (entityType === "road") {
     push("Road type", r.road_type, ROAD_TYPE_LABELS);
-  } else if (entityType === "utility_easement") {
-    push("Easement type", r.easement_type, EASEMENT_TYPE_LABELS);
+  } else if (entityType === "easement") {
+    const e = row as EasementGeo;
+    push("Easement type", e.easement_type, EASEMENT_TYPE_LABELS);
+    push("Relationship", e.relationship, EASEMENT_RELATIONSHIP_LABELS);
+    if (e.geom_geojson && e.width_ft != null) {
+      rows.push(["Width", `${formatNumber(e.width_ft)} ft (informational)`]);
+    }
+    if (e.expiration_date) rows.push(["Expires", e.expiration_date]);
+    if (e.elevation_ft != null) rows.push(["Flowage elevation", `${formatNumber(e.elevation_ft)} ft`]);
+    push("Program", e.program);
+    push("Restrictions", e.restrictions);
     push("Holder", r.holder);
     push("Recorded ref", r.recorded_ref);
   } else if (entityType === "asset") {
     const a = row as AssetGeo;
     push("Type", ASSET_TYPES[a.asset_type]?.label ?? a.asset_type);
+    // Footprint size for outline-drawn and circle assets (pivots show
+    // their coverage acres below instead).
+    const g = a.geom_geojson;
+    if (
+      a.asset_type !== "irrigation_pivot" &&
+      g &&
+      (g.type === "Polygon" || g.type === "MultiPolygon")
+    ) {
+      const sqFt = turfArea({ type: "Feature", properties: {}, geometry: g }) * 10.7639;
+      const circle = circleFromDetails(a.details as Record<string, unknown>);
+      rows.push([
+        circle ? "Circle footprint" : "Footprint",
+        formatFootprint(sqFt, formatAcres, formatNumber) +
+          (circle ? ` (${formatNumber(circle.diameterFt)} ft diameter)` : ""),
+      ]);
+    }
     push("Year", a.year_installed);
     push("Condition", a.condition, CONDITION_LABELS);
     if (a.estimated_value !== null) {
@@ -221,6 +263,7 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     }
     // Type-specific details, labeled from the config
     for (const f of ASSET_TYPES[a.asset_type]?.fields ?? []) {
+      if (f.mapManaged) continue;
       if (f.mapManaged) continue;
       const v = a.details?.[f.key];
       if (v === null || v === undefined || v === "") continue;
@@ -276,6 +319,7 @@ export default function FeaturePanel({
   onEditGeometry,
   onSplit,
   onPivotCircle,
+  onCircleFootprint,
   onChanged,
 }: {
   entityType: EntityType;
@@ -287,6 +331,7 @@ export default function FeaturePanel({
   onEditGeometry: () => void;
   onSplit?: () => void; // timber stands: split with a drawn line
   onPivotCircle?: () => void; // irrigation pivots: parametric coverage circle
+  onCircleFootprint?: () => void; // round assets: parametric circle footprint
   onChanged: () => void;
 }) {
   const supabase = createClient();
@@ -302,11 +347,15 @@ export default function FeaturePanel({
   const geometryButtonLabel =
     entityType === "road"
       ? "Edit line"
-      : entityType === "asset"
-        ? ((row as AssetGeo).geom_geojson?.type?.includes("Line")
-            ? "Edit line"
-            : "Move pin")
-        : "Edit boundary";
+      : entityType === "easement"
+        ? ((row as EasementGeo).geom_geojson ? "Edit line" : "Edit boundary")
+        : entityType === "asset"
+          ? ((row as AssetGeo).geom_geojson?.type?.includes("Line")
+              ? "Edit line"
+              : (row as AssetGeo).geom_geojson?.type?.includes("Polygon")
+                ? "Edit outline"
+                : "Move pin")
+          : "Edit boundary";
 
   async function saveDetails(formData: FormData) {
     setBusy(true);
@@ -348,8 +397,9 @@ export default function FeaturePanel({
     onChanged();
   }
 
+  const isLineEasement = entityType === "easement" && !!(row as EasementGeo).geom_geojson;
   const metric =
-    entityType === "road"
+    entityType === "road" || isLineEasement
       ? `${formatNumber(Math.round((row as RoadGeo).length_feet ?? 0))} ft (${((row as RoadGeo).miles ?? 0).toFixed(2)} mi)`
       : entityType !== "asset" && "acres" in row
         ? `${formatAcres((row as { acres: number | null }).acres)} acres`
@@ -389,7 +439,7 @@ export default function FeaturePanel({
             {metric ? (
               <div className="flex justify-between">
                 <dt className="text-gray-500">
-                  {entityType === "road" ? "Length" : "Acres"}
+                  {entityType === "road" || isLineEasement ? "Length" : "Acres"}
                 </dt>
                 <dd className="font-medium text-gray-900">{metric}</dd>
               </div>
@@ -479,12 +529,20 @@ export default function FeaturePanel({
                 entityType === "asset" &&
                 (row as AssetGeo).asset_type === "irrigation_pivot";
               const hasCircle = isPivot && (row as AssetGeo).details?.center_lon != null;
+              const footprintCircle =
+                entityType === "asset" &&
+                !isPivot &&
+                circleFromDetails((row as AssetGeo).details as Record<string, unknown>) !== null;
+              const canCircle =
+                entityType === "asset" &&
+                !isPivot &&
+                !(row as AssetGeo).geom_geojson?.type?.includes("Line");
               return (
                 <>
                   {/* Pivot shapes are parametric: a 64-vertex circle is
                       uneditable by hand, so shaped pivots get the
                       editor instead of raw geometry editing. */}
-                  {!hasCircle ? (
+                  {!hasCircle && !footprintCircle ? (
                     <button
                       onClick={onEditGeometry}
                       className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -498,6 +556,16 @@ export default function FeaturePanel({
                       className="rounded-lg border border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 hover:bg-sky-50"
                     >
                       {hasCircle ? "Edit coverage" : "Add coverage circle"}
+                    </button>
+                  ) : null}
+                  {/* Circle footprints are parametric too (center +
+                      diameter): edits reopen the mini editor. */}
+                  {canCircle && onCircleFootprint ? (
+                    <button
+                      onClick={onCircleFootprint}
+                      className="rounded-lg border border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 hover:bg-sky-50"
+                    >
+                      {footprintCircle ? "Edit circle" : "Circle footprint"}
                     </button>
                   ) : null}
                 </>
@@ -564,7 +632,8 @@ export default function FeaturePanel({
               ) : (
                 <input
                   name={f.key}
-                  type={f.input === "number" ? "number" : "text"}
+                  type={f.input === "number" ? "number" : f.input === "date" ? "date" : "text"}
+                  step={f.input === "number" ? "any" : undefined}
                   required={f.required}
                   defaultValue={fieldDisplayValue(
                     f,

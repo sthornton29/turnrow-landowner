@@ -278,7 +278,34 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
   },
 };
 
+// Footprint parameters shared by EVERY type (migration-free; details
+// jsonb). footprint_shape is 'circle' when the polygon was generated
+// from center + diameter_ft by the map's circle editor (lib/geo/
+// circle.ts); outline-drawn footprints carry no shape key. Map-managed
+// so form saves carry them through. diameter_ft stays a normal spec
+// field on grain bins (declared above), so for bins the circle editor
+// and the form share one number.
+const FOOTPRINT_FIELDS: DetailField[] = [
+  { key: "footprint_shape", label: "Footprint shape", input: "text", mapManaged: true },
+  { key: "center_lon", label: "Center longitude", input: "number", mapManaged: true },
+  { key: "center_lat", label: "Center latitude", input: "number", mapManaged: true },
+];
+for (const t of Object.keys(ASSET_TYPES) as AssetType[]) {
+  const def = ASSET_TYPES[t];
+  const have = new Set(def.fields.map((f) => f.key));
+  for (const f of FOOTPRINT_FIELDS) if (!have.has(f.key)) def.fields.push(f);
+  // Circle footprints need a diameter; every type other than grain bin
+  // (which has it as a spec field) keeps it map-managed.
+  if (!have.has("diameter_ft")) {
+    def.fields.push({ key: "diameter_ft", label: "Footprint diameter", input: "number", unit: "ft", mapManaged: true });
+  }
+}
+
 export const ASSET_TYPE_ORDER = Object.keys(ASSET_TYPES) as AssetType[];
+
+// Types whose footprint is usually round: the placement picker leads
+// with Circle for these (it stays available for every type).
+export const ROUND_ASSET_TYPES: AssetType[] = ["grain_bin"];
 
 export function assetTypeLabel(t: AssetType): string {
   return ASSET_TYPES[t]?.label ?? t;
@@ -337,29 +364,6 @@ export const STAND_TYPE_COLORS: Record<string, string> = {
   hardwood: "#c2410c", // burnt orange
   mixed: "#7c3aed", // deep violet
   other: "#6b7280", // gray
-};
-
-// Utility easements: always labeled "easement" (a pipeline easement is
-// the utility's corridor, never the farm's own underground irrigation
-// pipe asset).
-export const EASEMENT_TYPE_LABELS: Record<string, string> = {
-  powerline: "Powerline easement",
-  pipeline: "Pipeline easement",
-  other: "Other easement",
-};
-
-// Easement map colors: powerline red, pipeline safety orange, other
-// gray. Rendered as translucent strips (polygon fills) with per-type
-// dashed outlines keeping them distinguishable: powerline long-dash,
-// pipeline dot-dash, other solid. Checked distinct from roads white,
-// irrigation light blue, wetlands steel blue, the timber palette, and
-// the crop palette (wheat amber #d97706 is the nearest neighbor to the
-// pipeline orange; the dash pattern and low fill opacity keep them
-// apart).
-export const EASEMENT_COLORS: Record<string, string> = {
-  powerline: "#dc2626",
-  pipeline: "#f97316",
-  other: "#9ca3af",
 };
 
 export const ROAD_TYPE_LABELS: Record<string, string> = {

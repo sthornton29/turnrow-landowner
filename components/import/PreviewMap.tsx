@@ -22,7 +22,7 @@ const COLOR: Record<EntityType, string> = {
   wetland: "#6487a8",
   timber_stand: "#a7f3d0",
   road: "#e5e7eb",
-  utility_easement: "#dc2626",
+  easement: "#dc2626",
   asset: "#bae6fd",
 };
 

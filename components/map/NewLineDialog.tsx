@@ -13,10 +13,17 @@ export interface NewLinePayload {
   roadType: RoadType | null;
 }
 
-// Shown after a line is drawn: is it a road, buried pipe, or a fence?
-// (Utility easements are polygon boundaries now: draw those with the
-// boundary tool.) The property containing the line is preselected.
+const KIND_LABEL: Record<LineKind, string> = {
+  road: "road",
+  underground_pipe: "underground pipe",
+  fence: "fence",
+};
+
+// Save form for a line drawn in a pick-first session (road, your
+// buried pipe, or a fence). The kind was chosen before drawing and is
+// fixed here. Line easements use the boundary dialog instead.
 export default function NewLineDialog({
+  fixedKind,
   properties,
   suggestedPropertyId = null,
   saving,
@@ -24,6 +31,7 @@ export default function NewLineDialog({
   onSave,
   onCancel,
 }: {
+  fixedKind: LineKind;
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
   saving: boolean;
@@ -31,7 +39,7 @@ export default function NewLineDialog({
   onSave: (payload: NewLinePayload) => void;
   onCancel: () => void;
 }) {
-  const [kind, setKind] = useState<LineKind>("road");
+  const kind = fixedKind;
   const [propertyId, setPropertyId] = useState(
     suggestedPropertyId ?? properties[0]?.id ?? ""
   );
@@ -52,40 +60,9 @@ export default function NewLineDialog({
 
   return (
     <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:w-80 md:rounded-xl md:border">
-      <h2 className="text-lg font-semibold text-gray-900">Save line</h2>
+      <h2 className="text-lg font-semibold text-gray-900">Save {KIND_LABEL[kind]}</h2>
 
       <form action={handleSubmit} className="mt-3 space-y-3">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">This is a</label>
-          <div className="grid grid-cols-3 gap-1.5">
-            {(
-              [
-                ["road", "Road"],
-                ["underground_pipe", "Pipe (yours)"],
-                ["fence", "Fence"],
-              ] as Array<[LineKind, string]>
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setKind(k)}
-                className={
-                  "rounded-lg border px-2 py-1.5 text-sm font-medium " +
-                  (kind === k
-                    ? "border-kelly-500 bg-kelly-50 text-pine-900"
-                    : "border-gray-300 text-gray-600 hover:bg-gray-50")
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 text-xs text-gray-500">
-            A utility easement (powerline, pipeline) is a boundary now: use
-            Add &gt; Boundary and pick Easement.
-          </p>
-        </div>
-
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>
           <input

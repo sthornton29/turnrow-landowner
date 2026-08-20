@@ -13,7 +13,7 @@ const ENTITY_TYPES: EntityType[] = [
   "wetland",
   "timber_stand",
   "road",
-  "utility_easement",
+  "easement",
   "asset",
 ];
 

@@ -25,11 +25,44 @@ import {
 } from "@/lib/geo/normalize";
 import {
   ASSET_TYPES,
-  EASEMENT_COLORS,
-  EASEMENT_TYPE_LABELS,
   STAND_TYPE_COLORS,
   STAND_TYPE_LABELS,
 } from "@/lib/assetTypes";
+import {
+  EASEMENT_CATEGORY_COLORS,
+  EASEMENT_CATEGORY_LABELS,
+  EASEMENT_STYLES,
+  categoriesPresent,
+  easementCategory,
+} from "@/lib/easements";
+import {
+  DEFAULT_CIRCLE_DIAMETER_FT,
+  MIN_CIRCLE_DIAMETER_FT,
+  circleAcres,
+  circleAreaSqFt,
+  circleFromDetails,
+  circlePolygon,
+  detailsFromCircle,
+  diameterFromRimPoint,
+  formatFootprint,
+  rimPoint,
+  type CircleParams,
+} from "@/lib/geo/circle";
+import { formatNumber } from "@/lib/format";
+import { addEasementLayers } from "./easementLayers";
+import {
+  ASSET_LIGHT_BLUE,
+  KELLY,
+  MINT,
+  PASTURE_TAN,
+  PINE,
+  WETLAND_BLUE,
+  applyDraftColor,
+  draftColorFor,
+} from "./drawColors";
+import DrawTypePicker, { type DrawType } from "./DrawTypePicker";
+import AssetPlacePicker, { type AssetPlacement } from "./AssetPlacePicker";
+export { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
 import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
 import {
@@ -65,8 +98,9 @@ import type {
   PastureGeo,
   PropertyGeo,
   RoadGeo,
+  AssetType,
   TimberStandGeo,
-  UtilityEasementGeo,
+  EasementGeo,
   WetlandGeo,
 } from "@/types/db";
 import LayerToggle from "./LayerToggle";
@@ -78,28 +112,46 @@ import {
   type PrintLayerFlags,
 } from "./printPdf";
 import FeaturePanel, { ENTITY_TABLE } from "./FeaturePanel";
-import NewBoundaryDialog, { type NewBoundaryPayload } from "./NewBoundaryDialog";
+import NewBoundaryDialog, { type BoundaryType, type NewBoundaryPayload } from "./NewBoundaryDialog";
 import NewLineDialog, { type NewLinePayload } from "./NewLineDialog";
 import NewAssetDialog, { type NewAssetPayload } from "./NewAssetDialog";
 import type { AnyGeoRow, LayerVisibility, MapMode, SelectedFeature } from "./types";
 
-export const KELLY = "#39b54a";
-export const PINE = "#14532d";
-const MINT = "#a7f3d0";
 // Pastures: warm tan, distinct from kelly (ag fields), canola light
 // green, wheat amber, the timber palette, and pivot blue.
-export const PASTURE_TAN = "#d2b48c";
 // Wetlands (OPEN wetlands: marsh, sloughs, duck holes; forested
 // bottomland stays a timber stand): muted steel blue, checked distinct
 // from kelly, every crop color, the timber palette including planted
 // pine's deep teal #0f766e and the "other" gray #6b7280, pivot light
 // blue #7dd3fc/#38bdf8, pasture tan, and entity outlines.
-export const WETLAND_BLUE = "#6487a8";
 
 const POLYGON_TYPES: EntityType[] = [
   "property", "parcel", "field", "pasture", "wetland", "timber_stand",
-  "utility_easement",
+  "easement",
 ];
+
+// A pick-first draw session: what the Add menu chose before the first
+// point went down. Asset outlines join the same machinery.
+type DrawSession = DrawType | { kind: "asset_outline"; assetType: AssetType };
+
+function sessionColorKey(t: DrawSession): string {
+  return t.kind === "asset_outline" ? "asset" : t.entityType;
+}
+
+// Straight-line length of a drawn line in feet (preview only; the
+// server computes the real geodesic length on save).
+function approxLengthFt(ml: MultiLineString): number {
+  let total = 0;
+  for (const line of ml.coordinates) {
+    for (let i = 1; i < line.length; i++) {
+      total += distanceFt(
+        line[i - 1] as [number, number],
+        line[i] as [number, number]
+      );
+    }
+  }
+  return total;
+}
 
 // An in-frame item in the print setup's property chips / item drawer.
 interface PrintItemInfo {
@@ -118,7 +170,7 @@ const PRINT_TYPE_LABELS: Record<EntityType, string> = {
   wetland: "Wetlands",
   timber_stand: "Timber stands",
   road: "Roads",
-  utility_easement: "Utility easements",
+  easement: "Easements",
   asset: "Assets",
 };
 
@@ -154,7 +206,7 @@ const LAYER_DEFAULTS: LayerVisibility = {
   wetland: true,
   timber_stand: true,
   road: true,
-  utility_easement: true,
+  easement: true,
   asset: true,
 };
 const LAYER_STORAGE_KEY = "turnrow.map.layers.v1";
@@ -200,15 +252,17 @@ export function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureColl
     if (entityType === "timber_stand") {
       props.standType = (row as TimberStandGeo).stand_type ?? "other";
     }
-    if (entityType === "utility_easement") {
-      props.easementType = (row as UtilityEasementGeo).easement_type ?? "other";
+    if (entityType === "easement") {
+      props.easementType = (row as EasementGeo).easement_type ?? "other";
+      props.easementCategory = easementCategory((row as EasementGeo).easement_type);
     }
     features.push({ type: "Feature", geometry: g, properties: props });
-    // Pivot coverage shapes keep their P marker at the center for
-    // low-zoom recognition (clickable like the polygon).
+    // Shaped assets (pivot coverage, outline footprints, circles) keep
+    // their letter marker at the center for low-zoom recognition
+    // (clickable like the polygon).
     if (entityType === "asset") {
       const a = row as AssetGeo;
-      if (a.asset_type === "irrigation_pivot" && g.type !== "Point") {
+      if (g.type === "Polygon" || g.type === "MultiPolygon") {
         const lon = Number(a.details?.center_lon);
         const lat = Number(a.details?.center_lat);
         const mp = toMultiPolygon(g);
@@ -305,7 +359,7 @@ export default function MapView({
   const [wetlands, setWetlands] = useState<WetlandGeo[]>([]);
   const [timber, setTimber] = useState<TimberStandGeo[]>([]);
   const [roads, setRoads] = useState<RoadGeo[]>([]);
-  const [easements, setEasements] = useState<UtilityEasementGeo[]>([]);
+  const [easements, setEasements] = useState<EasementGeo[]>([]);
   const [assets, setAssets] = useState<AssetGeo[]>([]);
   const [loading, setLoading] = useState(true);
   const [cropsOn, setCropsOn] = useState(false);
@@ -333,8 +387,22 @@ export default function MapView({
   const [fullscreen, setFullscreen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
-  // Draw/save state
+  // Draw/save state. drawKind is the tool (polygon or line); the
+  // session says what it becomes (fixed before drawing).
   const drawKindRef = useRef<"boundary" | "line" | null>(null);
+  const [drawSession, setDrawSession] = useState<DrawSession | null>(null);
+  const drawSessionRef = useRef<DrawSession | null>(null);
+  drawSessionRef.current = drawSession;
+  const [pickerOpen, setPickerOpen] = useState<"draw" | "asset" | null>(null);
+  // Pin placement for a type chosen up front (null = legacy any-type).
+  const [placeAssetType, setPlaceAssetType] = useState<AssetType | null>(null);
+  // Crosshair is placing a NEW circle footprint's center for this type.
+  const placeForCircleRef = useRef<AssetType | null>(null);
+  // Editing a saved line (road, line easement, pipe/fence): no boolean
+  // area tools in the toolbar.
+  const [editIsLine, setEditIsLine] = useState(false);
+  // Ids of the shared easement layers (visibility toggles).
+  const easementLayerIdsRef = useRef<string[]>([]);
   const [pendingPoly, setPendingPoly] = useState<MultiPolygon | null>(null);
   const [pendingLine, setPendingLine] = useState<MultiLineString | null>(null);
   const [pendingPoint, setPendingPoint] = useState<[number, number] | null>(null);
@@ -378,6 +446,20 @@ export default function MapView({
   const placeForPivotRef = useRef(false);
   const [pendingPivotSave, setPendingPivotSave] = useState(false);
 
+  // Parametric circle footprint editor (grain bins and any round
+  // structure): center + diameter, polygon derived, never vertex-edited.
+  // assetId null = a NEW asset from the Add menu; Save asks for name and
+  // property. For grain bins diameterFt IS details.diameter_ft.
+  const [circleEdit, setCircleEdit] = useState<{
+    assetId: string | null;
+    assetType: AssetType;
+    params: CircleParams;
+    existingDetails: Record<string, unknown>;
+  } | null>(null);
+  const circleEditRef = useRef(circleEdit);
+  circleEditRef.current = circleEdit;
+  const [pendingCircleSave, setPendingCircleSave] = useState(false);
+
   // Crosshair position in container pixels; null = screen center. The
   // crosshair is DRAGGABLE (touch/click and drag the marker) and the
   // map still pans beneath it; fine-tune by either method. Place here
@@ -410,12 +492,12 @@ export default function MapView({
     useState<"landscape" | "portrait">("landscape");
   const [printLayers, setPrintLayers] = useState<PrintLayerFlags>({
     property: true, parcel: false, field: true, pasture: true, wetland: true,
-    timber_stand: true, road: true, utility_easement: true, asset: true,
+    timber_stand: true, road: true, easement: true, asset: true,
     crops: false, entity: false,
   });
   const [printLabels, setPrintLabels] = useState<PrintLabelFlags>({
     property: true, parcel: false, field: true, pasture: true, wetland: true,
-    timber_stand: true, road: true, utility_easement: true, asset: true,
+    timber_stand: true, road: true, easement: true, asset: true,
   });
   const [printTitle, setPrintTitle] = useState("");
   const [printSubtitle, setPrintSubtitle] = useState("");
@@ -445,7 +527,7 @@ export default function MapView({
       supabase.from("wetlands_geo").select("*").order("name"),
       supabase.from("timber_stands_geo").select("*").order("name"),
       supabase.from("roads_geo").select("*").order("name"),
-      supabase.from("utility_easements_geo").select("*").order("name"),
+      supabase.from("easements_geo").select("*").order("name"),
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
       supabase.from("field_mappings").select("*").eq("status", "confirmed"),
       supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
@@ -460,7 +542,7 @@ export default function MapView({
     setWetlands((w.data as WetlandGeo[]) ?? []);
     setTimber((t.data as TimberStandGeo[]) ?? []);
     setRoads((r.data as RoadGeo[]) ?? []);
-    setEasements((ue.data as UtilityEasementGeo[]) ?? []);
+    setEasements((ue.data as EasementGeo[]) ?? []);
     setAssets((a.data as AssetGeo[]) ?? []);
 
     // Current-year farm activity keyed to local fields / properties
@@ -520,7 +602,7 @@ export default function MapView({
       wetland: wetlands,
       timber_stand: timber,
       road: roads,
-      utility_easement: easements,
+      easement: easements,
       asset: assets,
     }),
     [properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets]
@@ -557,7 +639,7 @@ export default function MapView({
     const groups: string[][] = [
       ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
       ["roads-hit"],
-      ["easements-fill"],
+      ["easements-hit", "easements-fill", "easements-hatch-base"],
       ["fields-fill"],
       ["pastures-fill"],
       ["wetlands-fill"],
@@ -699,30 +781,10 @@ export default function MapView({
       map.addLayer({ id: "roads-hit", type: "line", source: "roads",
         paint: { "line-color": "#ffffff", "line-width": 16, "line-opacity": 0.01 } });
 
-      // Utility easements: translucent polygon strips with per-type
-      // dashed outlines. Powerline red long-dash, pipeline safety
-      // orange dot-dash, other solid gray; instantly apart from roads
-      // (white), the farm's own pipe (dashed light blue), and every
-      // land palette.
-      const easementColor: mapboxgl.Expression = [
-        "match", ["get", "easementType"],
-        "powerline", EASEMENT_COLORS.powerline,
-        "pipeline", EASEMENT_COLORS.pipeline,
-        EASEMENT_COLORS.other,
-      ];
-      map.addLayer({ id: "easements-fill", type: "fill", source: "easements",
-        paint: { "fill-color": easementColor, "fill-opacity": 0.18 } });
-      map.addLayer({ id: "easements-line-powerline", type: "line", source: "easements",
-        filter: ["==", ["get", "easementType"], "powerline"],
-        paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2,
-          "line-dasharray": [4, 2] } });
-      map.addLayer({ id: "easements-line-pipeline", type: "line", source: "easements",
-        filter: ["==", ["get", "easementType"], "pipeline"],
-        paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2,
-          "line-dasharray": [3, 1.5, 0.4, 1.5] } });
-      map.addLayer({ id: "easements-line-other", type: "line", source: "easements",
-        filter: ["==", ["get", "easementType"], "other"],
-        paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2 } });
+      // Easements: category-styled fills/outlines (conservation hatch,
+      // railroad ties, line easements on the same layers); shared with
+      // the print renderer in ./easementLayers.ts.
+      easementLayerIdsRef.current = addEasementLayers(map, "easements").ids;
 
       // Asset lines (pipe, fence): dashed light blue, distinct from roads.
       // Asset polygons (footprints, pond surface): faint white. Pivot
@@ -731,12 +793,14 @@ export default function MapView({
         "==", ["get", "assetType"], "irrigation_pivot",
       ];
       const notPivot: mapboxgl.Expression = ["!", isIrrigation];
+      // Footprints (outline-drawn or circle): light fill + light blue
+      // outline, the letter marker sits at the centroid (rowsToFC).
       map.addLayer({ id: "assets-fill", type: "fill", source: "assets",
         filter: ["all", ["==", ["geometry-type"], "Polygon"], notPivot],
-        paint: { "fill-color": "#ffffff", "fill-opacity": 0.08 } });
+        paint: { "fill-color": ASSET_LIGHT_BLUE, "fill-opacity": 0.14 } });
       map.addLayer({ id: "assets-outline", type: "line", source: "assets",
         filter: ["all", ["==", ["geometry-type"], "Polygon"], notPivot],
-        paint: { "line-color": "#bae6fd", "line-width": 1.5 } });
+        paint: { "line-color": ASSET_LIGHT_BLUE, "line-width": 2 } });
       map.addLayer({ id: "pivot-circles-fill", type: "fill", source: "assets",
         filter: ["all", ["==", ["geometry-type"], "Polygon"], isIrrigation],
         paint: { "fill-color": "#7dd3fc", "fill-opacity": 0.18 } });
@@ -745,7 +809,7 @@ export default function MapView({
         paint: { "line-color": "#38bdf8", "line-width": 2 } });
       map.addLayer({ id: "assets-line", type: "line", source: "assets",
         filter: ["==", ["geometry-type"], "LineString"],
-        paint: { "line-color": "#bae6fd", "line-width": 2, "line-dasharray": [2, 2] } });
+        paint: { "line-color": ASSET_LIGHT_BLUE, "line-width": 2, "line-dasharray": [2, 2] } });
 
       // Selection highlights
       for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber"]) {
@@ -898,12 +962,12 @@ export default function MapView({
         map.once("touchend", end);
       };
       map.on("mousedown", "pivot-handles", (e) => {
-        if (!pivotEditRef.current) return;
+        if (!pivotEditRef.current && !circleEditRef.current) return;
         e.preventDefault();
         beginPivotDrag(String(e.features?.[0]?.properties?.role ?? ""));
       });
       map.on("touchstart", "pivot-handles", (e) => {
-        if (!pivotEditRef.current) return;
+        if (!pivotEditRef.current && !circleEditRef.current) return;
         e.preventDefault();
         beginPivotDrag(String(e.features?.[0]?.properties?.role ?? ""));
       });
@@ -915,6 +979,7 @@ export default function MapView({
     for (const layer of [
       "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
       "wetlands-fill", "timber-fill", "roads-hit", "easements-fill",
+      "easements-hatch-base", "easements-hit",
       "assets-circle", "assets-line", "assets-fill",
     ]) {
       map.on("mouseenter", layer, () => {
@@ -989,7 +1054,7 @@ export default function MapView({
     setData("wetlands", rowsToFC(inc(wetlands, "wetland"), "wetland"));
     setData("timber", rowsToFC(inc(timber, "timber_stand"), "timber_stand"));
     setData("roads", rowsToFC(inc(roads, "road"), "road"));
-    setData("easements", rowsToFC(inc(easements, "utility_easement"), "utility_easement"));
+    setData("easements", rowsToFC(inc(easements, "easement"), "easement"));
     setData("assets", rowsToFC(inc(assets, "asset"), "asset"));
     setData("property-labels", rowsToLabelFC(inc(properties, "property"), "property"));
     setData("parcel-labels", rowsToLabelFC(inc(parcels, "parcel"), "parcel"));
@@ -997,7 +1062,7 @@ export default function MapView({
     setData("pasture-labels", rowsToLabelFC(inc(pastures, "pasture"), "pasture"));
     setData("wetland-labels", rowsToLabelFC(inc(wetlands, "wetland"), "wetland"));
     setData("timber-labels", rowsToLabelFC(inc(timber, "timber_stand"), "timber_stand"));
-    setData("easement-labels", rowsToLabelFC(inc(easements, "utility_easement"), "utility_easement"));
+    setData("easement-labels", rowsToLabelFC(inc(easements, "easement"), "easement"));
 
     const ghostFeatures: Feature[] = [];
     if (printOpen && excluded.size > 0) {
@@ -1116,11 +1181,7 @@ export default function MapView({
       ["wetland", ["wetlands-fill", "wetlands-line", "wetland-labels"]],
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
-      ["utility_easement", [
-        "easements-fill",
-        "easements-line-powerline", "easements-line-pipeline",
-        "easements-line-other", "easement-labels",
-      ]],
+      ["easement", [...easementLayerIdsRef.current, "easement-labels"]],
       ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
     ];
     for (const [key, layers] of groups) {
@@ -1144,7 +1205,7 @@ export default function MapView({
       const srcName: Record<EntityType, string> = {
         property: "properties", parcel: "parcels", field: "fields",
         pasture: "pastures", wetland: "wetlands", timber_stand: "timber",
-        road: "roads", utility_easement: "easements", asset: "assets",
+        road: "roads", easement: "easements", asset: "assets",
       };
       bySource[srcName[selected.entityType]] = selected.id;
     }
@@ -1194,6 +1255,11 @@ export default function MapView({
     setDrawingShape(false);
     completedDrawIdsRef.current = new Set();
     placeForPivotRef.current = false;
+    placeForCircleRef.current = null;
+    setPlaceAssetType(null);
+    setDrawSession(null);
+    setEditIsLine(false);
+    if (mapRef.current) applyDraftColor(mapRef.current, null);
   }
 
   // Session-level cancel: when completed areas exist, a mis-tap must not
@@ -1386,6 +1452,20 @@ export default function MapView({
     () => {}
   );
   applyPivotDragRef.current = (role, lngLat) => {
+    if (circleEditRef.current) {
+      setCircleEdit((edit) => {
+        if (!edit) return edit;
+        if (role === "center") return { ...edit, params: { ...edit.params, center: lngLat } };
+        if (role === "radius") {
+          return {
+            ...edit,
+            params: { ...edit.params, diameterFt: diameterFromRimPoint(edit.params.center, lngLat) },
+          };
+        }
+        return edit;
+      });
+      return;
+    }
     setPivotEdit((edit) => {
       if (!edit) return edit;
       const p = edit.params;
@@ -1424,6 +1504,23 @@ export default function MapView({
     const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
     const preview = map.getSource("pivot-preview") as GeoJSONSource | undefined;
     const handles = map.getSource("pivot-handles") as GeoJSONSource | undefined;
+    if (circleEdit) {
+      const c = circleEdit.params;
+      preview?.setData({
+        type: "FeatureCollection",
+        features: [{ type: "Feature", properties: {}, geometry: circlePolygon(c) }],
+      });
+      handles?.setData({
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: { role: "center", kind: "center" },
+            geometry: { type: "Point", coordinates: c.center } },
+          { type: "Feature", properties: { role: "radius", kind: "radius" },
+            geometry: { type: "Point", coordinates: rimPoint(c) } },
+        ],
+      });
+      return;
+    }
     if (!pivotEdit) {
       preview?.setData(empty);
       handles?.setData(empty);
@@ -1465,7 +1562,108 @@ export default function MapView({
       );
     }
     handles?.setData({ type: "FeatureCollection", features: handleFeatures });
-  }, [pivotEdit, mapLoaded]);
+  }, [pivotEdit, circleEdit, mapLoaded]);
+
+  // ---- Circle footprint editor (grain bins, round structures) ----
+
+  function openCircleEditor(
+    assetId: string | null,
+    assetType: AssetType,
+    params: CircleParams,
+    existingDetails: Record<string, unknown>
+  ) {
+    const map = mapRef.current;
+    setSelected(null);
+    setSaveError(null);
+    setMode("circle");
+    setCircleEdit({ assetId, assetType, params, existingDetails });
+    if (map) {
+      const box = bboxOf([circlePolygon(params)]);
+      if (box) map.fitBounds(box, { padding: 120, duration: 300, maxZoom: 19 });
+    }
+  }
+
+  // From the click panel: reopen a saved circle, or start one for an
+  // asset that has a pin (the pin becomes the center) or no shape.
+  function startCircleEditor() {
+    const map = mapRef.current;
+    const row = selectedRow as AssetGeo | null;
+    if (!map || !row || !selected || selected.entityType !== "asset") return;
+    const details = (row.details ?? {}) as Record<string, unknown>;
+    let params = circleFromDetails(details);
+    if (!params) {
+      const g = row.geom_geojson;
+      let center: [number, number] = [map.getCenter().lng, map.getCenter().lat];
+      if (g?.type === "Point") center = g.coordinates as [number, number];
+      else if (g) {
+        const mp = toMultiPolygon(g);
+        const pt = mp ? labelPointOf(mp) : null;
+        if (pt) center = pt;
+      }
+      const d = Number(details.diameter_ft);
+      params = { center, diameterFt: d > 0 ? d : DEFAULT_CIRCLE_DIAMETER_FT };
+    }
+    openCircleEditor(row.id, row.asset_type, params, details);
+  }
+
+  function cancelCircleEditor() {
+    setCircleEdit(null);
+    setPendingCircleSave(false);
+    setMode("view");
+    setSaveError(null);
+  }
+
+  async function saveCircle() {
+    const edit = circleEditRef.current;
+    if (!edit) return;
+    if (edit.assetId === null) {
+      setPendingCircleSave(true);
+      return;
+    }
+    const details = { ...edit.existingDetails, ...detailsFromCircle(edit.params) };
+    setSaving(true);
+    const { error: dErr } = await supabase
+      .from("assets")
+      .update({ details })
+      .eq("id", edit.assetId);
+    const gErr = dErr
+      ? null
+      : await applyGeometry({ entityType: "asset", id: edit.assetId }, circlePolygon(edit.params));
+    setSaving(false);
+    if (dErr || gErr) {
+      setSaveError("Could not save the circle. " + (dErr?.message ?? gErr?.message ?? ""));
+      return;
+    }
+    const sel: SelectedFeature = { entityType: "asset", id: edit.assetId };
+    cancelCircleEditor();
+    await loadData();
+    setSelected(sel);
+  }
+
+  async function saveNewCircleAsset(payload: NewAssetPayload) {
+    const edit = circleEditRef.current;
+    if (!edit) return;
+    setSaving(true);
+    setSaveError(null);
+    const sel = await insertAndSetGeometry(
+      "assets",
+      {
+        organization_id: orgId,
+        property_id: payload.propertyId,
+        name: payload.name,
+        asset_type: edit.assetType,
+        details: detailsFromCircle(edit.params),
+      },
+      "asset",
+      circlePolygon(edit.params)
+    );
+    setSaving(false);
+    if (sel) {
+      cancelCircleEditor();
+      await loadData();
+      setSelected(sel);
+    }
+  }
 
   function startPivotEditor() {
     const map = mapRef.current;
@@ -1702,35 +1900,64 @@ export default function MapView({
     setSelected(sel);
   };
 
-  function startAdd(kind: "boundary" | "line" | "asset_point" | "pivot") {
-    const draw = drawRef.current;
-    if (!draw) return;
+  // Add menu: Draw and Asset open a picker FIRST; the pivot goes
+  // straight to crosshair placement (its type is implied).
+  function startAdd(kind: "draw" | "asset" | "pivot") {
     setAddMenuOpen(false);
     setSelected(null);
     setSaveError(null);
     editTargetRef.current = null;
-    if (kind === "asset_point" || kind === "pivot") {
-      placeForPivotRef.current = kind === "pivot";
-      setCrosshairPos(null);
-      setMode("place");
-      setEditHint(
-        kind === "pivot"
-          ? "Pan the map or drag the crosshair onto the pivot point, then press Place here."
-          : "Pan the map or drag the crosshair to line it up, then press Place here."
-      );
+    if (kind === "draw" || kind === "asset") {
+      setPickerOpen(kind);
       return;
     }
-    drawKindRef.current = kind;
+    placeForPivotRef.current = true;
+    setCrosshairPos(null);
+    setMode("place");
+    setEditHint("Pan the map or drag the crosshair onto the pivot point, then press Place here.");
+  }
+
+  // Pick-first: the type is fixed for the session; the right tool and
+  // the draft color load, and the save form already knows its type.
+  function beginDrawSession(session: DrawSession) {
+    const draw = drawRef.current;
+    const map = mapRef.current;
+    if (!draw || !map) return;
+    setPickerOpen(null);
+    const isLine = session.kind === "line";
+    drawKindRef.current = isLine ? "line" : "boundary";
+    setDrawSession(session);
     setMode("draw");
     draw.deleteAll();
     completedDrawIdsRef.current = new Set();
     setDrawingShape(true);
-    if (kind === "boundary") {
-      setEditHint("Tap the map to add points. Double tap the last point to finish.");
-      draw.changeMode("draw_polygon");
-    } else {
+    applyDraftColor(map, draftColorFor(sessionColorKey(session)));
+    if (isLine) {
       setEditHint("Tap along the line. Double tap the last point to finish.");
       draw.changeMode("draw_line_string");
+    } else {
+      setEditHint("Tap the map to add points. Double tap the last point to finish.");
+      draw.changeMode("draw_polygon");
+    }
+  }
+
+  // Asset placement picked up front: pin (crosshair), outline (polygon
+  // draw in the asset look), or circle (crosshair center, then the
+  // parametric editor).
+  function beginAssetPlacement(assetType: AssetType, placement: AssetPlacement) {
+    setPickerOpen(null);
+    if (placement === "outline") {
+      beginDrawSession({ kind: "asset_outline", assetType });
+      return;
+    }
+    setCrosshairPos(null);
+    setMode("place");
+    if (placement === "circle") {
+      placeForCircleRef.current = assetType;
+      setEditHint("Pan the map or drag the crosshair onto the center, then press Place here.");
+    } else {
+      setPlaceAssetType(assetType);
+      setEditHint("Pan the map or drag the crosshair to line it up, then press Place here.");
     }
   }
 
@@ -1747,8 +1974,9 @@ export default function MapView({
     const isPoint = g?.type === "Point" || g?.type === "MultiPoint";
     const isLineTarget =
       selected.entityType === "road" ||
-      (selected.entityType === "asset" &&
+      ((selected.entityType === "asset" || selected.entityType === "easement") &&
         (g?.type === "LineString" || g?.type === "MultiLineString"));
+    setEditIsLine(isLineTarget);
 
     if (selected.entityType === "asset" && (isPoint || !g)) {
       // Move a pin (or place one for an asset with no location): crosshair mode
@@ -1840,6 +2068,20 @@ export default function MapView({
     // Wherever the crosshair sits: its dragged position, else center.
     const pos = crosshairPosRef.current;
     const center = pos ? map.unproject([pos.x, pos.y]) : map.getCenter();
+    if (placeForCircleRef.current) {
+      // The crosshair placed a NEW circle footprint's center: into the
+      // circle editor (Save asks for name and property).
+      const assetType = placeForCircleRef.current;
+      placeForCircleRef.current = null;
+      setEditHint(null);
+      openCircleEditor(
+        null,
+        assetType,
+        { center: [center.lng, center.lat], diameterFt: DEFAULT_CIRCLE_DIAMETER_FT },
+        {}
+      );
+      return;
+    }
     if (placeForPivotRef.current) {
       // The crosshair placed a NEW pivot's center: straight into the
       // circle editor (Save asks for name and property).
@@ -1913,7 +2155,9 @@ export default function MapView({
   }
 
   async function saveNewBoundary(payload: NewBoundaryPayload) {
-    if (!pendingPoly) return;
+    // Line easements arrive as a pending line; everything else a polygon.
+    const geometry: Geometry | null = pendingPoly ?? pendingLine;
+    if (!geometry) return;
     setSaving(true);
     setSaveError(null);
     const base: Record<string, unknown> = { organization_id: orgId };
@@ -1935,17 +2179,24 @@ export default function MapView({
         base.year_established = payload.yearEstablished;
         base.notes = payload.standNotes;
       }
-      if (payload.entityType === "utility_easement") {
+      if (payload.entityType === "easement") {
         // Easement details inline the same way; property stays optional
-        // (easements cross property lines).
+        // (easements cross property lines, and one that BENEFITS this
+        // property lies on a neighbor).
         base.easement_type = payload.easementType ?? "other";
+        base.relationship = payload.relationship ?? "burdens_this_property";
         base.holder = payload.holder;
         base.recorded_ref = payload.recordedRef;
+        base.expiration_date = payload.expirationDate;
+        base.width_ft = payload.widthFt;
+        base.elevation_ft = payload.elevationFt;
+        base.program = payload.program;
+        base.restrictions = payload.restrictions;
         base.notes = payload.easementNotes;
       }
     }
     const sel = await insertAndSetGeometry(
-      ENTITY_TABLE[payload.entityType], base, payload.entityType, pendingPoly
+      ENTITY_TABLE[payload.entityType], base, payload.entityType, geometry
     );
     setSaving(false);
     if (sel) {
@@ -1975,6 +2226,25 @@ export default function MapView({
         "asset", pendingLine
       );
     }
+    setSaving(false);
+    if (sel) {
+      resetDrawState();
+      await loadData();
+      setSelected(sel);
+    }
+  }
+
+  // Outline-drawn footprint (shop, barn, pond): the polygon IS the asset.
+  async function saveNewAssetOutline(payload: NewAssetPayload) {
+    if (!pendingPoly) return;
+    setSaving(true);
+    setSaveError(null);
+    const sel = await insertAndSetGeometry(
+      "assets",
+      { organization_id: orgId, property_id: payload.propertyId,
+        name: payload.name, asset_type: payload.assetType },
+      "asset", pendingPoly
+    );
     setSaving(false);
     if (sel) {
       resetDrawState();
@@ -2016,7 +2286,7 @@ export default function MapView({
       wetland: visibility.wetland,
       timber_stand: visibility.timber_stand,
       road: visibility.road,
-      utility_easement: visibility.utility_easement,
+      easement: visibility.easement,
       asset: visibility.asset,
       crops: cropsOn,
       entity: entityColorsOn,
@@ -2166,7 +2436,7 @@ export default function MapView({
     const incWetlands = printInc(wetlands, "wetland");
     const incTimber = printInc(timber, "timber_stand");
     const incRoads = printInc(roads, "road");
-    const incEasements = printInc(easements, "utility_easement");
+    const incEasements = printInc(easements, "easement");
     const incAssets = printInc(assets, "asset");
     if (flags.property && !flags.entity) {
       out.push({ label: "Property boundary", color: "#6b7280", kind: "outline" });
@@ -2208,15 +2478,23 @@ export default function MapView({
     if (flags.road && incRoads.length > 0) {
       out.push({ label: "Roads", color: PINE, kind: "line" });
     }
-    if (flags.utility_easement) {
-      for (const type of ["powerline", "pipeline", "other"] as const) {
-        if (incEasements.some((e) => (e.easement_type ?? "other") === type)) {
-          out.push({
-            label: EASEMENT_TYPE_LABELS[type],
-            color: EASEMENT_COLORS[type],
-            kind: "fill",
-          });
-        }
+    if (flags.easement) {
+      for (const cat of categoriesPresent(incEasements)) {
+        out.push({
+          label: `${EASEMENT_CATEGORY_LABELS[cat]} easement`,
+          color: EASEMENT_CATEGORY_COLORS[cat],
+          kind:
+            cat === "conservation"
+              ? "hatch"
+              : cat === "access_transport"
+                ? "dash"
+                : cat === "water"
+                  ? "dotdash"
+                  : "fill",
+        });
+      }
+      if (incEasements.some((e) => e.easement_type === "railroad")) {
+        out.push({ label: "Railroad", color: EASEMENT_STYLES.railroad.color, kind: "ticks" });
       }
     }
     if (flags.asset && incAssets.length > 0) {
@@ -2259,7 +2537,7 @@ export default function MapView({
           wetlands: rowsToFC(printInc(wetlands, "wetland"), "wetland"),
           timber: rowsToFC(printInc(timber, "timber_stand"), "timber_stand"),
           roads: rowsToFC(printInc(roads, "road"), "road"),
-          easements: rowsToFC(printInc(easements, "utility_easement"), "utility_easement"),
+          easements: rowsToFC(printInc(easements, "easement"), "easement"),
           assets: rowsToFC(printInc(assets, "asset"), "asset"),
           propertyLabels: rowsToLabelFC(printInc(properties, "property"), "property"),
           parcelLabels: rowsToLabelFC(printInc(parcels, "parcel"), "parcel"),
@@ -2267,7 +2545,7 @@ export default function MapView({
           pastureLabels: rowsToLabelFC(printInc(pastures, "pasture"), "pasture"),
           wetlandLabels: rowsToLabelFC(printInc(wetlands, "wetland"), "wetland"),
           timberLabels: rowsToLabelFC(printInc(timber, "timber_stand"), "timber_stand"),
-          easementLabels: rowsToLabelFC(printInc(easements, "utility_easement"), "utility_easement"),
+          easementLabels: rowsToLabelFC(printInc(easements, "easement"), "easement"),
         },
         legend: buildPrintLegend(printLayers),
         onProgress: setPrintBusy,
@@ -2635,7 +2913,7 @@ export default function MapView({
                   ["pasture", "Pastures", true],
                   ["wetland", "Wetlands", true],
                   ["road", "Roads", true],
-                  ["utility_easement", "Utility easements", true],
+                  ["easement", "Easements", true],
                   ["asset", "Assets", true],
                 ] as Array<[keyof PrintLabelFlags, string, boolean]>
               ).map(([key, label, hasLabels]) => (
@@ -2714,35 +2992,45 @@ export default function MapView({
       {/* Left control column */}
       <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
-        {visibility.utility_easement && easements.length > 0 ? (
+        {visibility.easement && easements.length > 0 ? (
           <div className="rounded-lg bg-white/95 p-2 shadow-md">
             <p className="text-xs font-medium text-gray-800">Easements</p>
             <div className="mt-1 space-y-0.5">
-              {(Object.keys(EASEMENT_TYPE_LABELS) as Array<keyof typeof EASEMENT_COLORS>)
-                .filter((type) =>
-                  easements.some((e) => (e.easement_type ?? "other") === type)
-                )
-                .map((type) => (
-                  <p key={type} className="flex items-center gap-1.5 text-xs text-gray-700">
-                    {/* Translucent strip swatch; the border keeps the
-                        per-type dash identity (long-dash powerline,
-                        dotted pipeline, solid other). */}
+              {categoriesPresent(easements).map((cat) => {
+                const color = EASEMENT_CATEGORY_COLORS[cat];
+                const hatch = cat === "conservation";
+                return (
+                  <p key={cat} className="flex items-center gap-1.5 text-xs text-gray-700">
                     <span
-                      className="h-3 w-4 rounded-[2px]"
+                      className="h-3 w-4 shrink-0 rounded-[2px]"
                       style={{
-                        backgroundColor: EASEMENT_COLORS[type] + "30",
+                        background: hatch
+                          ? `repeating-linear-gradient(45deg, ${color}cc 0 1.5px, ${color}22 1.5px 4px)`
+                          : color + "40",
                         border: `1.5px ${
-                          type === "powerline"
+                          cat === "utility" || cat === "access_transport" || cat === "water"
                             ? "dashed"
-                            : type === "pipeline"
-                              ? "dotted"
-                              : "solid"
-                        } ${EASEMENT_COLORS[type]}`,
+                            : "solid"
+                        } ${color}`,
                       }}
                     />
-                    {EASEMENT_TYPE_LABELS[type]}
+                    {EASEMENT_CATEGORY_LABELS[cat]}
                   </p>
-                ))}
+                );
+              })}
+              {easements.some((e) => e.easement_type === "railroad") ? (
+                <p className="flex items-center gap-1.5 text-xs text-gray-700">
+                  <span
+                    className="h-1 w-4 shrink-0"
+                    style={{
+                      background: `repeating-linear-gradient(90deg, ${EASEMENT_STYLES.railroad.color} 0 1.5px, transparent 1.5px 4px)`,
+                      borderTop: `1px solid ${EASEMENT_STYLES.railroad.color}`,
+                      borderBottom: `1px solid ${EASEMENT_STYLES.railroad.color}`,
+                    }}
+                  />
+                  Railroad
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -2840,11 +3128,10 @@ export default function MapView({
               <div className="absolute left-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-lg bg-white shadow-lg">
                 {(
                   [
-                    ["boundary", "Boundary (field, timber...)"],
-                    ["line", "Road, pipe, or fence"],
-                    ["asset_point", "Asset pin (well, bin...)"],
-                    ["pivot", "Irrigation pivot (circle)"],
-                  ] as Array<["boundary" | "line" | "asset_point" | "pivot", string]>
+                    ["draw", "Draw (boundary, road, easement)"],
+                    ["asset", "Asset (pin, outline, circle)"],
+                    ["pivot", "Irrigation pivot (coverage)"],
+                  ] as Array<["draw" | "asset" | "pivot", string]>
                 ).map(([kind, label]) => (
                   <button
                     key={kind}
@@ -3040,8 +3327,76 @@ export default function MapView({
           })()
         : null}
 
+      {/* Circle footprint toolbar (hidden while the new-asset save
+          dialog is up) */}
+      {mode === "circle" && circleEdit && !pendingCircleSave
+        ? (() => {
+            const c = circleEdit.params;
+            const sqFt = circleAreaSqFt(c.diameterFt);
+            const isBin = circleEdit.assetType === "grain_bin";
+            return (
+              <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[94%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
+                <p className="text-xs">
+                  White handle moves the center, blue sets the diameter.
+                  {isBin ? " The diameter is the bin's diameter spec; typing it on the asset page resizes this circle too." : ""}
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center justify-center gap-2">
+                  <label className="flex items-center gap-1 text-xs">
+                    Diameter
+                    <input
+                      type="number"
+                      step="any"
+                      value={Math.round(c.diameterFt * 10) / 10}
+                      onChange={(e) =>
+                        setCircleEdit((edit) =>
+                          edit
+                            ? {
+                                ...edit,
+                                params: {
+                                  ...edit.params,
+                                  diameterFt: Math.max(
+                                    MIN_CIRCLE_DIAMETER_FT,
+                                    Number(e.target.value) || MIN_CIRCLE_DIAMETER_FT
+                                  ),
+                                },
+                              }
+                            : edit
+                        )
+                      }
+                      className="w-20 rounded border-0 px-1.5 py-0.5 text-xs text-gray-900"
+                    />
+                    ft
+                  </label>
+                  <span className="text-xs tabular-nums">
+                    {formatFootprint(sqFt, formatAcres, formatNumber)}
+                    {circleAcres(c.diameterFt) >= 0.5
+                      ? ""
+                      : ` (${formatAcres(circleAcres(c.diameterFt))} ac)`}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex justify-center gap-2">
+                  <button
+                    onClick={saveCircle}
+                    disabled={saving}
+                    className="rounded bg-kelly-500 px-3 py-1 text-xs font-semibold hover:bg-kelly-600 disabled:opacity-60"
+                  >
+                    {saving ? "Saving..." : "Save circle"}
+                  </button>
+                  <button
+                    onClick={cancelCircleEditor}
+                    className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {saveError ? <p className="mt-1 text-xs text-red-300">{saveError}</p> : null}
+              </div>
+            );
+          })()
+        : null}
+
       {/* Draw/edit/place toolbar */}
-      {mode !== "view" && mode !== "pivot" ? (
+      {mode !== "view" && mode !== "pivot" && mode !== "circle" ? (
         <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[92%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
           <p className="text-xs">{editHint}</p>
           <div className="mt-1.5 flex justify-center gap-2">
@@ -3054,7 +3409,7 @@ export default function MapView({
                 {saving ? "Saving..." : "Save"}
               </button>
             ) : null}
-            {mode === "edit" && editTargetType && POLYGON_TYPES.includes(editTargetType) ? (
+            {mode === "edit" && editTargetType && !editIsLine && POLYGON_TYPES.includes(editTargetType) ? (
               <>
                 <button
                   onClick={() => startBoundaryOp("add")}
@@ -3118,23 +3473,40 @@ export default function MapView({
         </div>
       ) : null}
 
-      {/* Save dialogs */}
-      {pendingPoly && mode === "draw" ? (
+      {/* Pick-first pickers */}
+      {pickerOpen === "draw" ? (
+        <DrawTypePicker onPick={beginDrawSession} onCancel={() => setPickerOpen(null)} />
+      ) : null}
+      {pickerOpen === "asset" ? (
+        <AssetPlacePicker onPick={beginAssetPlacement} onCancel={() => setPickerOpen(null)} />
+      ) : null}
+
+      {/* Save dialogs: the session's type is fixed, so each form opens
+          already set to it with its inline fields. */}
+      {mode === "draw" && drawSession && drawSession.kind !== "asset_outline" &&
+      (drawSession.entityType === "easement"
+        ? pendingPoly || pendingLine
+        : drawSession.kind === "boundary" && pendingPoly) ? (
         <NewBoundaryDialog
-          approxAcres={approxAcres(pendingPoly)}
+          fixedType={drawSession.entityType as BoundaryType}
+          shape={drawSession.kind === "line" ? "line" : "polygon"}
+          approxAcres={pendingPoly ? approxAcres(pendingPoly) : null}
+          approxLengthFt={pendingLine ? approxLengthFt(pendingLine) : null}
           properties={properties}
-          suggestedPropertyId={suggestedForPoly}
+          suggestedPropertyId={pendingPoly ? suggestedForPoly : suggestedForLine}
           saving={saving}
           error={saveError}
           onSave={saveNewBoundary}
-          onCancel={cancelBoundarySession}
+          onCancel={pendingPoly ? cancelBoundarySession : resetDrawState}
           onAddArea={() => startBoundaryOp("add")}
           onCutArea={() => startBoundaryOp("subtract")}
           hidden={pendingExtraDraw}
         />
       ) : null}
-      {pendingLine && mode === "draw" ? (
+      {pendingLine && mode === "draw" && drawSession?.kind === "line" &&
+      drawSession.entityType !== "easement" ? (
         <NewLineDialog
+          fixedKind={drawSession.entityType}
           properties={properties}
           suggestedPropertyId={suggestedForLine}
           saving={saving}
@@ -3143,14 +3515,40 @@ export default function MapView({
           onCancel={resetDrawState}
         />
       ) : null}
+      {pendingPoly && mode === "draw" && drawSession?.kind === "asset_outline" && !pendingExtraDraw ? (
+        <NewAssetDialog
+          properties={properties}
+          suggestedPropertyId={suggestedForPoly}
+          fixedType={drawSession.assetType}
+          saving={saving}
+          error={saveError}
+          onSave={saveNewAssetOutline}
+          onCancel={cancelBoundarySession}
+        />
+      ) : null}
       {pendingPoint && mode === "place" ? (
         <NewAssetDialog
           properties={properties}
           suggestedPropertyId={suggestedForPoint}
+          fixedType={placeAssetType}
           saving={saving}
           error={saveError}
           onSave={saveNewAsset}
           onCancel={resetDrawState}
+        />
+      ) : null}
+      {pendingCircleSave && mode === "circle" && circleEdit ? (
+        <NewAssetDialog
+          properties={properties}
+          suggestedPropertyId={suggestPropertyId(
+            { type: "Point", coordinates: circleEdit.params.center },
+            matchableProperties
+          )}
+          fixedType={circleEdit.assetType}
+          saving={saving}
+          error={saveError}
+          onSave={saveNewCircleAsset}
+          onCancel={() => setPendingCircleSave(false)}
         />
       ) : null}
       {pendingPivotSave && mode === "pivot" && pivotEdit ? (
@@ -3185,6 +3583,7 @@ export default function MapView({
           onEditGeometry={startEditGeometry}
           onSplit={startSplitStand}
           onPivotCircle={startPivotEditor}
+          onCircleFootprint={startCircleEditor}
           onChanged={loadData}
         />
       ) : null}

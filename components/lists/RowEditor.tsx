@@ -89,7 +89,8 @@ export default function RowEditor({
             ) : (
               <input
                 name={f.key}
-                type={f.input === "number" ? "number" : "text"}
+                type={f.input === "number" ? "number" : f.input === "date" ? "date" : "text"}
+                step={f.input === "number" ? "any" : undefined}
                 required={f.required}
                 defaultValue={fieldDisplayValue(f, row[f.key])}
                 placeholder={f.label}

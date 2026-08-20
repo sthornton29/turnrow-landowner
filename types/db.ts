@@ -181,24 +181,52 @@ export interface RoadGeo {
   updated_at: string;
 }
 
-export type EasementType = "powerline" | "pipeline" | "other";
+export type EasementType =
+  | "powerline"
+  | "pipeline"
+  | "waterline_sewer"
+  | "telecom_fiber"
+  | "access_row"
+  | "public_road_row"
+  | "railroad"
+  | "drainage"
+  | "flowage"
+  | "conservation"
+  | "cemetery_access"
+  | "construction_temp"
+  | "solar_wind"
+  | "other";
 
-// Utility easements (powerline/pipeline corridors). NOT the farm's own
-// underground irrigation pipe (that is an asset); labels always say
-// "easement" so the two never read as the same thing. Polygon
-// boundaries like every land type since migration 0017; acres is the
-// generated PostGIS column.
-export interface UtilityEasementGeo {
+export type EasementRelationship =
+  | "burdens_this_property"
+  | "benefits_this_property";
+
+// Easements (migration 0019; utility_easements before that): every
+// recorded right someone else holds over the land, or that the owner
+// holds over a neighbor (relationship = benefits_this_property, whose
+// geometry may lie outside the property). Each is EITHER a polygon
+// (boundary + generated acres) OR a line (geom + generated length).
+// NOT the farm's own underground irrigation pipe (that is an asset).
+export interface EasementGeo {
   id: string;
   organization_id: string;
   property_id: string | null;
   name: string;
   easement_type: EasementType;
+  relationship: EasementRelationship;
   holder: string | null;
   recorded_ref: string | null;
+  expiration_date: string | null; // null = permanent / indefinite
+  width_ft: number | null; // informational on line easements
+  elevation_ft: number | null; // flowage contour
+  program: string | null; // conservation program / holder detail
+  restrictions: string | null; // conservation restrictions notes
   notes: string | null;
   acres: number | null;
+  length_feet: number | null;
+  miles: number | null;
   boundary_geojson: MultiPolygon | null;
+  geom_geojson: MultiLineString | null;
   created_at: string;
   updated_at: string;
 }
@@ -252,5 +280,5 @@ export type EntityType =
   | "wetland"
   | "timber_stand"
   | "road"
-  | "utility_easement"
+  | "easement"
   | "asset";

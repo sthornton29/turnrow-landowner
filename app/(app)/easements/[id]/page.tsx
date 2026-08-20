@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres } from "@/lib/format";
-import { EASEMENT_TYPE_LABELS } from "@/lib/assetTypes";
+import { formatAcres, formatNumber } from "@/lib/format";
+import {
+  EASEMENT_RELATIONSHIP_LABELS,
+  easementTypeLabel,
+} from "@/lib/easements";
 import {
   ActionLink,
   DetailsCard,
@@ -12,7 +15,7 @@ import {
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import RowEditor from "@/components/lists/RowEditor";
 
-export const metadata = { title: "Utility easement" };
+export const metadata = { title: "Easement" };
 
 export default async function EasementSummaryPage({
   params,
@@ -23,7 +26,7 @@ export default async function EasementSummaryPage({
   const { supabase, profile } = await requireOrg();
 
   const { data: easement } = await supabase
-    .from("utility_easements_geo")
+    .from("easements_geo")
     .select("*")
     .eq("id", id)
     .single();
@@ -40,9 +43,13 @@ export default async function EasementSummaryPage({
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 md:p-6">
       <SummaryHeader
-        typeLabel={EASEMENT_TYPE_LABELS[easement.easement_type] ?? "Utility easement"}
+        typeLabel={`${easementTypeLabel(easement.easement_type)} easement`}
         name={easement.name}
-        keyFigure={`${formatAcres(easement.acres)} acres`}
+        keyFigure={
+          easement.geom_geojson
+            ? `${formatNumber(Math.round(easement.length_feet ?? 0))} ft`
+            : `${formatAcres(easement.acres)} acres`
+        }
         breadcrumb={[
           { href: "/properties", label: "Properties" },
           ...(property
@@ -51,37 +58,59 @@ export default async function EasementSummaryPage({
           { href: `/easements/${id}`, label: easement.name },
         ]}
         actions={
-          <ActionLink href={`/map?focus=utility_easement:${id}`} primary>
+          <ActionLink href={`/map?focus=easement:${id}`} primary>
             View on map
           </ActionLink>
         }
       />
 
-      <MapThumb geometry={easement.boundary_geojson} focus={`utility_easement:${id}`} />
+      <MapThumb
+        geometry={easement.boundary_geojson ?? easement.geom_geojson}
+        focus={`easement:${id}`}
+      />
 
       <DetailsCard
         rows={[
+          ["Easement type", easementTypeLabel(easement.easement_type)],
           [
-            "Easement type",
-            EASEMENT_TYPE_LABELS[easement.easement_type] ?? easement.easement_type,
+            "Relationship",
+            EASEMENT_RELATIONSHIP_LABELS[
+              easement.relationship as keyof typeof EASEMENT_RELATIONSHIP_LABELS
+            ] ?? easement.relationship,
           ],
           ["Holder", easement.holder],
-          ["Acres", formatAcres(easement.acres)],
+          easement.geom_geojson
+            ? [
+                "Length",
+                `${formatNumber(Math.round(easement.length_feet ?? 0))} ft (${Number(easement.miles ?? 0).toFixed(2)} mi)`,
+              ]
+            : ["Acres", formatAcres(easement.acres)],
+          easement.geom_geojson && easement.width_ft != null
+            ? ["Width", `${formatNumber(easement.width_ft)} ft (informational)`]
+            : ["Width", null],
           ["Recorded ref", easement.recorded_ref],
+          ["Expires", easement.expiration_date ?? "Permanent / indefinite"],
+          [
+            "Flowage elevation",
+            easement.elevation_ft != null ? `${formatNumber(easement.elevation_ft)} ft` : null,
+          ],
+          ["Program / holder detail", easement.program],
+          ["Restrictions", easement.restrictions],
           ["Notes", easement.notes],
         ]}
       />
-      <RowEditor entityType="utility_easement" row={easement} />
+      <RowEditor entityType="easement" row={easement} />
 
       <RelatedSection title="Documents">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <p className="mb-2 text-xs text-gray-500">
             The recorded easement deed belongs here; it is exactly the
-            document that gets lost.
+            document that gets lost. (Severed mineral rights are not an
+            easement; a future encumbrances area will hold those.)
           </p>
           <EntityDocuments
             orgId={profile.organization_id!}
-            entityType="utility_easement"
+            entityType="easement"
             entityId={id}
           />
         </div>

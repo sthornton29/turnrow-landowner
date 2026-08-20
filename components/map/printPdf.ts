@@ -10,12 +10,10 @@
 import mapboxgl from "mapbox-gl";
 import { jsPDF } from "jspdf";
 import type { FeatureCollection } from "geojson";
-import {
-  EASEMENT_COLORS,
-  STAND_TYPE_COLORS,
-} from "@/lib/assetTypes";
+import { STAND_TYPE_COLORS } from "@/lib/assetTypes";
 import { distanceFt } from "@/lib/geo/pivot";
-import { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./MapView";
+import { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
+import { addEasementLayers } from "./easementLayers";
 
 export interface PrintLayerFlags {
   property: boolean;
@@ -25,7 +23,7 @@ export interface PrintLayerFlags {
   wetland: boolean;
   timber_stand: boolean;
   road: boolean;
-  utility_easement: boolean;
+  easement: boolean;
   asset: boolean;
   crops: boolean; // recolor ag fields by current-year crop
   entity: boolean; // recolor property outlines by holding entity
@@ -39,7 +37,7 @@ export interface PrintLabelFlags {
   wetland: boolean;
   timber_stand: boolean;
   road: boolean;
-  utility_easement: boolean;
+  easement: boolean;
   asset: boolean;
 }
 
@@ -65,7 +63,15 @@ export interface PrintSources {
 export interface LegendEntry {
   label: string;
   color: string;
-  kind: "fill" | "line" | "dash" | "dotdash" | "outline" | "point";
+  kind:
+    | "fill"
+    | "line"
+    | "dash"
+    | "dotdash"
+    | "outline"
+    | "point"
+    | "hatch" // conservation easements: hatched fill
+    | "ticks"; // railroad: line with tie marks
 }
 
 export interface PrintJob {
@@ -158,7 +164,7 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
   src("wetlands", layers.wetland ? sources.wetlands : empty);
   src("timber", layers.timber_stand ? sources.timber : empty);
   src("roads", layers.road ? sources.roads : empty);
-  src("easements", layers.utility_easement ? sources.easements : empty);
+  src("easements", layers.easement ? sources.easements : empty);
   src("assets", layers.asset ? sources.assets : empty);
 
   // Mirrors the live map's styles; order matches too.
@@ -213,25 +219,8 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
     layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": "#ffffff", "line-width": 2 } });
 
-  const easementColor: mapboxgl.Expression = [
-    "match", ["get", "easementType"],
-    "powerline", EASEMENT_COLORS.powerline,
-    "pipeline", EASEMENT_COLORS.pipeline,
-    EASEMENT_COLORS.other,
-  ];
-  map.addLayer({ id: "easements-fill", type: "fill", source: "easements",
-    paint: { "fill-color": easementColor, "fill-opacity": 0.18 } });
-  map.addLayer({ id: "easements-line-powerline", type: "line", source: "easements",
-    filter: ["==", ["get", "easementType"], "powerline"],
-    paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2,
-      "line-dasharray": [4, 2] } });
-  map.addLayer({ id: "easements-line-pipeline", type: "line", source: "easements",
-    filter: ["==", ["get", "easementType"], "pipeline"],
-    paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2,
-      "line-dasharray": [3, 1.5, 0.4, 1.5] } });
-  map.addLayer({ id: "easements-line-other", type: "line", source: "easements",
-    filter: ["==", ["get", "easementType"], "other"],
-    paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2 } });
+  // Same layers as the live map (shared builder), so the PDF matches.
+  addEasementLayers(map, "easements");
 
   const notPivot: mapboxgl.Expression = [
     "!", ["==", ["get", "assetType"], "irrigation_pivot"],
@@ -296,7 +285,7 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
         "text-size": 10, "text-font": fonts },
       paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
   }
-  if (layers.utility_easement && labels.utility_easement) {
+  if (layers.easement && labels.easement) {
     labelLayer("easement-labels", sources.easementLabels, 10, "#ffffff", "#7f1d1d");
   }
   if (layers.asset && labels.asset) {
@@ -421,6 +410,22 @@ export async function generateMapPdf(job: PrintJob): Promise<void> {
     } else if (entry.kind === "point") {
       pdf.setFillColor(r, g, b2);
       pdf.circle(x + 2.5, y - 1, 1.4, "F");
+    } else if (entry.kind === "hatch") {
+      pdf.setDrawColor(r, g, b2);
+      pdf.setLineWidth(0.25);
+      pdf.rect(x, y - 2.6, 5, 3.2);
+      for (let d = 0.8; d < 8; d += 1.2) {
+        const x1 = x + Math.max(0, d - 3.2);
+        const y1 = y - 2.6 + Math.min(d, 3.2);
+        const x2 = x + Math.min(d, 5);
+        const y2 = y - 2.6 + Math.max(0, d - 5);
+        if (x1 < x2) pdf.line(x1, y1, x2, y2);
+      }
+    } else if (entry.kind === "ticks") {
+      pdf.setDrawColor(r, g, b2);
+      pdf.setLineWidth(0.5);
+      pdf.line(x, y - 1, x + 5, y - 1);
+      for (let t = 0.6; t < 5; t += 1.1) pdf.line(x + t, y - 2.1, x + t, y + 0.1);
     } else {
       pdf.setDrawColor(r, g, b2);
       pdf.setLineWidth(0.8);
