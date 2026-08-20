@@ -1,6 +1,9 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-20 (document vault with a typed taxonomy, AI
+Last updated: 2026-08-20, evening (documents attach to several
+properties, Unfiled documents, AI property matching with the owner's
+property list, 156EZ multi-farm packets, resumable uploads and scan by
+storage path, migrations 0023 to 0026; earlier the same day: document vault with a typed taxonomy, AI
 classification and per-type scans, and boundary plotting from deeds
 and plats, migration 0020; government payments (FSA farms, base acres,
 PLC / ARC-CO projections, income share), migration 0021; the Ask data
@@ -10,12 +13,22 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 ## DEPLOY CHECKLIST (this release)
 
 1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
-   0022_assistant.sql, 0023_document_properties.sql, and
-   0024_unfiled_documents.sql, then 0025_storage_limits.sql (documents bucket to 200 MB; also raise the project-wide Storage upload limit in the dashboard) in Supabase,
-   in that order, BEFORE the deploy
-   goes live (the Documents page reads documents.doc_type and the
-   government payments pages read the fsa_* tables; a deploy without
-   the migrations breaks those pages).
+   0022_assistant.sql, 0023_document_properties.sql,
+   0024_unfiled_documents.sql, 0025_storage_limits.sql, and
+   0026_storage_bucket_unlimited.sql in Supabase, in that order, BEFORE
+   the deploy goes live (the Documents page reads documents.doc_type and
+   the government payments pages read the fsa_* tables; a deploy without
+   the migrations breaks those pages). All seven were run on 2026-08-20.
+   STORAGE LIMIT LESSON (2026-08-20): the documents bucket now carries
+   NO file_size_limit (0026 cleared the 200 MB cap 0025 had set, since a
+   bucket cap always wins over the project-wide limit). The project-wide
+   limit lives in the dashboard under Storage > Settings > Upload file
+   size limit (Pro plan); saving it once left Storage still enforcing
+   the 50 MB Free default (probed: 52,428,800 bytes accepted, one byte
+   more returned 413) until the value was re-saved. When an upload says
+   "Maximum size exceeded", probe the real limit with a tus creation
+   request (POST /storage/v1/upload/resumable with Upload-Length) rather
+   than trusting the dashboard.
 2. Set the new Vercel env vars: NASS_API_KEY (USDA Quick Stats),
    RESEND_API_KEY, SUPPORT_EMAIL, and optionally SUPPORT_FROM. Contact
    support returns a clear 503 until the Resend vars exist; NASS price
@@ -237,12 +250,21 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
-  LARGE DOCUMENTS AND 156EZ PACKETS (migration 0025): the documents
-  bucket accepts 200 MB files (the dashboard's project-wide limit still
-  applies); a storage-limit failure shows a fix-it message and files
-  over 30 MB get a non-blocking heads-up. /api/extract accepts PDFs up
-  to 100 MB and splits long ones with pdf-lib (app/api/extract/
-  pdfChunks.ts): classification reads the first 20 pages, single-record
+  LARGE DOCUMENTS AND 156EZ PACKETS (migrations 0025 + 0026): the
+  documents bucket has no size cap of its own (the dashboard's
+  project-wide Storage limit is the single control, see the deploy
+  checklist); uploads over 6 MB use Supabase's RESUMABLE protocol
+  (tus-js-client, exactly 6 MB chunks, retries, resume of an
+  interrupted upload; uploadToStorage in components/documents/
+  classify.ts) and smaller files the plain upload; a storage-limit
+  failure shows a fix-it message and files over 30 MB get a
+  non-blocking heads-up. SCANS GO BY STORAGE PATH: ScanDocumentButton
+  posts only storage_path/file_name/content_type and /api/extract
+  downloads the file itself under the caller's session (RLS applies),
+  so a 60 MB packet never passes through Vercel's 4.5 MB request body
+  limit; the route allows 300 s (maxDuration) for long packets.
+  /api/extract accepts PDFs up to 100 MB and splits long ones with
+  pdf-lib (app/api/extract/pdfChunks.ts): classification reads the first 20 pages, single-record
   scans the first 90 (pages_scanned/total_pages recorded and an unsure
   note when truncated), and FSA-156EZ reads EVERY 90-page chunk (two at
   a time) and merges farms by farm number (mergeFsaExtractions in
