@@ -16,6 +16,7 @@ import {
 } from "@/lib/documents";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 import {
+  bestGuess,
   isConfident,
   suggestProperties,
   type MatchableParcel,
@@ -57,6 +58,9 @@ const ATTACH_TYPES: Array<{ key: DocumentEntityType; label: string }> = [
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none";
+
+// Property filter value for documents not yet filed to any property.
+const UNFILED_FILTER = "__unfiled";
 
 export interface DocPropertyLink {
   document_id: string;
@@ -120,7 +124,10 @@ export default function DocumentsClient({
     return docs.filter((d) => {
       const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
       const docProps = propsFor(d);
-      if (propertyFilter && !docProps.includes(propertyFilter)) return false;
+      const unfiled = d.entity_type === "organization" && docProps.length === 0;
+      if (propertyFilter === UNFILED_FILTER) {
+        if (!unfiled) return false;
+      } else if (propertyFilter && !docProps.includes(propertyFilter)) return false;
       if (entityFilter) {
         const ok =
           (d.entity_type === "entity" && d.entity_id === entityFilter) ||
@@ -146,10 +153,14 @@ export default function DocumentsClient({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs, search, propertyFilter, entityFilter, typeFilter, targetByKey, propertyEntity, linkedProps, propertyName]);
 
+  const isUnfiled = (d: DocumentRow) => d.entity_type === "organization" && propsFor(d).length === 0;
+  const unfiledDocs = filtered.filter(isUnfiled);
   const groups = (Object.keys(DOC_TYPES_BY_GROUP) as DocGroup[]).map((g) => ({
     key: g,
     label: DOC_GROUP_LABELS[g],
-    docs: filtered.filter((d) => (DOC_TYPE_GROUP[(d.doc_type ?? "other") as DocType] ?? "other") === g),
+    docs: filtered.filter(
+      (d) => !isUnfiled(d) && (DOC_TYPE_GROUP[(d.doc_type ?? "other") as DocType] ?? "other") === g
+    ),
   }));
   const untypedCount = docs.filter((d) => (d.doc_type ?? "other") === "other").length;
 
@@ -190,6 +201,7 @@ export default function DocumentsClient({
         />
         <select value={propertyFilter} onChange={(e) => setPropertyFilter(e.target.value)} className={inputClass}>
           <option value="">All properties</option>
+          <option value={UNFILED_FILTER}>Unfiled</option>
           {properties.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
@@ -221,6 +233,33 @@ export default function DocumentsClient({
             Upload a deed, survey, or FSA-156EZ here, or from any property, lease, or sale page.
           </p>
         </div>
+      ) : null}
+
+      {unfiledDocs.length > 0 ? (
+        <section className="rounded-xl border border-amber-200 bg-white">
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <span className="h-2 w-2 rounded-full bg-amber-400" />
+              Unfiled
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
+                {unfiledDocs.length}
+              </span>
+            </span>
+            <span className="text-xs text-gray-500">Not yet assigned to a property. Use Edit properties on a row.</span>
+          </div>
+          <ul className="divide-y divide-gray-100 border-t border-gray-100">
+            {unfiledDocs.map((d) => (
+              <DocumentRowView
+                key={d.id}
+                doc={d}
+                target={null}
+                propertyIds={[]}
+                properties={properties}
+                onChanged={() => router.refresh()}
+              />
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {groups.map((g) => (
@@ -364,7 +403,11 @@ function DocumentRowView({
                 {target.label}
               </Link>
             ) : null}
-            {!target && propertyIds.length === 0 ? <span>Attached record not found</span> : null}
+            {doc.entity_type === "organization" && propertyIds.length === 0 ? (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-900">Unfiled</span>
+            ) : !target && propertyIds.length === 0 ? (
+              <span>Attached record not found</span>
+            ) : null}
             <button
               onClick={() => {
                 setDraftProps(propertyIds);
@@ -464,34 +507,52 @@ function UploadSheet({
     setPropSuggestions([]);
     if (!f || mode === "manual") return;
     setClassifying(true);
-    const s = await classifyFile(f);
+    // The model sees the owner's property list (names, counties, parcel
+    // and FSA numbers, acres) so it can name the property outright; the
+    // page-level hints still score independently.
+    const context = matchProperties.map((mp) => ({
+      name: mp.name,
+      county: mp.county,
+      state: mp.state,
+      parcel_numbers: matchParcels.filter((pc) => pc.property_id === mp.id).map((pc) => pc.parcel_number),
+      fsa_numbers: mp.fsa_numbers ?? [],
+      acres: mp.acres,
+    }));
+    const s = await classifyFile(f, context);
     setClassifying(false);
     if (s) {
       setSuggestion(s);
       if (!title && s.title) setTitle(s.title);
-      const sugg = suggestProperties(s.property_hints, matchProperties, matchParcels);
+      const sugg = suggestProperties(s.property_hints, matchProperties, matchParcels, s.matched_properties);
       setPropSuggestions(sugg);
-      // Confident matches come pre-checked; weaker ones are shown but
-      // left for the user to tick.
+      // Confident matches come pre-checked; otherwise the one clear
+      // best guess is; weaker ones are shown but left for the user.
       const confident = sugg.filter(isConfident).map((x) => x.propertyId);
-      if (confident.length > 0) {
-        setPropertyIds((cur) => [...new Set([...cur, ...confident])]);
+      const guess = confident.length === 0 ? bestGuess(sugg) : null;
+      const pre = confident.length > 0 ? confident : guess ? [guess.propertyId] : [];
+      if (pre.length > 0) {
+        setPropertyIds((cur) => [...new Set([...cur, ...pre])]);
       }
     }
   }
 
   const extraChosen = extraOn && attachId !== "";
-  const canSave = !!file && (propertyIds.length > 0 || extraChosen);
+  // No gate on properties: a document with nothing chosen saves as
+  // Unfiled and can be assigned from its row any time.
+  const canSave = !!file;
+  const willBeUnfiled = !!file && propertyIds.length === 0 && !extraChosen;
 
   async function save() {
     if (!file || !canSave) return;
     setBusy(true);
     setError(null);
-    // Primary attachment: the first chosen property unless a specific
-    // non-property record was picked.
+    // Primary attachment: a specific record if picked, else the first
+    // chosen property, else Unfiled (entity_type organization).
     const primary = extraChosen
       ? { entityType: attachType, entityId: attachId }
-      : { entityType: "property" as DocumentEntityType, entityId: propertyIds[0] };
+      : propertyIds.length > 0
+        ? { entityType: "property" as DocumentEntityType, entityId: propertyIds[0] }
+        : { entityType: "organization" as DocumentEntityType, entityId: orgId };
     const result = await uploadDocument(supabase, {
       orgId,
       entityType: primary.entityType,
@@ -656,8 +717,10 @@ function UploadSheet({
             ) : null}
           </div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          {file && !canSave ? (
-            <p className="text-xs text-gray-500">Pick at least one property or a specific record.</p>
+          {willBeUnfiled ? (
+            <p className="text-xs text-amber-900">
+              No property chosen: it will be saved as Unfiled; assign properties any time from the row.
+            </p>
           ) : null}
           <div className="flex gap-2">
             <button

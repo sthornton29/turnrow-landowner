@@ -10,7 +10,8 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 ## DEPLOY CHECKLIST (this release)
 
 1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
-   0022_assistant.sql, and 0023_document_properties.sql in Supabase,
+   0022_assistant.sql, 0023_document_properties.sql, and
+   0024_unfiled_documents.sql in Supabase,
    in that order, BEFORE the deploy
    goes live (the Documents page reads documents.doc_type and the
    government payments pages read the fsa_* tables; a deploy without
@@ -236,6 +237,19 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  UNFILED DOCUMENTS (migration 0024): documents.entity_type gains
+  'organization' (entity_id = the organization id): an upload never
+  has to name a property first. The classify call now also receives
+  the owner's property list (names, counties, parcel and FSA numbers,
+  acres; capped at 200, re-serialized server-side) and returns
+  matched_properties (name, confidence, reason); lib/documentMatch.ts
+  scores an AI vote +70/+45/+20 by confidence, adds +40 when a hinted
+  county holds exactly one property, and bestGuess() pre-checks the one
+  clear leader (>= 30 and 15 ahead) when nothing reached the confident
+  bar. With nothing checked the document saves as Unfiled; /documents
+  shows an amber Unfiled section at the top, an Unfiled option in the
+  property filter, and Edit properties re-points the primary
+  attachment to the first property chosen (or back to Unfiled).
   MULTI-PROPERTY DOCUMENTS (migration 0023): document_properties
   (org RLS, composite FK to properties, unique per document+property,
   backfilled from every property-attached document) lists EVERY

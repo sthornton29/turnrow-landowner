@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONFIDENT_SCORE,
+  bestGuess,
   isConfident,
   nameMentioned,
   suggestProperties,
@@ -75,5 +76,49 @@ describe("suggestProperties", () => {
   it("handles missing hints", () => {
     expect(suggestProperties(null, props, parcels)).toEqual([]);
     expect(suggestProperties({}, props, parcels)).toEqual([]);
+  });
+
+  it("AI votes score by confidence with the model's reason", () => {
+    const s = suggestProperties({}, props, parcels, [
+      { name: "River Farm", confidence: "high", reason: "Grantee address matches" },
+      { name: "home place", confidence: "medium", reason: "" },
+      { name: "Nobody", confidence: "high", reason: "invented" },
+    ]);
+    const byId = Object.fromEntries(s.map((x) => [x.propertyId, x]));
+    expect(byId.river.score).toBe(70);
+    expect(byId.river.reasons[0]).toBe("AI: Grantee address matches");
+    expect(byId.home.score).toBe(45);
+    expect(byId.home.reasons[0]).toContain("medium confidence");
+    expect(byId.ms).toBeUndefined();
+    expect(suggestProperties(null, props, parcels, [{ name: "River Farm", confidence: "low" }])[0].score).toBe(20);
+  });
+
+  it("the only property in a hinted county gets the uniqueness bonus", () => {
+    const s = suggestProperties({ counties: ["Bolivar"], states: ["MS"] }, props, parcels);
+    expect(s).toHaveLength(1);
+    expect(s[0].propertyId).toBe("ms");
+    expect(s[0].score).toBe(40 + 12);
+    expect(s[0].reasons).toContain("The only property in Bolivar County");
+    // Two Lawrence properties: no bonus for either.
+    const two = suggestProperties({ counties: ["Lawrence"] }, props, parcels);
+    expect(two.every((x) => x.score === 10)).toBe(true);
+  });
+
+  it("bestGuess needs 30 points and a 15 point lead", () => {
+    expect(bestGuess([])).toBeNull();
+    expect(bestGuess([{ propertyId: "a", score: 29, reasons: [] }])).toBeNull();
+    expect(bestGuess([{ propertyId: "a", score: 30, reasons: [] }])?.propertyId).toBe("a");
+    expect(
+      bestGuess([
+        { propertyId: "a", score: 45, reasons: [] },
+        { propertyId: "b", score: 35, reasons: [] },
+      ])
+    ).toBeNull();
+    expect(
+      bestGuess([
+        { propertyId: "b", score: 20, reasons: [] },
+        { propertyId: "a", score: 52, reasons: [] },
+      ])?.propertyId
+    ).toBe("a");
   });
 });

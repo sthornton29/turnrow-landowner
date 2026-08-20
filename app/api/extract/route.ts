@@ -637,6 +637,45 @@ export async function POST(request: Request) {
       ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
       : { type: "image", source: { type: "base64",
           media_type: file.type as (typeof IMAGE_TYPES)[number], data: base64 } };
+    // Classification may carry the owner's property list (name, county,
+    // state, parcel and FSA numbers, acres) so the model can name which
+    // of THOSE properties the document concerns; capped and re-serialized
+    // server-side so nothing unexpected reaches the prompt.
+    let promptText = VAULT_PROMPTS[vaultKind];
+    if (vaultKind === "classify") {
+      const rawContext = formData.get("context");
+      if (typeof rawContext === "string" && rawContext.length < 200_000) {
+        try {
+          const parsed = JSON.parse(rawContext) as unknown;
+          if (Array.isArray(parsed)) {
+            const lines = parsed.slice(0, 200).flatMap((item) => {
+              if (!item || typeof item !== "object") return [];
+              const o = item as Record<string, unknown>;
+              const name = typeof o.name === "string" ? o.name.trim().slice(0, 120) : "";
+              if (!name) return [];
+              const strs = (v: unknown) =>
+                Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 40).map((x) => String(x).slice(0, 60)) : [];
+              const parts = [
+                typeof o.county === "string" && o.county ? `${o.county} County` : null,
+                typeof o.state === "string" && o.state ? o.state : null,
+                typeof o.acres === "number" ? `${Math.round(o.acres * 10) / 10} acres` : null,
+                strs(o.parcel_numbers).length ? `parcels ${strs(o.parcel_numbers).join(", ")}` : null,
+                strs(o.fsa_numbers).length ? `FSA farms ${strs(o.fsa_numbers).join(", ")}` : null,
+              ].filter(Boolean);
+              return [`- "${name}"${parts.length ? `: ${parts.join("; ")}` : ""}`];
+            });
+            if (lines.length > 0) {
+              promptText +=
+                "\n\nThe owner's properties are:\n" +
+                lines.join("\n") +
+                "\n\nIn matched_properties, name which of THESE properties the document most likely concerns (by parcel numbers, FSA farm numbers, county, acreage, owner or tract names). Use the names exactly as listed; never invent a name; leave it empty when nothing ties the document to a listed property.";
+            }
+          }
+        } catch {
+          // Malformed context: classify without it.
+        }
+      }
+    }
     try {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
@@ -644,7 +683,7 @@ export async function POST(request: Request) {
         tools: [vtool],
         tool_choice: { type: "tool", name: vtool.name },
         messages: [
-          { role: "user", content: [vblock, { type: "text", text: VAULT_PROMPTS[vaultKind] }] },
+          { role: "user", content: [vblock, { type: "text", text: promptText }] },
         ],
       });
       const toolUse = response.content.find(

@@ -257,7 +257,8 @@ export type DocumentEntityType =
   | "lease"
   | "timber_sale"
   | "tax_statement"
-  | "entity";
+  | "entity"
+  | "organization"; // unfiled: entity_id = the organization id (migration 0024)
 
 export interface DocumentRow {
   id: string;

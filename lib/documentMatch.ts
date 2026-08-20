@@ -40,7 +40,18 @@ export interface PropertySuggestion {
   reasons: string[];
 }
 
+export interface AiPropertyMatch {
+  name: string;
+  confidence: "high" | "medium" | "low" | string;
+  reason?: string | null;
+}
+
 export const CONFIDENT_SCORE = 50;
+
+// The classifier also names properties off the owner's list; its vote
+// is weighted by its stated confidence and always comes with a reason.
+const AI_SCORE: Record<string, number> = { high: 70, medium: 45, low: 20 };
+const UNIQUE_COUNTY_SCORE = 40;
 
 const SCORE = {
   parcel: 60,
@@ -98,9 +109,12 @@ function normFsa(s: string): string {
 export function suggestProperties(
   hints: PropertyHints | null | undefined,
   properties: MatchableProperty[],
-  parcels: MatchableParcel[]
+  parcels: MatchableParcel[],
+  aiMatches: AiPropertyMatch[] | null | undefined = null
 ): PropertySuggestion[] {
-  if (!hints) return [];
+  const ai = (aiMatches ?? []).filter((m) => m && typeof m.name === "string");
+  if (!hints && ai.length === 0) return [];
+  hints = hints ?? {};
   const parcelHints = (hints.parcel_numbers ?? [])
     .map((p) => ({ raw: p, key: parcelKey(p) }))
     .filter((p) => p.key.length > 0);
@@ -115,10 +129,40 @@ export function suggestProperties(
   const acresHint =
     typeof hints.acres === "number" && hints.acres > 0 ? hints.acres : null;
 
+  // Uniqueness: when the org has exactly one property in a hinted
+  // county (and state, when the state is named too), that property is
+  // the obvious home even without a parcel or farm number on the page.
+  const uniqueInCounty = new Set<string>();
+  for (const c of counties) {
+    const inCounty = properties.filter((p) => {
+      if (normCounty(p.county) !== c) return false;
+      if (states.size === 0) return true;
+      const ps = normState(p.state);
+      return !ps || states.has(ps);
+    });
+    if (inCounty.length === 1) uniqueInCounty.add(inCounty[0].id);
+  }
+
   const out: PropertySuggestion[] = [];
   for (const p of properties) {
     let score = 0;
     const reasons: string[] = [];
+
+    // The classifier named this property from the owner's list.
+    const vote = ai.find((m) => norm(m.name) === norm(p.name));
+    if (vote) {
+      score += AI_SCORE[norm(vote.confidence)] ?? AI_SCORE.low;
+      reasons.push(
+        vote.reason && vote.reason.trim()
+          ? `AI: ${vote.reason.trim()}`
+          : `AI named this property (${norm(vote.confidence) || "low"} confidence)`
+      );
+    }
+
+    if (uniqueInCounty.has(p.id)) {
+      score += UNIQUE_COUNTY_SCORE;
+      reasons.push(`The only property in ${p.county} County`);
+    }
 
     // Parcel numbers printed on the document that sit on this property.
     for (const ph of parcelHints) {
@@ -175,4 +219,18 @@ export function suggestProperties(
 
 export function isConfident(s: PropertySuggestion): boolean {
   return s.score >= CONFIDENT_SCORE;
+}
+
+// The single best suggestion, when it stands clearly apart: at least 30
+// and 15 ahead of the runner-up (or alone). Pre-checked on upload when
+// nothing reached the confident bar, so one likely property is offered
+// rather than none.
+export function bestGuess(suggestions: PropertySuggestion[]): PropertySuggestion | null {
+  if (suggestions.length === 0) return null;
+  const sorted = [...suggestions].sort((a, b) => b.score - a.score);
+  const top = sorted[0];
+  if (top.score < 30) return null;
+  const next = sorted[1];
+  if (next && top.score - next.score < 15) return null;
+  return top;
 }

@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DocType } from "@/lib/documents";
-import type { PropertyHints } from "@/lib/documentMatch";
+import type { AiPropertyMatch, PropertyHints } from "@/lib/documentMatch";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 
 export interface ClassifySuggestion {
@@ -16,20 +16,39 @@ export interface ClassifySuggestion {
   title: string | null;
   reason: string | null;
   property_hints: PropertyHints | null;
+  matched_properties: AiPropertyMatch[];
+}
+
+// What the classifier is told about the owner's properties so it can
+// name which one a document concerns (capped to 200 server-side).
+export interface ClassifyContextProperty {
+  name: string;
+  county: string | null;
+  state: string | null;
+  parcel_numbers: string[];
+  fsa_numbers: string[];
+  acres: number | null;
 }
 
 // Asks /api/extract kind=classify for a type suggestion plus property
 // hints. Never throws: a failed classification simply yields null and
 // the user picks everything by hand.
-export async function classifyFile(file: File): Promise<ClassifySuggestion | null> {
+export async function classifyFile(
+  file: File,
+  context: ClassifyContextProperty[] = []
+): Promise<ClassifySuggestion | null> {
   try {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("kind", "classify");
+    if (context.length > 0) fd.append("context", JSON.stringify(context.slice(0, 200)));
     const res = await fetch("/api/extract", { method: "POST", body: fd });
     if (!res.ok) return null;
     const body = (await res.json()) as {
-      extraction?: Partial<ClassifySuggestion> & { property_hints?: PropertyHints | null };
+      extraction?: Partial<ClassifySuggestion> & {
+        property_hints?: PropertyHints | null;
+        matched_properties?: AiPropertyMatch[] | null;
+      };
     };
     const x = body.extraction;
     if (!x || !x.doc_type) return null;
@@ -39,6 +58,7 @@ export async function classifyFile(file: File): Promise<ClassifySuggestion | nul
       title: x.title ?? null,
       reason: x.reason ?? null,
       property_hints: x.property_hints ?? null,
+      matched_properties: Array.isArray(x.matched_properties) ? x.matched_properties : [],
     };
   } catch {
     return null;
@@ -128,12 +148,22 @@ export async function setDocumentProperties(
       .in("id", toRemove.map((r) => r.id as string));
     if (error) return error.message;
   }
-  if (doc.entity_type === "property" && !want.includes(doc.entity_id)) {
-    if (want.length === 0) return "A document must stay attached to at least one property or record.";
+  // Primary attachment follows the list: an unfiled document becomes
+  // attached to the first chosen property; a property-attached document
+  // whose property left the list moves to another, or back to Unfiled
+  // (entity_type organization, migration 0024) when none remain.
+  if (doc.entity_type === "organization" && want.length > 0) {
     const { error } = await supabase
       .from("documents")
       .update({ entity_type: "property", entity_id: want[0] })
       .eq("id", doc.id);
+    if (error) return error.message;
+  } else if (doc.entity_type === "property" && !want.includes(doc.entity_id)) {
+    const patch =
+      want.length > 0
+        ? { entity_type: "property", entity_id: want[0] }
+        : { entity_type: "organization", entity_id: doc.organization_id };
+    const { error } = await supabase.from("documents").update(patch).eq("id", doc.id);
     if (error) return error.message;
   }
   return null;

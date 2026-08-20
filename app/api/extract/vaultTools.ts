@@ -57,8 +57,23 @@ export const CLASSIFY_TOOL: Anthropic.Tool = {
         ],
         additionalProperties: false,
       },
+      matched_properties: {
+        type: "array",
+        description:
+          "Which of the OWNER'S LISTED PROPERTIES (given in the prompt) this document most likely concerns. Use the listed names exactly; never invent a name. Empty when none of them fits or no list was given.",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "One of the listed property names, exactly" },
+            confidence: { type: "string", enum: ["high", "medium", "low"] },
+            reason: { type: "string", description: "One short sentence: which fact on the page ties it to this property" },
+          },
+          required: ["name", "confidence", "reason"],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ["doc_type", "confidence", "title", "reason", "property_hints"],
+    required: ["doc_type", "confidence", "title", "reason", "property_hints", "matched_properties"],
     additionalProperties: false,
   },
 };
