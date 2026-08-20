@@ -87,13 +87,16 @@ export default function DropZone({
           }}
         />
       </div>
-      <button
-        type="button"
-        onClick={onManual}
-        className="text-xs font-medium text-gray-500 hover:text-gray-800 hover:underline"
-      >
-        Enter details manually instead
-      </button>
+      <div className="flex flex-col items-center gap-1">
+        <p className="text-xs text-gray-500">Prefer to type it in yourself?</p>
+        <button
+          type="button"
+          onClick={onManual}
+          className="w-full rounded-lg border-2 border-pine-800 bg-white px-4 py-2.5 text-sm font-semibold text-pine-900 hover:bg-kelly-50 sm:w-auto"
+        >
+          Manual upload (no AI)
+        </button>
+      </div>
     </div>
   );
 }

@@ -366,8 +366,12 @@ export default function IntakeFlow({
             <div className="h-1.5 w-full overflow-hidden rounded bg-gray-200">
               <div className="h-full w-1/3 animate-pulse rounded bg-kelly-500" />
             </div>
-            <button type="button" onClick={goManual} className="text-xs font-medium text-gray-500 hover:text-gray-800 hover:underline">
-              Enter details manually instead
+            <button
+              type="button"
+              onClick={goManual}
+              className="rounded-lg border-2 border-pine-800 bg-white px-4 py-2 text-sm font-semibold text-pine-900 hover:bg-kelly-50"
+            >
+              Skip the AI: manual upload
             </button>
           </div>
         </div>
@@ -437,8 +441,12 @@ export default function IntakeFlow({
                 Start over
               </button>
               {step === "confirm" ? (
-                <button type="button" onClick={goManual} className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-800 hover:underline">
-                  Enter details manually instead
+                <button
+                  type="button"
+                  onClick={goManual}
+                  className="ml-auto rounded-lg border-2 border-pine-800 bg-white px-3 py-2 text-sm font-semibold text-pine-900 hover:bg-kelly-50"
+                >
+                  Switch to manual upload
                 </button>
               ) : null}
             </div>
