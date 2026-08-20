@@ -42,7 +42,10 @@ alter table public.documents add constraint documents_doc_type_check
 
 -- An easement deed points at the easement it describes; deleting the
 -- easement clears the link, never the document. Composite FK keeps it
--- in-tenant.
+-- in-tenant. easements never got the (id, organization_id) unique key
+-- the other land tables carry as a composite-FK target; add it first.
+alter table public.easements
+  add constraint easements_id_org_key unique (id, organization_id);
 alter table public.documents
   add constraint documents_linked_easement_fkey
   foreign key (linked_easement_id, organization_id)
