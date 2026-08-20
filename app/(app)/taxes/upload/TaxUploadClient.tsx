@@ -225,7 +225,7 @@ export default function TaxUploadClient({
       patchItem(item.localId, {
         status: "review",
         error: duplicate
-          ? `There is already a ${f.tax_year} statement for this parcel. Open the Taxes page to see it; delete it first if this upload should replace it.`
+          ? `There is already a ${f.tax_year} statement for this parcel. Open the Property Taxes page to see it; delete it first if this upload should replace it.`
           : "Could not save: " + (err?.message ?? ""),
       });
       return;
@@ -567,7 +567,7 @@ export default function TaxUploadClient({
                 {item.matchMode === "unmatched" ? (
                   <p className="text-xs text-gray-600">
                     Saved without a parcel; it will appear under Unmatched on
-                    the Taxes page for you to resolve.
+                    the Property Taxes page for you to resolve.
                   </p>
                 ) : null}
               </div>
@@ -604,7 +604,7 @@ export default function TaxUploadClient({
           href="/taxes"
           className="inline-block rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
         >
-          All saved; open the Taxes page
+          All saved; open the Property Taxes page
         </Link>
       ) : null}
     </div>

@@ -2,19 +2,26 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import TimberSaleForm, { type TimberPrefill } from "@/components/timber/TimberSaleForm";
+import { suggestStandIds } from "@/lib/timberMatch";
+import TimberSaleForm, {
+  type StandOption,
+  type TimberPrefill,
+} from "@/components/timber/TimberSaleForm";
 
 export default function NewTimberClient({
   orgId,
   tenants,
+  stands,
 }: {
   orgId: string;
   tenants: Array<{ id: string; name: string }>;
+  stands: StandOption[];
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"choose" | "extracting" | "form">("choose");
   const [prefill, setPrefill] = useState<TimberPrefill | null>(null);
   const [unsure, setUnsure] = useState<string[]>([]);
+  const [suggested, setSuggested] = useState<string[]>([]);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [extractError, setExtractError] = useState<string | null>(null);
 
@@ -29,8 +36,14 @@ export default function NewTimberClient({
       const res = await fetch("/api/extract", { method: "POST", body: formData });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Extraction failed.");
-      setPrefill(body.extraction as TimberPrefill);
+      const x = body.extraction as TimberPrefill;
+      setPrefill(x);
       setUnsure((body.extraction.unsure_fields as string[]) ?? []);
+      // Suggest stand links from the contract's tract description
+      // (name/acres similarity); the user confirms every link.
+      setSuggested(
+        suggestStandIds(x.tract_description ?? null, x.sale_acres ?? null, stands)
+      );
       setMode("form");
     } catch (err) {
       setExtractError(
@@ -65,13 +78,14 @@ export default function NewTimberClient({
               Upload contract and extract terms
             </span>
             <span className="text-sm text-gray-600">
-              PDF of the timber sale contract. You review everything before saving.
+              PDF or photo of the timber sale contract (lump sum, pay-as-cut,
+              or delivered price). You review everything before saving.
             </span>
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/pdf"
+            accept="application/pdf,image/jpeg,image/png,image/webp"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -91,7 +105,8 @@ export default function NewTimberClient({
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center">
           <p className="font-medium text-gray-900">Reading the contract...</p>
           <p className="mt-1 text-sm text-gray-500">
-            Extracting sale type, rates, deadline, and deposit. Usually under a minute.
+            Extracting sale type, rates, deadline, deposit, and the land it
+            covers. Usually under a minute.
           </p>
         </div>
       ) : null}
@@ -104,6 +119,8 @@ export default function NewTimberClient({
             prefill={prefill}
             unsure={unsure}
             sourceFile={sourceFile}
+            standOptions={stands}
+            suggestedStandIds={suggested}
           />
         </div>
       ) : null}

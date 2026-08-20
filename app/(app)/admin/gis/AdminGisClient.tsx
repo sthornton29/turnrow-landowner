@@ -29,11 +29,14 @@ interface Sample {
   has_geometry: boolean;
 }
 
-// Platform admin registry of county ArcGIS parcel services.
+// Platform admin registry of county ArcGIS parcel services. Rendered
+// inside the Settings page's Admin section (embedded) or standalone.
 export default function AdminGisClient({
   initialServices,
+  embedded = false,
 }: {
   initialServices: CountyGisService[];
+  embedded?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [services, setServices] = useState(initialServices);
@@ -241,9 +244,11 @@ export default function AdminGisClient({
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 md:p-6">
+    <div className={embedded ? "space-y-5" : "mx-auto max-w-4xl space-y-5 p-4 md:p-6"}>
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">County GIS services</h1>
+        {embedded ? null : (
+          <h1 className="text-xl font-semibold text-gray-900">County GIS services</h1>
+        )}
         <p className="mt-0.5 text-sm text-gray-600">
           Platform-level registry of county parcel services. Every
           organization sees active entries on the county import page.

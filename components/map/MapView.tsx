@@ -98,7 +98,51 @@ export const WETLAND_BLUE = "#6487a8";
 
 const POLYGON_TYPES: EntityType[] = [
   "property", "parcel", "field", "pasture", "wetland", "timber_stand",
+  "utility_easement",
 ];
+
+// An in-frame item in the print setup's property chips / item drawer.
+interface PrintItemInfo {
+  key: string; // "entityType:id"
+  entityType: EntityType;
+  id: string;
+  name: string;
+  propertyId: string | null;
+}
+
+const PRINT_TYPE_LABELS: Record<EntityType, string> = {
+  property: "Property boundary",
+  parcel: "Parcels",
+  field: "Ag fields",
+  pasture: "Pastures",
+  wetland: "Wetlands",
+  timber_stand: "Timber stands",
+  road: "Roads",
+  utility_easement: "Utility easements",
+  asset: "Assets",
+};
+
+// Tri-state checkbox for the Choose items drawer: checked = fully
+// included in the print, indeterminate = partly excluded.
+function TriCheckbox({
+  state,
+  onToggle,
+}: {
+  state: "all" | "some" | "none";
+  onToggle: () => void;
+}) {
+  return (
+    <input
+      type="checkbox"
+      checked={state === "all"}
+      ref={(el) => {
+        if (el) el.indeterminate = state === "some";
+      }}
+      onChange={onToggle}
+      className="h-3.5 w-3.5 shrink-0 accent-kelly-500"
+    />
+  );
+}
 
 // Layer toggle defaults: parcels start OFF (they clutter the default
 // view); the user's choices persist per browser and win over defaults.
@@ -219,38 +263,6 @@ function fieldsFCWithCrops(
     }
   }
   return fc;
-}
-
-// Corridor strips for easements with a known width: the centerline
-// buffered by width/2 (display only; acres = length x width).
-function easementCorridorFC(easements: UtilityEasementGeo[]): FeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: easements
-      .filter((e) => e.width_ft && e.width_ft > 0 && e.geom_geojson)
-      .flatMap((e) => {
-        try {
-          const buffered = turfBuffer(
-            { type: "Feature", properties: {}, geometry: e.geom_geojson! },
-            e.width_ft! / 2,
-            { units: "feet" }
-          );
-          return buffered
-            ? [{
-                type: "Feature" as const,
-                properties: {
-                  id: e.id,
-                  entityType: "utility_easement",
-                  easementType: e.easement_type ?? "other",
-                },
-                geometry: buffered.geometry,
-              }]
-            : [];
-        } catch {
-          return [];
-        }
-      }),
-  };
 }
 
 export function rowsToLabelFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
@@ -407,6 +419,19 @@ export default function MapView({
   });
   const [printTitle, setPrintTitle] = useState("");
   const [printSubtitle, setPrintSubtitle] = useState("");
+  // Per-print-session item exclusions (never persisted): keys are
+  // "entityType:id". Tap an item on the preview to toggle it out
+  // (ghosted); the property chips and the Choose items drawer write
+  // into this same set, so every control stays in sync. Excluding a
+  // whole property expands to its boundary plus everything on it.
+  const [printExcluded, setPrintExcluded] = useState<Set<string>>(new Set());
+  const [printDrawerOpen, setPrintDrawerOpen] = useState(false);
+  const [printItemFilter, setPrintItemFilter] = useState("");
+  // Bumped on map move while the print frame is up so the in-frame
+  // item list tracks the framed extent.
+  const [printViewVersion, setPrintViewVersion] = useState(0);
+  const printOpenRef = useRef(printOpen);
+  printOpenRef.current = printOpen;
 
   // ---------------------------------------------------------------- data
 
@@ -532,7 +557,7 @@ export default function MapView({
     const groups: string[][] = [
       ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
       ["roads-hit"],
-      ["easements-hit", "easements-corridor-fill"],
+      ["easements-fill"],
       ["fields-fill"],
       ["pastures-fill"],
       ["wetlands-fill"],
@@ -540,6 +565,40 @@ export default function MapView({
       ["parcels-fill"],
       ["properties-fill"],
     ];
+    if (printOpen) {
+      // Print setup: tapping any rendered item toggles it out of the
+      // print (ghosted); tapping a ghosted item restores it.
+      const ghostLayers = [
+        "print-ghost-circle", "print-ghost-line", "print-ghost-fill",
+      ].filter((l) => map.getLayer(l));
+      if (ghostLayers.length > 0) {
+        const ghostHits = map.queryRenderedFeatures(e.point, { layers: ghostLayers });
+        if (ghostHits.length > 0) {
+          const props = ghostHits[0].properties as { id: string; entityType: EntityType };
+          setPrintExcluded((prev) => {
+            const next = new Set(prev);
+            next.delete(`${props.entityType}:${props.id}`);
+            return next;
+          });
+          return;
+        }
+      }
+      for (const group of groups) {
+        const layers = group.filter((l) => map.getLayer(l));
+        if (layers.length === 0) continue;
+        const hits = map.queryRenderedFeatures(e.point, { layers });
+        if (hits.length > 0) {
+          const props = hits[0].properties as { id: string; entityType: EntityType };
+          setPrintExcluded((prev) => {
+            const next = new Set(prev);
+            next.add(`${props.entityType}:${props.id}`);
+            return next;
+          });
+          return;
+        }
+      }
+      return;
+    }
     for (const group of groups) {
       const layers = group.filter((l) => map.getLayer(l));
       if (layers.length === 0) continue;
@@ -578,9 +637,9 @@ export default function MapView({
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
         "properties", "parcels", "fields", "pastures", "wetlands", "timber",
-        "roads", "easements", "easement-corridors", "assets",
+        "roads", "easements", "assets",
         "property-labels", "parcel-labels", "field-labels", "pasture-labels",
-        "wetland-labels", "timber-labels",
+        "wetland-labels", "timber-labels", "easement-labels",
       ]) {
         map.addSource(id, { type: "geojson", data: empty });
       }
@@ -640,36 +699,30 @@ export default function MapView({
       map.addLayer({ id: "roads-hit", type: "line", source: "roads",
         paint: { "line-color": "#ffffff", "line-width": 16, "line-opacity": 0.01 } });
 
-      // Utility easements: corridor strip when a width is known, plus
-      // per-type styled centerlines. Powerline red long-dash, pipeline
-      // safety orange dot-dash, other solid gray; instantly apart from
-      // roads (white), the farm's own pipe (dashed light blue), and
-      // every land palette.
+      // Utility easements: translucent polygon strips with per-type
+      // dashed outlines. Powerline red long-dash, pipeline safety
+      // orange dot-dash, other solid gray; instantly apart from roads
+      // (white), the farm's own pipe (dashed light blue), and every
+      // land palette.
       const easementColor: mapboxgl.Expression = [
         "match", ["get", "easementType"],
         "powerline", EASEMENT_COLORS.powerline,
         "pipeline", EASEMENT_COLORS.pipeline,
         EASEMENT_COLORS.other,
       ];
-      map.addLayer({ id: "easements-corridor-fill", type: "fill",
-        source: "easement-corridors",
+      map.addLayer({ id: "easements-fill", type: "fill", source: "easements",
         paint: { "fill-color": easementColor, "fill-opacity": 0.18 } });
-      map.addLayer({ id: "easements-corridor-line", type: "line",
-        source: "easement-corridors",
-        paint: { "line-color": easementColor, "line-width": 1 } });
       map.addLayer({ id: "easements-line-powerline", type: "line", source: "easements",
         filter: ["==", ["get", "easementType"], "powerline"],
-        paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2.5,
+        paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2,
           "line-dasharray": [4, 2] } });
       map.addLayer({ id: "easements-line-pipeline", type: "line", source: "easements",
         filter: ["==", ["get", "easementType"], "pipeline"],
-        paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2.5,
+        paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2,
           "line-dasharray": [3, 1.5, 0.4, 1.5] } });
       map.addLayer({ id: "easements-line-other", type: "line", source: "easements",
         filter: ["==", ["get", "easementType"], "other"],
-        paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2.5 } });
-      map.addLayer({ id: "easements-hit", type: "line", source: "easements",
-        paint: { "line-color": "#ffffff", "line-width": 16, "line-opacity": 0.01 } });
+        paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2 } });
 
       // Asset lines (pipe, fence): dashed light blue, distinct from roads.
       // Asset polygons (footprints, pond surface): faint white. Pivot
@@ -744,9 +797,9 @@ export default function MapView({
         layout: { "symbol-placement": "line", "text-field": ["get", "name"],
           "text-size": 10, "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
-      map.addLayer({ id: "easement-labels", type: "symbol", source: "easements",
-        layout: { "symbol-placement": "line", "text-field": ["get", "name"],
-          "text-size": 10, "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
+      map.addLayer({ id: "easement-labels", type: "symbol", source: "easement-labels",
+        layout: { "text-field": ["get", "name"], "text-size": 10,
+          "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": "#7f1d1d", "text-halo-width": 1.1 } });
 
       // Asset markers on top: branded circle + type letter + name below
@@ -766,6 +819,49 @@ export default function MapView({
           "text-offset": [0, 1.6],
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
+
+      // Print-mode ghosts: items excluded from the print render here
+      // (heavy transparency + slash pattern) instead of their normal
+      // layers, and tapping a ghost restores the item.
+      {
+        const size = 12;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.strokeStyle = "rgba(255,255,255,0.85)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(-3, size + 3);
+          ctx.lineTo(size + 3, -3);
+          ctx.stroke();
+          map.addImage("print-slash", ctx.getImageData(0, 0, size, size), {
+            pixelRatio: 1,
+          });
+        }
+      }
+      map.addSource("print-ghost", { type: "geojson", data: empty });
+      map.addLayer({ id: "print-ghost-fill", type: "fill", source: "print-ghost",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "fill-pattern": "print-slash", "fill-opacity": 0.45 } });
+      map.addLayer({ id: "print-ghost-outline", type: "line", source: "print-ghost",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "line-color": "#9ca3af", "line-width": 1.5,
+          "line-dasharray": [2, 2], "line-opacity": 0.7 } });
+      map.addLayer({ id: "print-ghost-line", type: "line", source: "print-ghost",
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": "#9ca3af", "line-width": 2.5,
+          "line-dasharray": [1.5, 2], "line-opacity": 0.55 } });
+      map.addLayer({ id: "print-ghost-circle", type: "circle", source: "print-ghost",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 9, "circle-color": "#9ca3af",
+          "circle-opacity": 0.35, "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5, "circle-stroke-opacity": 0.5 } });
+
+      map.on("move", () => {
+        if (printOpenRef.current) setPrintViewVersion((v) => v + 1);
+      });
 
       // Pivot coverage circle editor: live preview + drag handles.
       map.addSource("pivot-preview", { type: "geojson", data: empty });
@@ -818,7 +914,7 @@ export default function MapView({
     map.on("click", (e) => clickRef.current(e));
     for (const layer of [
       "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
-      "wetlands-fill", "timber-fill", "roads-hit", "easements-hit",
+      "wetlands-fill", "timber-fill", "roads-hit", "easements-fill",
       "assets-circle", "assets-line", "assets-fill",
     ]) {
       map.on("mouseenter", layer, () => {
@@ -878,22 +974,50 @@ export default function MapView({
     const setData = (source: string, fc: FeatureCollection) =>
       (map.getSource(source) as GeoJSONSource)?.setData(fc);
 
-    setData("properties", propertiesFCWithEntity(properties, entities));
-    setData("parcels", rowsToFC(parcels, "parcel"));
-    setData("fields", fieldsFCWithCrops(fields, farmActivity.byField));
-    setData("pastures", rowsToFC(pastures, "pasture"));
-    setData("wetlands", rowsToFC(wetlands, "wetland"));
-    setData("timber", rowsToFC(timber, "timber_stand"));
-    setData("roads", rowsToFC(roads, "road"));
-    setData("easements", rowsToFC(easements, "utility_easement"));
-    setData("easement-corridors", easementCorridorFC(easements));
-    setData("assets", rowsToFC(assets, "asset"));
-    setData("property-labels", rowsToLabelFC(properties, "property"));
-    setData("parcel-labels", rowsToLabelFC(parcels, "parcel"));
-    setData("field-labels", rowsToLabelFC(fields, "field"));
-    setData("pasture-labels", rowsToLabelFC(pastures, "pasture"));
-    setData("wetland-labels", rowsToLabelFC(wetlands, "wetland"));
-    setData("timber-labels", rowsToLabelFC(timber, "timber_stand"));
+    // Print-mode item exclusions: excluded items leave their normal
+    // layers (and labels) and render in the ghost source instead.
+    const excluded = printOpen ? printExcluded : new Set<string>();
+    const inc = <T extends AnyGeoRow>(rows: T[], type: EntityType): T[] =>
+      excluded.size === 0
+        ? rows
+        : rows.filter((r) => !excluded.has(`${type}:${r.id}`));
+
+    setData("properties", propertiesFCWithEntity(inc(properties, "property") as PropertyGeo[], entities));
+    setData("parcels", rowsToFC(inc(parcels, "parcel"), "parcel"));
+    setData("fields", fieldsFCWithCrops(inc(fields, "field") as FieldGeo[], farmActivity.byField));
+    setData("pastures", rowsToFC(inc(pastures, "pasture"), "pasture"));
+    setData("wetlands", rowsToFC(inc(wetlands, "wetland"), "wetland"));
+    setData("timber", rowsToFC(inc(timber, "timber_stand"), "timber_stand"));
+    setData("roads", rowsToFC(inc(roads, "road"), "road"));
+    setData("easements", rowsToFC(inc(easements, "utility_easement"), "utility_easement"));
+    setData("assets", rowsToFC(inc(assets, "asset"), "asset"));
+    setData("property-labels", rowsToLabelFC(inc(properties, "property"), "property"));
+    setData("parcel-labels", rowsToLabelFC(inc(parcels, "parcel"), "parcel"));
+    setData("field-labels", rowsToLabelFC(inc(fields, "field"), "field"));
+    setData("pasture-labels", rowsToLabelFC(inc(pastures, "pasture"), "pasture"));
+    setData("wetland-labels", rowsToLabelFC(inc(wetlands, "wetland"), "wetland"));
+    setData("timber-labels", rowsToLabelFC(inc(timber, "timber_stand"), "timber_stand"));
+    setData("easement-labels", rowsToLabelFC(inc(easements, "utility_easement"), "utility_easement"));
+
+    const ghostFeatures: Feature[] = [];
+    if (printOpen && excluded.size > 0) {
+      for (const [type, rows] of Object.entries(rowLists) as Array<
+        [EntityType, AnyGeoRow[]]
+      >) {
+        if (!visibility[type]) continue;
+        for (const row of rows) {
+          if (!excluded.has(`${type}:${row.id}`)) continue;
+          const g = geomOf(row);
+          if (!g) continue;
+          ghostFeatures.push({
+            type: "Feature",
+            geometry: g,
+            properties: { id: row.id, entityType: type },
+          });
+        }
+      }
+    }
+    setData("print-ghost", { type: "FeatureCollection", features: ghostFeatures });
 
     if (!didFitRef.current) {
       const box = bboxOf([
@@ -906,7 +1030,7 @@ export default function MapView({
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, farmActivity, entities]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, farmActivity, entities, printOpen, printExcluded, visibility, rowLists]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -993,9 +1117,9 @@ export default function MapView({
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
       ["utility_easement", [
-        "easements-corridor-fill", "easements-corridor-line",
+        "easements-fill",
         "easements-line-powerline", "easements-line-pipeline",
-        "easements-line-other", "easements-hit", "easement-labels",
+        "easements-line-other", "easement-labels",
       ]],
       ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
     ];
@@ -1623,7 +1747,6 @@ export default function MapView({
     const isPoint = g?.type === "Point" || g?.type === "MultiPoint";
     const isLineTarget =
       selected.entityType === "road" ||
-      selected.entityType === "utility_easement" ||
       (selected.entityType === "asset" &&
         (g?.type === "LineString" || g?.type === "MultiLineString"));
 
@@ -1676,7 +1799,6 @@ export default function MapView({
     let g: Geometry | null = null;
     const isLineTarget =
       target.entityType === "road" ||
-      target.entityType === "utility_easement" ||
       (target.entityType === "asset" &&
         all.some((f) => f.geometry.type.includes("Line")));
     if (isLineTarget) {
@@ -1813,6 +1935,14 @@ export default function MapView({
         base.year_established = payload.yearEstablished;
         base.notes = payload.standNotes;
       }
+      if (payload.entityType === "utility_easement") {
+        // Easement details inline the same way; property stays optional
+        // (easements cross property lines).
+        base.easement_type = payload.easementType ?? "other";
+        base.holder = payload.holder;
+        base.recorded_ref = payload.recordedRef;
+        base.notes = payload.easementNotes;
+      }
     }
     const sel = await insertAndSetGeometry(
       ENTITY_TABLE[payload.entityType], base, payload.entityType, pendingPoly
@@ -1836,15 +1966,6 @@ export default function MapView({
         { organization_id: orgId, property_id: payload.propertyId,
           name: payload.name, road_type: payload.roadType },
         "road", pendingLine
-      );
-    } else if (payload.kind === "utility_easement") {
-      sel = await insertAndSetGeometry(
-        "utility_easements",
-        { organization_id: orgId, property_id: payload.propertyId,
-          name: payload.name, easement_type: payload.easementType ?? "other",
-          holder: payload.holder, width_ft: payload.widthFt,
-          recorded_ref: payload.recordedRef },
-        "utility_easement", pendingLine
       );
     } else {
       sel = await insertAndSetGeometry(
@@ -1920,6 +2041,10 @@ export default function MapView({
     setPrintTitle(title);
     setPrintSubtitle(new Date().toLocaleDateString());
     setPrintError(null);
+    // Item exclusions are per print session, never persisted.
+    setPrintExcluded(new Set());
+    setPrintDrawerOpen(false);
+    setPrintItemFilter("");
     setPrintOpen(true);
   }
 
@@ -1940,8 +2065,109 @@ export default function MapView({
     return { left: (cw - w) / 2, top: (ch - h) / 2, width: w, height: h };
   }
 
+  // Items whose geometry touches the print frame: what the property
+  // chips and the Choose items drawer list (only in-frame items, so
+  // dense orgs stay navigable).
+  const printInFrame = useMemo(() => {
+    if (!printOpen) return { items: [] as PrintItemInfo[], propertyIds: [] as string[] };
+    const map = mapRef.current;
+    const rect = printFrameRect();
+    if (!map || !rect) return { items: [] as PrintItemInfo[], propertyIds: [] as string[] };
+    const sw = map.unproject([rect.left, rect.top + rect.height]);
+    const ne = map.unproject([rect.left + rect.width, rect.top]);
+    const inFrame = (g: Geometry | null) => {
+      const box = g ? bboxOf([g]) : null;
+      return Boolean(
+        box &&
+          box[0] < ne.lng && box[2] > sw.lng &&
+          box[1] < ne.lat && box[3] > sw.lat
+      );
+    };
+    const items: PrintItemInfo[] = [];
+    for (const [type, rows] of Object.entries(rowLists) as Array<
+      [EntityType, AnyGeoRow[]]
+    >) {
+      if (!visibility[type]) continue;
+      for (const row of rows) {
+        if (!inFrame(geomOf(row))) continue;
+        items.push({
+          key: `${type}:${row.id}`,
+          entityType: type,
+          id: row.id,
+          name: nameOf(row, type) || "(unnamed)",
+          propertyId:
+            type === "property"
+              ? row.id
+              : ((row as { property_id?: string | null }).property_id ?? null),
+        });
+      }
+    }
+    return {
+      items,
+      propertyIds: items.filter((i) => i.entityType === "property").map((i) => i.id),
+    };
+    // printViewVersion tracks map movement while the frame is up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printOpen, printViewVersion, printOrientation, rowLists, visibility]);
+
+  // Property chip: excluding a property expands to its boundary plus
+  // everything on it, so the flat exclusion set stays the one source
+  // of truth for taps, chips, and the drawer alike.
+  function togglePrintProperty(pid: string) {
+    setPrintExcluded((prev) => {
+      const next = new Set(prev);
+      const keys = [`property:${pid}`];
+      for (const [type, rows] of Object.entries(rowLists) as Array<
+        [EntityType, AnyGeoRow[]]
+      >) {
+        if (type === "property") continue;
+        for (const row of rows) {
+          if ((row as { property_id?: string | null }).property_id === pid) {
+            keys.push(`${type}:${row.id}`);
+          }
+        }
+      }
+      const isExcluded = next.has(`property:${pid}`);
+      for (const key of keys) {
+        if (isExcluded) next.delete(key);
+        else next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function togglePrintKeys(keys: string[]) {
+    setPrintExcluded((prev) => {
+      const next = new Set(prev);
+      const anyExcluded = keys.some((k) => next.has(k));
+      for (const key of keys) {
+        if (anyExcluded) next.delete(key);
+        else next.add(key);
+      }
+      return next;
+    });
+  }
+
+  // Excluded items vanish from the PDF, its legend, and its labels;
+  // this filter is what makes the exclusion real at generation time.
+  const printInc = useCallback(
+    <T extends AnyGeoRow>(rows: T[], type: EntityType): T[] =>
+      printExcluded.size === 0
+        ? rows
+        : rows.filter((r) => !printExcluded.has(`${type}:${r.id}`)),
+    [printExcluded]
+  );
+
   function buildPrintLegend(flags: PrintLayerFlags): LegendEntry[] {
     const out: LegendEntry[] = [];
+    const incParcels = printInc(parcels, "parcel");
+    const incFields = printInc(fields, "field");
+    const incPastures = printInc(pastures, "pasture");
+    const incWetlands = printInc(wetlands, "wetland");
+    const incTimber = printInc(timber, "timber_stand");
+    const incRoads = printInc(roads, "road");
+    const incEasements = printInc(easements, "utility_easement");
+    const incAssets = printInc(assets, "asset");
     if (flags.property && !flags.entity) {
       out.push({ label: "Property boundary", color: "#6b7280", kind: "outline" });
     }
@@ -1950,10 +2176,10 @@ export default function MapView({
         out.push({ label: e.name, color: entityColor(i), kind: "outline" })
       );
     }
-    if (flags.parcel && parcels.length > 0) {
+    if (flags.parcel && incParcels.length > 0) {
       out.push({ label: "Parcels", color: "#9ca3af", kind: "dash" });
     }
-    if (flags.field && fields.length > 0) {
+    if (flags.field && incFields.length > 0) {
       if (flags.crops) {
         for (const c of farmActivity.legend) {
           out.push({ label: c.label, color: c.color, kind: "fill" });
@@ -1962,15 +2188,15 @@ export default function MapView({
         out.push({ label: "Ag fields", color: KELLY, kind: "fill" });
       }
     }
-    if (flags.pasture && pastures.length > 0) {
+    if (flags.pasture && incPastures.length > 0) {
       out.push({ label: "Pastures", color: PASTURE_TAN, kind: "fill" });
     }
-    if (flags.wetland && wetlands.length > 0) {
+    if (flags.wetland && incWetlands.length > 0) {
       out.push({ label: "Wetlands", color: WETLAND_BLUE, kind: "fill" });
     }
     if (flags.timber_stand) {
       for (const type of Object.keys(STAND_TYPE_LABELS)) {
-        if (timber.some((t) => ((t as TimberStandGeo).stand_type ?? "other") === type)) {
+        if (incTimber.some((t) => ((t as TimberStandGeo).stand_type ?? "other") === type)) {
           out.push({
             label: STAND_TYPE_LABELS[type],
             color: STAND_TYPE_COLORS[type],
@@ -1979,24 +2205,24 @@ export default function MapView({
         }
       }
     }
-    if (flags.road && roads.length > 0) {
+    if (flags.road && incRoads.length > 0) {
       out.push({ label: "Roads", color: PINE, kind: "line" });
     }
     if (flags.utility_easement) {
       for (const type of ["powerline", "pipeline", "other"] as const) {
-        if (easements.some((e) => (e.easement_type ?? "other") === type)) {
+        if (incEasements.some((e) => (e.easement_type ?? "other") === type)) {
           out.push({
             label: EASEMENT_TYPE_LABELS[type],
             color: EASEMENT_COLORS[type],
-            kind: type === "powerline" ? "dash" : type === "pipeline" ? "dotdash" : "line",
+            kind: "fill",
           });
         }
       }
     }
-    if (flags.asset && assets.length > 0) {
+    if (flags.asset && incAssets.length > 0) {
       out.push({ label: "Assets", color: PINE, kind: "point" });
       if (
-        assets.some(
+        incAssets.some(
           (a) =>
             a.asset_type === "irrigation_pivot" &&
             a.geom_geojson &&
@@ -2026,22 +2252,22 @@ export default function MapView({
         layers: printLayers,
         labels: printLabels,
         sources: {
-          properties: propertiesFCWithEntity(properties, entities),
-          parcels: rowsToFC(parcels, "parcel"),
-          fields: fieldsFCWithCrops(fields, farmActivity.byField),
-          pastures: rowsToFC(pastures, "pasture"),
-          wetlands: rowsToFC(wetlands, "wetland"),
-          timber: rowsToFC(timber, "timber_stand"),
-          roads: rowsToFC(roads, "road"),
-          easements: rowsToFC(easements, "utility_easement"),
-          easementCorridors: easementCorridorFC(easements),
-          assets: rowsToFC(assets, "asset"),
-          propertyLabels: rowsToLabelFC(properties, "property"),
-          parcelLabels: rowsToLabelFC(parcels, "parcel"),
-          fieldLabels: rowsToLabelFC(fields, "field"),
-          pastureLabels: rowsToLabelFC(pastures, "pasture"),
-          wetlandLabels: rowsToLabelFC(wetlands, "wetland"),
-          timberLabels: rowsToLabelFC(timber, "timber_stand"),
+          properties: propertiesFCWithEntity(printInc(properties, "property"), entities),
+          parcels: rowsToFC(printInc(parcels, "parcel"), "parcel"),
+          fields: fieldsFCWithCrops(printInc(fields, "field"), farmActivity.byField),
+          pastures: rowsToFC(printInc(pastures, "pasture"), "pasture"),
+          wetlands: rowsToFC(printInc(wetlands, "wetland"), "wetland"),
+          timber: rowsToFC(printInc(timber, "timber_stand"), "timber_stand"),
+          roads: rowsToFC(printInc(roads, "road"), "road"),
+          easements: rowsToFC(printInc(easements, "utility_easement"), "utility_easement"),
+          assets: rowsToFC(printInc(assets, "asset"), "asset"),
+          propertyLabels: rowsToLabelFC(printInc(properties, "property"), "property"),
+          parcelLabels: rowsToLabelFC(printInc(parcels, "parcel"), "parcel"),
+          fieldLabels: rowsToLabelFC(printInc(fields, "field"), "field"),
+          pastureLabels: rowsToLabelFC(printInc(pastures, "pasture"), "pasture"),
+          wetlandLabels: rowsToLabelFC(printInc(wetlands, "wetland"), "wetland"),
+          timberLabels: rowsToLabelFC(printInc(timber, "timber_stand"), "timber_stand"),
+          easementLabels: rowsToLabelFC(printInc(easements, "utility_easement"), "utility_easement"),
         },
         legend: buildPrintLegend(printLayers),
         onProgress: setPrintBusy,
@@ -2062,7 +2288,7 @@ export default function MapView({
     const box = bboxOf([
       ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
       ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
-      ...roads.map(geomOf), ...assets.map(geomOf),
+      ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
     ]);
     if (box) map.fitBounds(box, { padding: 60 });
   }
@@ -2167,8 +2393,18 @@ export default function MapView({
                   }}
                 >
                   <span className="absolute -top-6 left-0 text-xs font-medium text-white drop-shadow">
-                    Print area: pan and zoom the map to frame it
+                    Print area: pan and zoom, tap items to hide them
                   </span>
+                  {printExcluded.size > 0 ? (
+                    <button
+                      onClick={() => setPrintExcluded(new Set())}
+                      className="pointer-events-auto absolute -top-7 right-0 rounded-full bg-white/95 px-2.5 py-1 text-xs font-medium text-gray-800 shadow hover:bg-white"
+                      title="Excluded items render ghosted and stay out of the PDF; tap to bring them all back"
+                    >
+                      {printExcluded.size} item{printExcluded.size === 1 ? "" : "s"} hidden
+                      · clear
+                    </button>
+                  ) : null}
                 </div>
               </div>
             );
@@ -2223,6 +2459,167 @@ export default function MapView({
                   {o}
                 </button>
               ))}
+            </div>
+
+            {printInFrame.propertyIds.length > 1 ? (
+              <div>
+                <p className="pt-1 text-xs font-medium text-gray-600">
+                  Properties in frame (tap to include or exclude)
+                </p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {printInFrame.propertyIds.map((pid) => {
+                    const property = properties.find((p) => p.id === pid);
+                    const off = printExcluded.has(`property:${pid}`);
+                    return (
+                      <button
+                        key={pid}
+                        onClick={() => togglePrintProperty(pid)}
+                        className={
+                          "rounded-full border px-2.5 py-1 text-xs font-medium " +
+                          (off
+                            ? "border-gray-300 bg-gray-100 text-gray-400 line-through"
+                            : "border-kelly-500 bg-kelly-50 text-pine-900")
+                        }
+                        title={
+                          off
+                            ? "Excluded from the print with everything on it; tap to restore"
+                            : "Tap to exclude this whole property from the print"
+                        }
+                      >
+                        {property?.name ?? "Property"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {printExcluded.size > 0 ? (
+              <button
+                onClick={() => setPrintExcluded(new Set())}
+                className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+              >
+                {printExcluded.size} item{printExcluded.size === 1 ? "" : "s"} hidden ·
+                clear all
+              </button>
+            ) : null}
+
+            <div>
+              <button
+                onClick={() => setPrintDrawerOpen((o) => !o)}
+                className="flex w-full items-center justify-between rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Choose items
+                <span className="text-gray-400">{printDrawerOpen ? "▴" : "▾"}</span>
+              </button>
+              {printDrawerOpen ? (
+                <div className="mt-1 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2">
+                  <input
+                    value={printItemFilter}
+                    onChange={(e) => setPrintItemFilter(e.target.value)}
+                    placeholder="Filter items..."
+                    className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                  />
+                  {(() => {
+                    const filter = printItemFilter.trim().toLowerCase();
+                    const visibleItems = printInFrame.items.filter(
+                      (i) => !filter || i.name.toLowerCase().includes(filter)
+                    );
+                    if (visibleItems.length === 0) {
+                      return (
+                        <p className="text-xs text-gray-500">
+                          Nothing in the frame{filter ? " matches" : ""}.
+                        </p>
+                      );
+                    }
+                    // Property > type > items, in-frame only.
+                    const propertyOrder: Array<string | null> = [];
+                    const byProperty = new Map<string | null, PrintItemInfo[]>();
+                    for (const item of visibleItems) {
+                      const pid = item.propertyId;
+                      if (!byProperty.has(pid)) {
+                        byProperty.set(pid, []);
+                        propertyOrder.push(pid);
+                      }
+                      byProperty.get(pid)!.push(item);
+                    }
+                    const triState = (keys: string[]): "all" | "some" | "none" => {
+                      const excludedCount = keys.filter((k) =>
+                        printExcluded.has(k)
+                      ).length;
+                      if (excludedCount === 0) return "all";
+                      return excludedCount === keys.length ? "none" : "some";
+                    };
+                    return propertyOrder.map((pid) => {
+                      const groupItems = byProperty.get(pid)!;
+                      const groupKeys = groupItems.map((i) => i.key);
+                      const propertyName = pid
+                        ? (properties.find((p) => p.id === pid)?.name ?? "Property")
+                        : "No property";
+                      const typeOrder: EntityType[] = [];
+                      const byType = new Map<EntityType, PrintItemInfo[]>();
+                      for (const item of groupItems) {
+                        if (item.entityType === "property") continue;
+                        if (!byType.has(item.entityType)) {
+                          byType.set(item.entityType, []);
+                          typeOrder.push(item.entityType);
+                        }
+                        byType.get(item.entityType)!.push(item);
+                      }
+                      const boundaryItem = groupItems.find(
+                        (i) => i.entityType === "property"
+                      );
+                      return (
+                        <div key={pid ?? "none"} className="space-y-1">
+                          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-gray-800">
+                            <TriCheckbox
+                              state={triState(groupKeys)}
+                              onToggle={() => togglePrintKeys(groupKeys)}
+                            />
+                            {propertyName}
+                          </label>
+                          {boundaryItem ? (
+                            <label className="ml-4 flex cursor-pointer items-center gap-1.5 text-xs text-gray-700">
+                              <TriCheckbox
+                                state={triState([boundaryItem.key])}
+                                onToggle={() => togglePrintKeys([boundaryItem.key])}
+                              />
+                              Boundary outline
+                            </label>
+                          ) : null}
+                          {typeOrder.map((type) => {
+                            const typeItems = byType.get(type)!;
+                            const typeKeys = typeItems.map((i) => i.key);
+                            return (
+                              <div key={type} className="ml-4 space-y-0.5">
+                                <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-700">
+                                  <TriCheckbox
+                                    state={triState(typeKeys)}
+                                    onToggle={() => togglePrintKeys(typeKeys)}
+                                  />
+                                  {PRINT_TYPE_LABELS[type]}
+                                </label>
+                                {typeItems.map((item) => (
+                                  <label
+                                    key={item.key}
+                                    className="ml-4 flex cursor-pointer items-center gap-1.5 text-xs text-gray-600"
+                                  >
+                                    <TriCheckbox
+                                      state={triState([item.key])}
+                                      onToggle={() => togglePrintKeys([item.key])}
+                                    />
+                                    <span className="truncate">{item.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              ) : null}
             </div>
 
             <p className="pt-1 text-xs font-medium text-gray-600">
@@ -2327,15 +2724,20 @@ export default function MapView({
                 )
                 .map((type) => (
                   <p key={type} className="flex items-center gap-1.5 text-xs text-gray-700">
+                    {/* Translucent strip swatch; the border keeps the
+                        per-type dash identity (long-dash powerline,
+                        dotted pipeline, solid other). */}
                     <span
-                      className="h-0.5 w-4"
+                      className="h-3 w-4 rounded-[2px]"
                       style={{
-                        background: EASEMENT_COLORS[type],
-                        ...(type === "powerline"
-                          ? { backgroundImage: `repeating-linear-gradient(90deg, ${EASEMENT_COLORS.powerline} 0 6px, transparent 6px 9px)`, backgroundColor: "transparent" }
-                          : type === "pipeline"
-                            ? { backgroundImage: `repeating-linear-gradient(90deg, ${EASEMENT_COLORS.pipeline} 0 5px, transparent 5px 7px, ${EASEMENT_COLORS.pipeline} 7px 8px, transparent 8px 10px)`, backgroundColor: "transparent" }
-                            : {}),
+                        backgroundColor: EASEMENT_COLORS[type] + "30",
+                        border: `1.5px ${
+                          type === "powerline"
+                            ? "dashed"
+                            : type === "pipeline"
+                              ? "dotted"
+                              : "solid"
+                        } ${EASEMENT_COLORS[type]}`,
                       }}
                     />
                     {EASEMENT_TYPE_LABELS[type]}

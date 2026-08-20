@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatNumber } from "@/lib/format";
-import { EASEMENT_TYPE_LABELS, easementAcres } from "@/lib/assetTypes";
+import { formatAcres } from "@/lib/format";
+import { EASEMENT_TYPE_LABELS } from "@/lib/assetTypes";
 import {
   ActionLink,
   DetailsCard,
@@ -37,17 +37,12 @@ export default async function EasementSummaryPage({
         .single()
     : { data: null };
 
-  const acres = easementAcres(easement.length_feet, easement.width_ft);
-
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-4 md:p-6">
       <SummaryHeader
         typeLabel={EASEMENT_TYPE_LABELS[easement.easement_type] ?? "Utility easement"}
         name={easement.name}
-        keyFigure={
-          `${formatNumber(Math.round(easement.length_feet ?? 0))} ft (${(easement.miles ?? 0).toFixed(2)} mi)` +
-          (acres !== null ? ` · ${formatAcres(acres)} corridor acres` : "")
-        }
+        keyFigure={`${formatAcres(easement.acres)} acres`}
         breadcrumb={[
           { href: "/properties", label: "Properties" },
           ...(property
@@ -62,7 +57,7 @@ export default async function EasementSummaryPage({
         }
       />
 
-      <MapThumb geometry={easement.geom_geojson} focus={`utility_easement:${id}`} />
+      <MapThumb geometry={easement.boundary_geojson} focus={`utility_easement:${id}`} />
 
       <DetailsCard
         rows={[
@@ -71,12 +66,7 @@ export default async function EasementSummaryPage({
             EASEMENT_TYPE_LABELS[easement.easement_type] ?? easement.easement_type,
           ],
           ["Holder", easement.holder],
-          ["Length", `${formatNumber(Math.round(easement.length_feet ?? 0))} ft`],
-          [
-            "Corridor width",
-            easement.width_ft != null ? `${formatNumber(easement.width_ft)} ft` : null,
-          ],
-          ["Corridor acres", acres !== null ? formatAcres(acres) : null],
+          ["Acres", formatAcres(easement.acres)],
           ["Recorded ref", easement.recorded_ref],
           ["Notes", easement.notes],
         ]}

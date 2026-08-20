@@ -1,10 +1,10 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-17 (Print button: WYSIWYG framed PDF maps with
-legend/scale/attribution; utility easements layer, migration 0016;
-earlier same day: simplified pivot editor, wetlands, brand lockup,
-parcels off by default, Ag Fields rename, pastures, summary pages, AI
-rent upload, irrigated/dryland acres)
+Last updated: 2026-08-20 (utility easements became polygon boundaries,
+migration 0017; timber sale contracts and logger settlements with AI
+extraction, allocation across stands, migration 0018; one Settings
+page; map-first landing; logo-only banner; Taxes renamed Property
+Taxes; print item exclusions)
 
 ## What this product is
 
@@ -30,11 +30,15 @@ and Postgres row level security guarantees each org sees only its own data.
   @turf/intersect, difference, union, buffer, simplify for Timber Scan
   clipping and the split tools; geotiff + proj4 for CDL raster decode
   and EPSG:5070 <-> 4326 reprojection
+- xlsx (SheetJS) for reading Excel/CSV logger settlement exports
+  server-side in /api/extract
 - Vitest (dev only) for unit tests: npm test runs every *.test.ts under
   lib/ (owner names, spatial reference, property matching, GIS where
   clauses, lease land matching, timber scan raster pipeline, price
   expressions, RMA parsing, lease pricing, crop matching, tenant data
-  aggregation, lease logic, income projections, pivot geometry)
+  aggregation, lease logic, income projections, pivot geometry,
+  easement line-to-polygon buffering, timber settlement spreadsheet
+  collapse + MBF/Doyle handling, timber allocation math)
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -99,24 +103,30 @@ Tables:
   toggle), property detail section, dashboard acres tile, and a
   /pastures/[id] summary page. FUTURE AREA: no grazing management
   features yet (deliberate).
-- utility_easements (migration 0016): powerline/pipeline/other
-  corridors, ALWAYS labeled "easement" (a pipeline easement is the
-  utility's corridor, never the farm's own underground irrigation pipe
-  asset). organization_id, property_id NULLABLE (easements cross
-  property lines; property deletion DETACHES via set null, a
-  deliberate departure from roads' cascade), name, easement_type
-  check, holder, width_ft, recorded_ref, notes, MultiLineString geom,
-  generated length_feet/miles like roads. Corridor acres = length x
-  width, derived in the app (lib/assetTypes.ts easementAcres,
-  unit-tested), never stored. RLS, geo view, set_geometry + documents
-  gain 'utility_easement' (easement deeds are exactly the documents
-  landowners lose; the summary page says so). Drawn via the line
-  dialog's "Utility easement" kind with inline fields; map layer
-  (persisted toggle): buffered corridor strip when width is set (turf
-  buffer at width/2) plus per-type centerlines, powerline red #dc2626
-  long-dash, pipeline safety orange #f97316 dot-dash, other gray, with
-  a per-type legend; click panel and /easements/[id] summary page show
-  length, width, corridor acres, holder, recorded ref, documents.
+- utility_easements (created as lines in 0016, POLYGON BOUNDARIES since
+  migration 0017): powerline/pipeline/other corridors, ALWAYS labeled
+  "easement" (a pipeline easement is the utility's corridor, never the
+  farm's own underground irrigation pipe asset). organization_id,
+  property_id NULLABLE (easements cross property lines; property
+  deletion DETACHES via set null, a deliberate departure from roads'
+  cascade), name, easement_type check, holder, recorded_ref, notes,
+  MultiPolygon boundary with the same generated acres column as every
+  land type. Migration 0017 converted existing centerlines by
+  buffering to half their width_ft (geography buffer, true ground
+  feet; null widths used a 50 ft default, got a visible note appended,
+  and were listed in migration NOTICEs) then dropped the line columns
+  (geom, width_ft, length_feet, miles). lib/geo/easementBuffer.ts
+  mirrors the buffering rule for unit tests. RLS, geo view,
+  set_geometry polygon branch + documents 'utility_easement' (easement
+  deeds are exactly the documents landowners lose; the summary page
+  says so). Drawn via the BOUNDARY dialog's "Easement" type with
+  inline fields (type, holder, recorded ref, notes; session-persistent
+  like the timber fields; property optional), multi-area supported;
+  map layer (persisted toggle): translucent per-type strips (fill
+  0.18) with dashed outlines, powerline red #dc2626 long-dash,
+  pipeline safety orange #f97316 dot-dash, other gray, per-type
+  legend swatches; click panel and /easements/[id] show acres, holder,
+  recorded ref, documents.
 - wetlands (migration 0015): same pattern as pastures, for OPEN
   wetlands only (marsh, sloughs, duck holes, WRP/easement ground;
   labels and dialog help text say so). Forested bottomland remains a
@@ -157,8 +167,9 @@ Phase 2 tables (all with the same org RLS + composite property FK):
   history).
 - Views timber_stands_geo / roads_geo / assets_geo mirror the Phase 1 *_geo
   pattern. public.set_geometry(entity_type, id, geojson) generalizes
-  set_boundary to all six entity types (polygon/line/any validation per
-  type); the app writes all geometry through it.
+  set_boundary to every entity type (polygon types incl. utility
+  easements since 0017 / line types roads / any for assets, validated
+  per type); the app writes all geometry through it.
 
 Phase 3 tables (migration 0003; all with org RLS + composite FKs):
 
@@ -184,13 +195,33 @@ Phase 3 tables (migration 0003; all with org RLS + composite FKs):
 - timber_sales: sale_name, buyer_name (free text) + optional
   buyer_tenant_id, sale_type (lump_sum | pay_as_cut), status, contract
   date, harvest_deadline, performance_deposit, sale_acres, lump_sum_price,
-  stumpage_rates jsonb ($/ton by product: pine sawtimber, pine chip-n-saw,
-  pine pulpwood, hardwood sawtimber, hardwood pulpwood, custom),
-  payment_schedule jsonb (split lump sums: label, due_date, amount).
-- timber_sale_stands: join to Phase 2 timber_stands.
-- timber_settlements: pay-as-cut entries (date, lines jsonb of
-  tons/price/amount by product, stored total_amount, check number). Count
-  directly as received timber income; not duplicated into payments.
+  stumpage_rates jsonb, payment_schedule jsonb (split lump sums: label,
+  due_date, amount). Migration 0018 adds harvest_type (clearcut |
+  first_thinning | second_thinning | select_cut | salvage | other),
+  delivered_net boolean (delivered-price arrangements: mill price minus
+  cut-and-haul model as pay_as_cut with per-product NET rates and this
+  flag, no separate structure), and allocation_method (by_acres default
+  | manual | none). Products cover the Southeast list: pine sawtimber,
+  pine chip-n-saw, pine pulpwood, hardwood sawtimber, hardwood
+  pulpwood, poles/pilings, veneer/peeler, crossties, topwood/chips,
+  plus custom slugs. Rate entries are { product, label, rate, unit
+  ('ton' default | 'mbf'), log_scale (doyle default | scribner |
+  international, MBF only) }; pre-0018 { price_per_ton } rows read
+  forever via normalizeStumpageRate in lib/leaseLogic.ts.
+- timber_sale_stands: join to Phase 2 timber_stands; 0018 adds
+  allocation_pct (manual allocation percentages).
+- timber_settlements: pay-as-cut entries (date, lines jsonb, stored
+  total_amount, check number; 0018 adds period_start/period_end and an
+  allocation jsonb override: null inherits the sale's method, else
+  { method, percents }). Lines are { product, label, quantity, unit,
+  rate, amount, load_count?, date_from?, date_to? }; legacy
+  { tons, price_per_ton } rows read via normalizeSettlementLine.
+  Settlements count directly as received timber income; not duplicated
+  into payments. Allocation math lives in lib/timberAllocation.ts
+  (unit-tested): by_acres splits by mapped stand acres (equal split
+  when no stand has acres), manual uses stored percentages as-is
+  (under-100 leaves a remainder unallocated), rounding drift lands in
+  the last stand so cents add back up.
 - expected_payments: generated rows (year, label, due_date,
   expected_amount) referencing exactly one of lease_id / timber_sale_id.
   Generated by the app (lib/leaseLogic.ts) from terms + schedule +
@@ -518,13 +549,20 @@ Functions and views:
 
 - app/(auth)/: login, signup, onboarding. Dark green (#14532d) background,
   stacked white logo.
-- app/(app)/: authenticated shell. Header: white bg; the brand lockup is
-  the horizontal green logo (T mark on mobile) with "Landowner" as a
-  letterspaced small-caps wordmark in dark green tight to it, styled as
-  BRANDING (no hover/nav affordances; tapping it still goes to the
-  dashboard as logos conventionally do; the auth pages' footer line
-  uses the same small-caps treatment in white). Bottom tab bar on
-  mobile (Home, Map, Properties, Import).
+- app/(app)/: authenticated shell. Header: white bg; the horizontal
+  green logo stands ALONE (T mark on mobile; the "Landowner" wordmark
+  came off the working banner 2026-08-20, and the auth pages keep
+  their lockup). Tapping the logo goes home, which is the MAP: login,
+  the root redirect, onboarding, proxy, and the PWA start_url all land
+  on /map, and the nav order starts with Map, then Dashboard,
+  Properties, Timber, Assets, Leases, Property Taxes, Income, Farm
+  Data, Import, and a gear icon for /settings. Bottom tab bar on
+  mobile (Map, Home, Properties, Leases, Income) with the gear in the
+  top bar. ONE SETTINGS PAGE (/settings): Members section (list,
+  invites, roles; owner-only invite form), Admin section (the
+  platform-admin county GIS registry rendered inline via
+  AdminGisClient embedded mode, platform admins only), and Sign out.
+  /settings/members and /admin/gis redirect there.
   - /dashboard: stat tiles (total acres, properties, field acres, timber
     acres, wells, pivots, grain bins, buildings), static satellite
     thumbnail (Mapbox Static Images API) linking to the map, quick links.
@@ -541,8 +579,8 @@ Functions and views:
     ag fields (kelly green), pastures (warm tan), wetlands (steel
     blue), timber stands (per-type fills, see TIMBER STANDS below),
     roads (white line over dark green casing, labels along the line),
-    utility easements (see the table entry: red/orange dashed lines +
-    corridor strips with a per-type legend), and
+    utility easements (see the table entry: translucent red/orange/gray
+    strips with per-type dashed outlines and legend), and
     assets (dark green circle markers with a per-type letter, dashed light
     blue lines for pipe/fence, faint outline for footprints, light blue
     pivot coverage shapes). PRINT BUTTON (top right): a print setup
@@ -565,6 +603,22 @@ Functions and views:
     fallback), and the Mapbox/OpenStreetMap attribution line. Progress
     shows during rendering; the file downloads as <title>-<date>.pdf
     (phones print from any PDF viewer; no window.print anywhere).
+    PRINT ITEM EXCLUSIONS (per print session, never persisted): while
+    the frame is up, tapping any rendered item toggles it out of the
+    print; excluded items render ghosted (canvas-generated white slash
+    pattern + heavy transparency + dashed gray outline in a dedicated
+    print-ghost source; tapping a ghost restores it) and are absent
+    from the PDF, its labels, and its legend presence checks. A
+    counter chip on the frame ("3 items hidden", tap to clear all)
+    keeps state visible. The setup panel adds property chips (only
+    when more than one property is in frame; excluding a property
+    expands to its boundary plus everything on it, so the flat
+    "entityType:id" exclusion set stays the single source of truth)
+    and an expandable "Choose items" drawer listing only in-frame
+    items as a Property > type > item tree with tri-state checkboxes
+    and a filter box, two-way synced with the taps. Layer checkboxes
+    stay the coarse control; item exclusions apply within checked
+    layers.
     Click
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
@@ -578,7 +632,13 @@ Functions and views:
     opens directly; Save asks for name + property, suggested
     from the center's location, and inserts the pivot with its
     parameters and derived polygon in one step). The line dialog's
-    kinds are Road, Pipe (yours), Fence, and Utility easement. When the
+    kinds are Road, Pipe (yours), and Fence (with a hint that utility
+    easements are boundaries now); the boundary dialog's types are Ag
+    field, Pasture, Wetland, Parcel, Property, Timber, and Easement.
+    When the type is Easement it expands in place with easement type
+    (powerline/pipeline/other), holder, recorded ref, and notes,
+    property optional (easements cross property lines), all
+    session-persistent. When the
     boundary dialog's type is Timber, it expands in place with stand
     type (required, five types), species (prefills "Loblolly pine" on
     a pine pick, never stomping a typed value), year established, and
@@ -702,14 +762,16 @@ Functions and views:
   - /assets/[id]: full editor: shared fields, dynamic type-specific form
     from lib/assetTypes.ts, supply well link, photo gallery
     (camera-friendly upload), documents, deactivate/reactivate/delete.
-  - /settings/members: member list, invite by email (owners only), revoke
-    pending invites.
+  - /settings: the one settings page (Members, Admin for platform
+    admins, Sign out), described under the authenticated shell above.
+    /settings/members and /admin/gis are redirects.
   - Leases section (one nav item, three tabs): /leases (list with status
     and acres), /tenants and /tenants/[id] (contact info, insurance badge,
     documents, their leases), /timber-sales.
   - /leases/new and /timber-sales/new: "Upload document and extract terms"
-    is the primary path (PDF -> /api/extract -> claude-sonnet-4-6 with a
-    forced tool call whose schema mirrors the form). The review form shows
+    is the primary path (PDF, or photo for timber contracts ->
+    /api/extract -> claude-sonnet-4-6 with a forced tool call whose
+    schema mirrors the form). The review form shows
     every extracted value; fields the model flagged as unsure are
     highlighted amber; extracted tenant names fuzzy-match existing tenants
     (suggested match) or offer to create one. The lease extraction also
@@ -733,10 +795,41 @@ Functions and views:
     per-year projection assumptions (flex bonus, crop share inputs),
     expected-vs-received payments table with status chips and inline
     payment recording, insurance warning for hunting leases, documents.
-  - /timber-sales/[id]: linked stands, lump-sum schedule with the same
-    payments engine, or pay-as-cut settlements entry (tons by product at
-    contract rates, computed amounts, running totals by product),
-    documents.
+  - /timber-sales/[id]: linked stands with the allocation method
+    (by_acres shares shown per stand, manual percentage inputs, or
+    keep-at-sale-level; each settlement can override), lump-sum
+    schedule with the same payments engine, or pay-as-cut settlements:
+    manual entry in each product's unit (tons or MBF at contract
+    rates, computed amounts), "Upload settlement" (below), running
+    totals by product with the contract rate beside the dollars, and
+    settlement history with period ranges and load counts. Marking a
+    thinning-type sale completed offers (reviewed, per-stand
+    checkboxes, editable year, never automatic) to set
+    last_thinning_year on the linked stands. Documents.
+  - TIMBER UPLOAD FLOWS (the 2026-08-20 wave): the contract extractor
+    (kind=timber) understands lump sum vs pay-as-cut vs delivered-net
+    (saved as pay_as_cut + the delivered_net flag), harvest type,
+    tract description, rates with $/ton or $/MBF units and log scale,
+    deposit, and penalty/BMP notes; the review form adds a Stands
+    section (suggestions matched from the tract description by
+    name/acres similarity in lib/timberMatch.ts, amber "Suggested from
+    contract" chips, user confirms links and the allocation method)
+    and the source file attaches to the sale (each linked stand's page
+    lists the sale's documents read-only via DocumentLinks).
+    Settlements (kind=timber_settlement) accept PDF, photo, or
+    Excel/CSV: spreadsheets parse server-side (xlsx), the model maps
+    ONLY columns and product spellings, and per-load rows collapse to
+    per-product period lines (load count, date range, weighted rate)
+    in deterministic unit-tested code (lib/timberSettlement.ts);
+    PDFs/photos extract collapsed lines directly. The shared review
+    card (components/timber/SettlementReview.tsx) shows lines against
+    the contract's rates with non-blocking mismatch flags ("settlement
+    pays $28.50/ton, contract says $30.00", unit mismatches too),
+    editable everything, per-settlement allocation override, and saves
+    the settlement + document. Uploading from /timber-sales without
+    picking a sale first suggests the matching sale by buyer
+    similarity + product overlap (lib/timberMatch.ts suggestSaleId),
+    user confirms.
   - RICH SUMMARY PAGES: one consistent template
     (components/summary/Summary.tsx: breadcrumbed header with type
     badge and key figure, static satellite thumbnail with the geometry
@@ -748,7 +841,9 @@ Functions and views:
     tenant's planted-by-practice acres labeled by source, covering
     leases with current-year projected rent, farm activity history,
     documents), /pastures/[id], /wetlands/[id], /parcels/[id] (tax
-    statements), /timber/[id] (linked timber sales), /roads/[id], plus upgraded
+    statements), /timber/[id] (linked timber sales with the stand's
+    ALLOCATED TIMBER INCOME per the allocation method, sale documents,
+    and an allocated-to-date total), /roads/[id], plus upgraded
     property (thumbnail, pasture section, irrigated rollup, child rows
     linking to their pages) and asset pages (thumbnail). Map click
     panels carry a prominent "View full page" link
@@ -769,8 +864,10 @@ Functions and views:
     provenance in the memo ("Uploaded check ..., extracted date",
     check # in method), attaches the source file to the lease's
     documents, and refreshes. A document reading as a timber
-    settlement offers routing to a pay-as-cut settlement on a chosen
-    timber sale (lines prefilled). Settlement yields/prices show as an
+    settlement offers routing that lands in the SAME SettlementReview
+    card as the sale page's Upload settlement (lines vs contract
+    rates, allocation, sale suggested by buyer/products, document
+    attached to the sale). Settlement yields/prices show as an
     OPTIONAL cross-check against that lease-year's assumptions,
     changing nothing unless the user acts. No match falls back to
     manual tenant/lease pick or unscheduled, same review screen.
@@ -795,7 +892,9 @@ Functions and views:
     Unassigned income shows only under All entities). Property detail pages show allocated income
     with taxes paid and net; the dashboard shows a "Payments needing
     attention" card (past due + due within 60 days).
-  - /taxes (Tax Statement Status): year selector; entity filter select
+  - /taxes ("Property Taxes"; the module renamed from "Taxes"
+    everywhere in UI text 2026-08-20, routes and tables unchanged):
+    year selector; entity filter select
     plus a "by entity" rollup table (statements covered X of Y, due,
     paid, outstanding per entity, amber/red highlights) so "is
     everything this entity owns covered and paid" reads at a glance;
@@ -915,8 +1014,10 @@ Functions and views:
     (lib/geo/spatialRef.ts, unit-tested) detects servers that ignore
     outSR=4326 and return Web Mercator, reprojects to WGS84 before any
     display or save, and console-warns naming the service.
-  - /admin/gis (platform admins only; Admin nav item appears only for
-    them): registry list with status chips and re-verify, add-service
+  - The GIS registry admin area (platform admins only; lives in the
+    Settings page's Admin section since 2026-08-20, /admin/gis
+    redirects there): registry list with status chips and re-verify,
+    add-service
     flow (paste layer URL, auto-read fields with guessed mappings,
     dropdown mapping, one-record test query, save as active/untested),
     edit, deactivate, delete.
@@ -1045,5 +1146,22 @@ Functions and views:
   button (WYSIWYG framed Letter PDFs with per-layer/label control,
   legend, scale bar, north indicator, brand lockup, attribution,
   client-side via jsPDF at print resolution) and the utility easements
-  layer (powerline/pipeline corridors with widths, corridor acres,
-  recorded refs, and easement-deed documents). Described above.
+  layer (then line+width corridors; became polygons in 0017).
+  Described above.
+- Post-Phase 6h (DONE, 2026-08-20, migrations 0017 + 0018): utility
+  easements became polygon boundaries drawn like every land type
+  (line-to-polygon buffer conversion, 50 ft default for missing
+  widths); one Settings page (Members + platform-admin GIS registry +
+  Sign out) collapsing three nav items; the map became the landing
+  page and first nav item; logo-only working banner; Taxes renamed
+  Property Taxes; timber sale contracts and logger settlements with
+  AI extraction (Southeast product classes, $/ton and $/MBF with log
+  scales, harvest types, delivered-net flag, stand allocation
+  by-acres/manual/none with per-settlement overrides, contract upload
+  with stand-link suggestions, settlement upload from PDF/photo/
+  Excel/CSV with deterministic per-load collapse and non-blocking
+  rate mismatch flags, unmatched-sale suggestion, last-thinning
+  offer, allocated income on stand pages, rent-upload timber routing
+  into the same review); and print item exclusions (tap-to-toggle
+  ghosting, property chips, Choose items drawer, per-session).
+  Described above.

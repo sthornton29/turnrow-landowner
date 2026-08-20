@@ -349,20 +349,90 @@ export const TIMBER_PRODUCTS: Array<{ product: string; label: string }> = [
   { product: "pine_pulpwood", label: "Pine pulpwood" },
   { product: "hardwood_sawtimber", label: "Hardwood sawtimber" },
   { product: "hardwood_pulpwood", label: "Hardwood pulpwood" },
+  { product: "poles_pilings", label: "Poles / pilings" },
+  { product: "veneer_peeler", label: "Veneer / peeler logs" },
+  { product: "crossties", label: "Crossties" },
+  { product: "topwood_chips", label: "Topwood / chips" },
 ];
+
+export const HARVEST_TYPE_LABELS: Record<string, string> = {
+  clearcut: "Clearcut",
+  first_thinning: "First thinning",
+  second_thinning: "Second thinning",
+  select_cut: "Select / seed-tree cut",
+  salvage: "Salvage",
+  other: "Other",
+};
+
+// Rate units: $/ton is the Southeast default; hardwood sawtimber
+// sometimes sells by the thousand board feet with a log scale noted
+// (Doyle is the regional default; Scribner and International 1/4 exist).
+export type RateUnit = "ton" | "mbf";
+export type LogScale = "doyle" | "scribner" | "international";
+
+export const RATE_UNIT_LABELS: Record<RateUnit, string> = {
+  ton: "ton",
+  mbf: "MBF",
+};
+
+export const LOG_SCALE_LABELS: Record<LogScale, string> = {
+  doyle: "Doyle",
+  scribner: "Scribner",
+  international: "International 1/4",
+};
 
 export interface StumpageRate {
   product: string; // one of TIMBER_PRODUCTS or a custom slug
   label: string;
-  price_per_ton: number;
+  rate: number; // dollars per unit
+  unit: RateUnit;
+  log_scale?: LogScale | null; // MBF rates only
+}
+
+// Rows written before migration 0018 stored { price_per_ton } with no
+// unit; read them as $/ton forever.
+export function normalizeStumpageRate(
+  raw: Partial<StumpageRate> & { price_per_ton?: number }
+): StumpageRate {
+  return {
+    product: raw.product ?? "",
+    label: raw.label ?? "",
+    rate: raw.rate ?? raw.price_per_ton ?? 0,
+    unit: raw.unit === "mbf" ? "mbf" : "ton",
+    log_scale:
+      raw.unit === "mbf" ? ((raw.log_scale ?? "doyle") as LogScale) : null,
+  };
 }
 
 export interface SettlementLine {
   product: string;
   label: string;
-  tons: number;
-  price_per_ton: number;
+  quantity: number; // in the product's unit (tons or MBF)
+  unit: RateUnit;
+  rate: number; // dollars per unit actually paid
   amount: number;
+  // Per-load statements collapse to one line per product, keeping the
+  // load count and date range for the record.
+  load_count?: number | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+// Pre-0018 settlement lines stored { tons, price_per_ton }.
+export function normalizeSettlementLine(
+  raw: Partial<SettlementLine> & { tons?: number; price_per_ton?: number }
+): SettlementLine {
+  return {
+    product: raw.product ?? "",
+    label: raw.label ?? "",
+    quantity: raw.quantity ?? raw.tons ?? 0,
+    unit: raw.unit === "mbf" ? "mbf" : "ton",
+    rate: raw.rate ?? raw.price_per_ton ?? 0,
+    amount: raw.amount ?? 0,
+    load_count: raw.load_count ?? null,
+    date_from: raw.date_from ?? null,
+    date_to: raw.date_to ?? null,
+  };
 }
 
 // ---------------------------------------------------------------- insurance

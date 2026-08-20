@@ -25,6 +25,12 @@ import {
   proposeAllocation,
   type OpenExpectedPayment,
 } from "@/lib/paymentMatch";
+import { slugifyProduct } from "@/lib/timberSettlement";
+import { suggestSaleId } from "@/lib/timberMatch";
+import SettlementReview, {
+  type SaleOption,
+  type SettlementExtraction,
+} from "@/components/timber/SettlementReview";
 
 interface Tenant {
   id: string;
@@ -36,11 +42,8 @@ interface Lease {
   tenant_id: string;
   status: string;
 }
-interface TimberSale {
-  id: string;
-  sale_name: string;
+interface TimberSale extends SaleOption {
   buyer_tenant_id: string | null;
-  sale_type: string;
 }
 interface ExpectedRow {
   id: string;
@@ -132,7 +135,11 @@ export default function RentUpload({
       const [t, l, s, e, p, a] = await Promise.all([
         supabase.from("tenants").select("id, name").order("name"),
         supabase.from("leases").select("id, name, tenant_id, status"),
-        supabase.from("timber_sales").select("id, sale_name, buyer_tenant_id, sale_type"),
+        supabase
+          .from("timber_sales")
+          .select(
+            "id, sale_name, buyer_name, buyer_tenant_id, sale_type, status, delivered_net, allocation_method, stumpage_rates"
+          ),
         supabase
           .from("expected_payments")
           .select("id, lease_id, label, due_date, expected_amount")
@@ -229,8 +236,17 @@ export default function RentUpload({
                 ? tenantLeases[0].id
                 : (tenantLeases.find((l) => l.status === "active")?.id ?? ""));
             const isTimber = x.document_kind === "timber_settlement" && sales.length > 0;
+            // Suggest the matching sale by buyer name and products (the
+            // user confirms); fall back to the payer's tenant link.
             const timberSaleId = isTimber
-              ? (sales.find((s) => s.buyer_tenant_id === tenantId)?.id ?? sales[0]?.id ?? "")
+              ? (suggestSaleId(
+                  x.payer_name,
+                  (x.timber_lines ?? []).map((l) => slugifyProduct(l.product)),
+                  sales
+                ) ??
+                sales.find((s) => s.buyer_tenant_id === tenantId)?.id ??
+                sales[0]?.id ??
+                "")
               : "";
             const next: Item = {
               ...it,
@@ -307,33 +323,9 @@ export default function RentUpload({
     const fail = (message: string) =>
       patch(item.localId, { status: "review", error: message });
 
-    if (item.mode === "timber") {
-      if (!item.timberSaleId) return fail("Pick the timber sale first.");
-      const lines = (item.extraction?.timber_lines ?? [])
-        .filter((l) => l.amount != null || (l.tons != null && l.price_per_ton != null))
-        .map((l) => ({
-          product: l.product.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
-          label: l.product,
-          tons: l.tons ?? 0,
-          price_per_ton: l.price_per_ton ?? 0,
-          amount: l.amount ?? Math.round((l.tons ?? 0) * (l.price_per_ton ?? 0) * 100) / 100,
-        }));
-      const { error } = await supabase.from("timber_settlements").insert({
-        organization_id: orgId,
-        timber_sale_id: item.timberSaleId,
-        settlement_date: item.date || new Date().toISOString().slice(0, 10),
-        lines,
-        total_amount: Number(item.amount) || 0,
-        check_number: item.checkNumber || null,
-        memo: provenance,
-      });
-      if (error) return fail("Could not save the settlement: " + error.message);
-      const docErr = await attachDocument(item, "timber_sale", item.timberSaleId);
-      if (docErr) return fail("Settlement saved, but " + docErr);
-      patch(item.localId, { status: "saved" });
-      router.refresh();
-      return;
-    }
+    // Timber settlements save through the shared SettlementReview card
+    // (same flow as the sale page's Upload settlement), never here.
+    if (item.mode === "timber") return;
 
     if (!item.leaseId) return fail("Pick the lease first (or the tenant to narrow it).");
     const total = Number(item.amount) || 0;
@@ -449,6 +441,7 @@ export default function RentUpload({
 
                 {item.status === "review" || item.status === "saving" ? (
                   <>
+                    {item.mode !== "timber" ? (
                     <div className="flex flex-wrap items-end gap-2">
                       <label className="text-xs text-gray-600">
                         Payer
@@ -486,6 +479,7 @@ export default function RentUpload({
                         />
                       </label>
                     </div>
+                    ) : null}
 
                     {item.extraction?.document_kind === "timber_settlement" && sales.length > 0 ? (
                       <div className="flex gap-1.5">
@@ -512,37 +506,46 @@ export default function RentUpload({
                     ) : null}
 
                     {item.mode === "timber" ? (
-                      <div className="space-y-1.5">
-                        <label className="block text-xs text-gray-600">
-                          Timber sale (pay as cut)
-                          <select
-                            value={item.timberSaleId}
-                            onChange={(e) => patch(item.localId, { timberSaleId: e.target.value })}
-                            className={`${inputClass} mt-0.5 block w-full`}
-                          >
-                            <option value="">Pick a sale...</option>
-                            {sales.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.sale_name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {(item.extraction?.timber_lines ?? []).length > 0 ? (
-                          <div className="rounded-lg bg-gray-50 p-2 text-xs text-gray-700">
-                            {(item.extraction?.timber_lines ?? []).map((l, i) => (
-                              <p key={i}>
-                                {l.product}: {formatNumber(l.tons ?? 0)} tons at{" "}
-                                {formatDollars(l.price_per_ton ?? 0)}/ton
-                                {l.amount != null ? ` = ${formatDollars(l.amount)}` : ""}
-                              </p>
-                            ))}
-                            <p className="mt-1 text-gray-500">
-                              Saves as a settlement on the sale for review there.
-                            </p>
-                          </div>
-                        ) : null}
-                      </div>
+                      // Lands in the same settlement review flow as the
+                      // sale page's Upload settlement: lines vs contract
+                      // rates, allocation, document attach.
+                      <SettlementReview
+                        orgId={orgId}
+                        file={item.file}
+                        extraction={
+                          {
+                            payer_name: item.payerName || null,
+                            date: item.date || null,
+                            period_start: null,
+                            period_end: null,
+                            check_number: item.checkNumber || null,
+                            total_amount: Number(item.amount) || null,
+                            lines: (item.extraction?.timber_lines ?? []).map((l) => ({
+                              product: slugifyProduct(l.product),
+                              label: l.product,
+                              quantity: l.tons ?? 0,
+                              unit: "ton" as const,
+                              rate: l.price_per_ton ?? 0,
+                              amount:
+                                l.amount ??
+                                Math.round((l.tons ?? 0) * (l.price_per_ton ?? 0) * 100) / 100,
+                            })),
+                            unsure_fields: item.extraction?.unsure_fields ?? [],
+                          } satisfies SettlementExtraction
+                        }
+                        sales={sales}
+                        initialSaleId={item.timberSaleId}
+                        saleSuggested={Boolean(item.timberSaleId)}
+                        onSaved={() => {
+                          patch(item.localId, { status: "saved" });
+                          router.refresh();
+                        }}
+                        onDiscard={() =>
+                          setItems((prev) =>
+                            prev.filter((x) => x.localId !== item.localId)
+                          )
+                        }
+                      />
                     ) : (
                       <>
                         <div className="flex flex-wrap gap-2">
@@ -678,27 +681,25 @@ export default function RentUpload({
                       </>
                     )}
 
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => saveItem(item)}
-                        disabled={item.status === "saving"}
-                        className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
-                      >
-                        {item.status === "saving"
-                          ? "Saving..."
-                          : item.mode === "timber"
-                            ? "Save settlement"
-                            : "Record payment"}
-                      </button>
-                      <button
-                        onClick={() =>
-                          setItems((prev) => prev.filter((x) => x.localId !== item.localId))
-                        }
-                        className="text-sm text-gray-500 hover:underline"
-                      >
-                        Discard
-                      </button>
-                    </div>
+                    {item.mode !== "timber" ? (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveItem(item)}
+                          disabled={item.status === "saving"}
+                          className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+                        >
+                          {item.status === "saving" ? "Saving..." : "Record payment"}
+                        </button>
+                        <button
+                          onClick={() =>
+                            setItems((prev) => prev.filter((x) => x.localId !== item.localId))
+                          }
+                          className="text-sm text-gray-500 hover:underline"
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
               </div>

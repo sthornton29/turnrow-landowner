@@ -286,7 +286,7 @@ export default function TaxStatusClient({
     <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Tax Statement Status</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Property Taxes</h1>
           <p className="mt-0.5 text-sm text-gray-600">
             Every parcel should have a statement each year; a missing one is
             how a parcel quietly goes delinquent.

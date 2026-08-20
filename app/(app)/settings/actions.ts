@@ -16,7 +16,7 @@ export async function createInvite(formData: FormData) {
     role,
     invited_by: profile.id,
   });
-  revalidatePath("/settings/members");
+  revalidatePath("/settings");
 }
 
 export async function deleteInvite(formData: FormData) {
@@ -24,5 +24,5 @@ export async function deleteInvite(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await supabase.from("invites").delete().eq("id", id);
-  revalidatePath("/settings/members");
+  revalidatePath("/settings");
 }

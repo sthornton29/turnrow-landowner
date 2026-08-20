@@ -4,7 +4,7 @@ import { signOut } from "../actions";
 
 // Runs after signup/login for users who do not belong to an organization
 // yet. If a pending invite matches their email, accept_invite() attaches
-// them and we send them to the dashboard. Otherwise (invite-only product)
+// them and we send them to the map. Otherwise (invite-only product)
 // they see a "not set up yet" message.
 export default async function OnboardingPage() {
   const supabase = await createClient();
@@ -20,10 +20,10 @@ export default async function OnboardingPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile?.organization_id) redirect("/dashboard");
+  if (profile?.organization_id) redirect("/map");
 
   const { data: accepted } = await supabase.rpc("accept_invite");
-  if (accepted) redirect("/dashboard");
+  if (accepted) redirect("/map");
 
   return (
     <div className="space-y-4 text-center">

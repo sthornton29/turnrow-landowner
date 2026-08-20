@@ -18,7 +18,7 @@ export async function login(
   if (error) {
     return { error: "Invalid email or password." };
   }
-  redirect("/dashboard");
+  redirect("/map");
 }
 
 export async function signup(

@@ -1,7 +1,7 @@
 import { requireOrg } from "@/lib/auth";
 import TaxStatusClient from "./TaxStatusClient";
 
-export const metadata = { title: "Taxes" };
+export const metadata = { title: "Property Taxes" };
 
 export default async function TaxesPage() {
   const { supabase, profile } = await requireOrg();

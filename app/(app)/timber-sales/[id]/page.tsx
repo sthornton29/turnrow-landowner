@@ -17,7 +17,7 @@ export default async function TimberSaleDetailPage({
     supabase.from("tenants").select("id, name").order("name"),
     supabase
       .from("timber_stands")
-      .select("id, property_id, name, acres")
+      .select("id, property_id, name, acres, last_thinning_year")
       .order("name"),
   ]);
   if (!sale) notFound();

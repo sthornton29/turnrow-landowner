@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars } from "@/lib/format";
 import SectionTabs from "@/components/leases/SectionTabs";
+import SettlementUpload from "@/components/timber/SettlementUpload";
 
 export const metadata = { title: "Timber sales" };
 
@@ -12,12 +13,14 @@ const STATUS_CLASSES: Record<string, string> = {
 };
 
 export default async function TimberSalesPage() {
-  const { supabase } = await requireOrg();
+  const { supabase, profile } = await requireOrg();
 
   const [{ data: sales }, { data: settlements }] = await Promise.all([
     supabase
       .from("timber_sales")
-      .select("id, sale_name, buyer_name, sale_type, status, contract_date, harvest_deadline, sale_acres, lump_sum_price")
+      .select(
+        "id, sale_name, buyer_name, sale_type, delivered_net, status, contract_date, harvest_deadline, sale_acres, lump_sum_price, stumpage_rates, allocation_method"
+      )
       .order("contract_date", { ascending: false }),
     supabase.from("timber_settlements").select("timber_sale_id, total_amount"),
   ]);
@@ -34,16 +37,33 @@ export default async function TimberSalesPage() {
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <SectionTabs active="/timber-sales" />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm text-gray-600">
-          Lump sum and pay-as-cut timber sale contracts.
+          Lump sum, pay-as-cut, and delivered-price timber sale contracts.
         </p>
-        <Link
-          href="/timber-sales/new"
-          className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-        >
-          + New timber sale
-        </Link>
+        <span className="ml-auto flex gap-2">
+          {(sales ?? []).some((s) => s.sale_type === "pay_as_cut") ? (
+            <SettlementUpload
+              orgId={profile.organization_id!}
+              sales={(sales ?? []).map((s) => ({
+                id: s.id,
+                sale_name: s.sale_name,
+                buyer_name: s.buyer_name,
+                sale_type: s.sale_type,
+                status: s.status,
+                delivered_net: s.delivered_net,
+                allocation_method: s.allocation_method,
+                stumpage_rates: s.stumpage_rates,
+              }))}
+            />
+          ) : null}
+          <Link
+            href="/timber-sales/new"
+            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+          >
+            + New timber sale
+          </Link>
+        </span>
       </div>
 
       {(sales ?? []).length === 0 ? (
@@ -65,6 +85,11 @@ export default async function TimberSalesPage() {
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
                   {s.sale_type === "lump_sum" ? "Lump sum" : "Pay as cut"}
                 </span>
+                {s.delivered_net ? (
+                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800">
+                    Delivered (net)
+                  </span>
+                ) : null}
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_CLASSES[s.status] ?? ""}`}
                 >

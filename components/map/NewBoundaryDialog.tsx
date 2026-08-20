@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { formatAcres } from "@/lib/format";
-import { STAND_TYPE_LABELS } from "@/lib/assetTypes";
-import type { EntityType, PropertyGeo, StandType } from "@/types/db";
+import { EASEMENT_TYPE_LABELS, STAND_TYPE_LABELS } from "@/lib/assetTypes";
+import type { EasementType, EntityType, PropertyGeo, StandType } from "@/types/db";
 
 type BoundaryType =
   | "field"
@@ -11,7 +11,8 @@ type BoundaryType =
   | "wetland"
   | "parcel"
   | "property"
-  | "timber_stand";
+  | "timber_stand"
+  | "utility_easement";
 
 export interface NewBoundaryPayload {
   entityType: EntityType;
@@ -25,6 +26,11 @@ export interface NewBoundaryPayload {
   species: string | null;
   yearEstablished: number | null;
   standNotes: string | null;
+  // Utility easement details, same one-step pattern.
+  easementType: EasementType | null;
+  holder: string | null;
+  recordedRef: string | null;
+  easementNotes: string | null;
 }
 
 const TYPE_LABEL: Record<BoundaryType, string> = {
@@ -34,6 +40,7 @@ const TYPE_LABEL: Record<BoundaryType, string> = {
   parcel: "Parcel",
   property: "Property",
   timber_stand: "Timber",
+  utility_easement: "Easement",
 };
 
 // Shown after a polygon is drawn: pick what it is, name it, and save.
@@ -76,7 +83,13 @@ export default function NewBoundaryDialog({
   // whole multi-area session like type/name/property do.
   const [standType, setStandType] = useState<StandType | null>(null);
   const [species, setSpecies] = useState("");
-  const needsProperty = entityType !== "property";
+  // Easement type as state for the same session-survival reason (the
+  // other easement fields are form inputs; the dialog stays mounted
+  // through a multi-area session so they survive too).
+  const [easementType, setEasementType] = useState<EasementType>("powerline");
+  const isEasement = entityType === "utility_easement";
+  // Easements often cross property lines, so their property is optional.
+  const needsProperty = entityType !== "property" && !isEasement;
   const isTimber = entityType === "timber_stand";
 
   function pickStandType(t: StandType) {
@@ -96,9 +109,10 @@ export default function NewBoundaryDialog({
     onSave({
       entityType,
       name: String(formData.get("name") ?? "").trim(),
-      propertyId: needsProperty
-        ? String(formData.get("property_id") ?? "") || null
-        : null,
+      propertyId:
+        needsProperty || isEasement
+          ? String(formData.get("property_id") ?? "") || null
+          : null,
       county: String(formData.get("county") ?? "").trim() || null,
       state: String(formData.get("state") ?? "").trim() || null,
       standType: isTimber ? standType : null,
@@ -106,6 +120,16 @@ export default function NewBoundaryDialog({
       yearEstablished: isTimber && year ? Number(year) : null,
       standNotes: isTimber
         ? String(formData.get("stand_notes") ?? "").trim() || null
+        : null,
+      easementType: isEasement ? easementType : null,
+      holder: isEasement
+        ? String(formData.get("holder") ?? "").trim() || null
+        : null,
+      recordedRef: isEasement
+        ? String(formData.get("recorded_ref") ?? "").trim() || null
+        : null,
+      easementNotes: isEasement
+        ? String(formData.get("easement_notes") ?? "").trim() || null
         : null,
     });
   }
@@ -193,6 +217,70 @@ export default function NewBoundaryDialog({
           </p>
         ) : null}
 
+        {isEasement ? (
+          <>
+            <p className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600">
+              The utility{"'"}s corridor (powerline, pipeline), drawn as the
+              recorded strip. Your own buried irrigation pipe is an asset,
+              not an easement.
+            </p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Easement type
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(Object.keys(EASEMENT_TYPE_LABELS) as EasementType[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setEasementType(t)}
+                    className={
+                      "rounded-lg border px-1.5 py-1.5 text-xs font-medium " +
+                      (easementType === t
+                        ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50")
+                    }
+                  >
+                    {EASEMENT_TYPE_LABELS[t].replace(" easement", "")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Holder (utility/company)
+                </label>
+                <input
+                  name="holder"
+                  placeholder="Optional"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Recorded ref
+                </label>
+                <input
+                  name="recorded_ref"
+                  placeholder="Book/page"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Notes
+              </label>
+              <input
+                name="easement_notes"
+                placeholder="Optional"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
+              />
+            </div>
+          </>
+        ) : null}
+
         {isTimber ? (
           <>
             <div>
@@ -254,10 +342,10 @@ export default function NewBoundaryDialog({
           </>
         ) : null}
 
-        {needsProperty ? (
+        {needsProperty || isEasement ? (
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Property
+              Property{isEasement ? " (optional; easements cross lines)" : ""}
               {suggestedPropertyId && propertyId === suggestedPropertyId ? (
                 <span
                   className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
@@ -267,18 +355,19 @@ export default function NewBoundaryDialog({
                 </span>
               ) : null}
             </label>
-            {properties.length === 0 ? (
+            {properties.length === 0 && !isEasement ? (
               <p className="text-sm text-red-600">
                 Create a property first; this must belong to one.
               </p>
             ) : (
               <select
                 name="property_id"
-                required
+                required={!isEasement}
                 value={propertyId}
                 onChange={(e) => setPropertyId(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
               >
+                {isEasement ? <option value="">None</option> : null}
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}

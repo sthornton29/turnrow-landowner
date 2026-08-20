@@ -52,7 +52,6 @@ export interface PrintSources {
   timber: FeatureCollection;
   roads: FeatureCollection;
   easements: FeatureCollection;
-  easementCorridors: FeatureCollection;
   assets: FeatureCollection;
   propertyLabels: FeatureCollection;
   parcelLabels: FeatureCollection;
@@ -60,6 +59,7 @@ export interface PrintSources {
   pastureLabels: FeatureCollection;
   wetlandLabels: FeatureCollection;
   timberLabels: FeatureCollection;
+  easementLabels: FeatureCollection;
 }
 
 export interface LegendEntry {
@@ -159,7 +159,6 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
   src("timber", layers.timber_stand ? sources.timber : empty);
   src("roads", layers.road ? sources.roads : empty);
   src("easements", layers.utility_easement ? sources.easements : empty);
-  src("easement-corridors", layers.utility_easement ? sources.easementCorridors : empty);
   src("assets", layers.asset ? sources.assets : empty);
 
   // Mirrors the live map's styles; order matches too.
@@ -220,20 +219,19 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
     "pipeline", EASEMENT_COLORS.pipeline,
     EASEMENT_COLORS.other,
   ];
-  map.addLayer({ id: "easements-corridor-fill", type: "fill",
-    source: "easement-corridors",
+  map.addLayer({ id: "easements-fill", type: "fill", source: "easements",
     paint: { "fill-color": easementColor, "fill-opacity": 0.18 } });
   map.addLayer({ id: "easements-line-powerline", type: "line", source: "easements",
     filter: ["==", ["get", "easementType"], "powerline"],
-    paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2.5,
+    paint: { "line-color": EASEMENT_COLORS.powerline, "line-width": 2,
       "line-dasharray": [4, 2] } });
   map.addLayer({ id: "easements-line-pipeline", type: "line", source: "easements",
     filter: ["==", ["get", "easementType"], "pipeline"],
-    paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2.5,
+    paint: { "line-color": EASEMENT_COLORS.pipeline, "line-width": 2,
       "line-dasharray": [3, 1.5, 0.4, 1.5] } });
   map.addLayer({ id: "easements-line-other", type: "line", source: "easements",
     filter: ["==", ["get", "easementType"], "other"],
-    paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2.5 } });
+    paint: { "line-color": EASEMENT_COLORS.other, "line-width": 2 } });
 
   const notPivot: mapboxgl.Expression = [
     "!", ["==", ["get", "assetType"], "irrigation_pivot"],
@@ -299,10 +297,7 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
       paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
   }
   if (layers.utility_easement && labels.utility_easement) {
-    map.addLayer({ id: "easement-labels", type: "symbol", source: "easements",
-      layout: { "symbol-placement": "line", "text-field": ["get", "name"],
-        "text-size": 10, "text-font": fonts },
-      paint: { "text-color": "#ffffff", "text-halo-color": "#7f1d1d", "text-halo-width": 1.1 } });
+    labelLayer("easement-labels", sources.easementLabels, 10, "#ffffff", "#7f1d1d");
   }
   if (layers.asset && labels.asset) {
     map.addLayer({ id: "assets-name", type: "symbol", source: "assets",

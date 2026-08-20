@@ -185,7 +185,9 @@ export type EasementType = "powerline" | "pipeline" | "other";
 
 // Utility easements (powerline/pipeline corridors). NOT the farm's own
 // underground irrigation pipe (that is an asset); labels always say
-// "easement" so the two never read as the same thing.
+// "easement" so the two never read as the same thing. Polygon
+// boundaries like every land type since migration 0017; acres is the
+// generated PostGIS column.
 export interface UtilityEasementGeo {
   id: string;
   organization_id: string;
@@ -193,12 +195,10 @@ export interface UtilityEasementGeo {
   name: string;
   easement_type: EasementType;
   holder: string | null;
-  width_ft: number | null;
   recorded_ref: string | null;
   notes: string | null;
-  length_feet: number | null;
-  miles: number | null;
-  geom_geojson: MultiLineString | null;
+  acres: number | null;
+  boundary_geojson: MultiPolygon | null;
   created_at: string;
   updated_at: string;
 }

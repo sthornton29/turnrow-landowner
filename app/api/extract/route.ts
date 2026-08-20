@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import {
+  collapseLoads,
+  csvToRows,
+  workbookToRows,
+  type SettlementColumnMap,
+} from "@/lib/timberSettlement";
 
 // AI term extraction for lease and timber sale documents. Runs server-side
 // so the Anthropic API key never reaches the browser. The extraction is
@@ -120,10 +126,13 @@ const LEASE_TOOL: Anthropic.Tool = {
   },
 };
 
+const TIMBER_PRODUCT_SLUGS =
+  "pine_sawtimber, pine_cns, pine_pulpwood, hardwood_sawtimber, hardwood_pulpwood, poles_pilings, veneer_peeler, crossties, topwood_chips, or a short custom slug";
+
 const TIMBER_TOOL: Anthropic.Tool = {
   name: "record_timber_extraction",
   description:
-    "Record the terms extracted from a timber sale contract. Use null for anything the document does not state.",
+    "Record the terms extracted from a timber sale contract (lump sum by timber deed/sale agreement, pay-as-cut stumpage agreement possibly with supplements, delivered-price arrangement, or salvage sale). Use null for anything the document does not state.",
   input_schema: {
     type: "object",
     properties: {
@@ -131,8 +140,19 @@ const TIMBER_TOOL: Anthropic.Tool = {
       buyer_name: { type: ["string", "null"], description: "The buyer/purchaser name" },
       sale_type: {
         type: "string",
-        enum: ["lump_sum", "pay_as_cut"],
-        description: "lump_sum for a fixed total price; pay_as_cut when paid per unit harvested (stumpage rates)",
+        enum: ["lump_sum", "pay_as_cut", "delivered_net"],
+        description:
+          "lump_sum for a fixed total price conveyed by timber deed or sale agreement (sealed bid or negotiated); pay_as_cut when paid per unit harvested at stumpage rates from scale tickets; delivered_net when rates are a delivered/mill price minus cut-and-haul (net to landowner)",
+      },
+      harvest_type: {
+        type: ["string", "null"],
+        enum: ["clearcut", "first_thinning", "second_thinning", "select_cut", "salvage", "other", null],
+        description: "The cutting type: clearcut, first or second thinning, select or seed-tree cut, salvage. Null when the contract does not say.",
+      },
+      tract_description: {
+        type: ["string", "null"],
+        description:
+          "How the contract describes the land/tract/stands being sold, condensed but keeping distinctive names, acreages, and landmarks (used to suggest which mapped timber stands this sale covers)",
       },
       contract_date: { type: ["string", "null"], description: "Contract date, YYYY-MM-DD" },
       harvest_deadline: { type: ["string", "null"], description: "Harvest deadline / contract expiration, YYYY-MM-DD" },
@@ -141,18 +161,25 @@ const TIMBER_TOOL: Anthropic.Tool = {
       lump_sum_price: { type: ["number", "null"], description: "Total sale price for lump sum sales" },
       stumpage_rates: {
         type: "array",
-        description: "Pay-as-cut: price per ton by product. Use the standard product slugs where they fit, otherwise a short custom slug.",
+        description:
+          "Per-unit sales: the rate per product. Default unit is $/ton; hardwood sawtimber sometimes sells $/MBF with a log scale (Doyle default in the Southeast). For delivered-price sales record the NET rate to the landowner.",
         items: {
           type: "object",
           properties: {
             product: {
               type: "string",
-              description: "pine_sawtimber, pine_cns, pine_pulpwood, hardwood_sawtimber, hardwood_pulpwood, or a short custom slug",
+              description: TIMBER_PRODUCT_SLUGS,
             },
             label: { type: "string", description: "Display label, e.g. 'Pine sawtimber'" },
-            price_per_ton: { type: "number", description: "Dollars per ton" },
+            rate: { type: "number", description: "Dollars per unit" },
+            unit: { type: "string", enum: ["ton", "mbf"], description: "ton unless the contract prices by thousand board feet" },
+            log_scale: {
+              type: ["string", "null"],
+              enum: ["doyle", "scribner", "international", null],
+              description: "MBF rates only: the log scale named (doyle if unstated)",
+            },
           },
-          required: ["product", "label", "price_per_ton"],
+          required: ["product", "label", "rate", "unit"],
           additionalProperties: false,
         },
       },
@@ -170,7 +197,11 @@ const TIMBER_TOOL: Anthropic.Tool = {
           additionalProperties: false,
         },
       },
-      notes: { type: ["string", "null"], description: "Other provisions worth noting, condensed" },
+      notes: {
+        type: ["string", "null"],
+        description:
+          "Provisions worth surfacing, condensed: penalty clauses (e.g. per-tree damages), BMP/streamside requirements, master stumpage agreement or supplement references, road/gate obligations, and anything unusual",
+      },
       unsure_fields: {
         type: "array",
         items: { type: "string" },
@@ -178,6 +209,99 @@ const TIMBER_TOOL: Anthropic.Tool = {
       },
     },
     required: ["sale_type", "stumpage_rates", "payment_schedule", "unsure_fields"],
+    additionalProperties: false,
+  },
+};
+
+// Logger/mill settlement statements as PDFs or photos: per-load detail
+// collapses to one line per product (keeping load count and date
+// range); period summaries record as printed.
+const TIMBER_SETTLEMENT_TOOL: Anthropic.Tool = {
+  name: "record_timber_settlement",
+  description:
+    "Record what this logger or mill settlement statement shows. Collapse per-load/scale-ticket detail to ONE line per product, keeping the load count and date range. Use null for anything not shown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      payer_name: { type: ["string", "null"], description: "The settling party (logger, mill, or timber buyer), exactly as printed" },
+      date: { type: ["string", "null"], description: "Settlement/check date, YYYY-MM-DD" },
+      period_start: { type: ["string", "null"], description: "Start of the period the statement covers, YYYY-MM-DD" },
+      period_end: { type: ["string", "null"], description: "End of the period, YYYY-MM-DD" },
+      check_number: { type: ["string", "null"] },
+      total_amount: { type: ["number", "null"], description: "Total dollars to the landowner" },
+      lines: {
+        type: "array",
+        description: "One line per product across the statement",
+        items: {
+          type: "object",
+          properties: {
+            product: { type: "string", description: TIMBER_PRODUCT_SLUGS },
+            label: { type: "string", description: "The product as the statement prints it" },
+            quantity: { type: "number", description: "Total units for the product across the statement" },
+            unit: { type: "string", enum: ["ton", "mbf"], description: "ton for net tons; mbf for thousand board feet" },
+            rate: { type: ["number", "null"], description: "Dollars per unit paid (weighted average if loads vary)" },
+            amount: { type: ["number", "null"], description: "Total dollars for the product" },
+            load_count: { type: ["integer", "null"], description: "Number of loads/tickets collapsed into this line" },
+            date_from: { type: ["string", "null"], description: "Earliest load date, YYYY-MM-DD" },
+            date_to: { type: ["string", "null"], description: "Latest load date, YYYY-MM-DD" },
+          },
+          required: ["product", "label", "quantity", "unit"],
+          additionalProperties: false,
+        },
+      },
+      unsure_fields: {
+        type: "array",
+        items: { type: "string" },
+        description: "Field names you are not confident about",
+      },
+    },
+    required: ["lines", "unsure_fields"],
+    additionalProperties: false,
+  },
+};
+
+// Spreadsheet settlements: the model only maps columns and product
+// spellings; the per-load rows collapse deterministically in
+// lib/timberSettlement.ts (unit-tested), never by the model.
+const SETTLEMENT_COLUMNS_TOOL: Anthropic.Tool = {
+  name: "record_settlement_columns",
+  description:
+    "Map the columns and product names of this settlement spreadsheet. Row and column indexes are 0-based, matching the row numbers shown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      header_row: { type: "integer", description: "0-based index of the header row; data rows follow it" },
+      ticket_col: { type: ["integer", "null"], description: "Column with the load/scale ticket number" },
+      date_col: { type: ["integer", "null"], description: "Column with the load or line date" },
+      product_col: { type: "integer", description: "Column with the product name" },
+      quantity_col: { type: "integer", description: "Column with the net tons (or MBF) per row" },
+      rate_col: { type: ["integer", "null"], description: "Column with the dollars-per-unit rate" },
+      amount_col: { type: ["integer", "null"], description: "Column with the landowner dollars per row" },
+      quantity_unit: { type: "string", enum: ["ton", "mbf"], description: "Unit of the quantity column" },
+      products: {
+        type: "array",
+        description: "Every distinct product spelling in the product column, mapped to a slug",
+        items: {
+          type: "object",
+          properties: {
+            raw: { type: "string", description: "The spelling exactly as it appears" },
+            product: { type: "string", description: TIMBER_PRODUCT_SLUGS },
+            label: { type: "string", description: "Clean display label" },
+          },
+          required: ["raw", "product", "label"],
+          additionalProperties: false,
+        },
+      },
+      payer_name: { type: ["string", "null"], description: "The settling party if named anywhere in the sheet" },
+      settlement_date: { type: ["string", "null"], description: "Settlement date if shown, YYYY-MM-DD" },
+      check_number: { type: ["string", "null"] },
+      unsure_fields: {
+        type: "array",
+        items: { type: "string" },
+        description: "Field names you are not confident about",
+      },
+    },
+    required: ["header_row", "product_col", "quantity_col", "quantity_unit", "products", "unsure_fields"],
     additionalProperties: false,
   },
 };
@@ -318,15 +442,38 @@ export async function POST(request: Request) {
   }
   const isPdf = file.type === "application/pdf";
   const isImage = (IMAGE_TYPES as readonly string[]).includes(file.type);
-  // Tax statements and rent checks are often phone photos; leases and
-  // timber contracts are PDFs.
-  const allowsImages = kind === "tax" || kind === "payment";
-  if (allowsImages ? !isPdf && !isImage : !isPdf) {
+  const lowerName = file.name.toLowerCase();
+  const isCsv = lowerName.endsWith(".csv") || file.type === "text/csv";
+  const isExcel =
+    lowerName.endsWith(".xlsx") ||
+    lowerName.endsWith(".xls") ||
+    file.type ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.type === "application/vnd.ms-excel";
+  const isSpreadsheet = isCsv || isExcel;
+  // Tax statements, rent checks, and timber contracts can be phone
+  // photos; leases are PDFs; logger/mill settlements arrive as PDFs,
+  // photos, or Excel/CSV exports.
+  const allowsImages =
+    kind === "tax" ||
+    kind === "payment" ||
+    kind === "timber" ||
+    kind === "timber_settlement";
+  const allowed =
+    kind === "timber_settlement"
+      ? isPdf || isImage || isSpreadsheet
+      : allowsImages
+        ? isPdf || isImage
+        : isPdf;
+  if (!allowed) {
     return NextResponse.json(
       {
-        error: allowsImages
-          ? "Upload a PDF or a photo (JPEG, PNG, or WebP). iPhone HEIC photos need to be shared as JPEG."
-          : "Only PDF documents can be extracted. Use manual entry for other formats.",
+        error:
+          kind === "timber_settlement"
+            ? "Upload a PDF, a photo (JPEG, PNG, or WebP), or an Excel/CSV settlement export."
+            : allowsImages
+              ? "Upload a PDF or a photo (JPEG, PNG, or WebP). iPhone HEIC photos need to be shared as JPEG."
+              : "Only PDF documents can be extracted. Use manual entry for other formats.",
       },
       { status: 400 }
     );
@@ -335,16 +482,136 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "File is too large (30 MB max)." }, { status: 400 });
   }
 
+  const client = new Anthropic();
+
+  // Spreadsheet settlements: the model maps columns and product names;
+  // the per-load rows collapse to per-product period lines in
+  // deterministic, unit-tested code (lib/timberSettlement.ts).
+  if (kind === "timber_settlement" && isSpreadsheet) {
+    let rows;
+    try {
+      rows = isCsv
+        ? csvToRows(await file.text())
+        : workbookToRows(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      return NextResponse.json(
+        { error: "Could not read the spreadsheet. Try exporting it again as .xlsx or .csv." },
+        { status: 400 }
+      );
+    }
+    if (rows.length === 0) {
+      return NextResponse.json(
+        { error: "The spreadsheet has no rows." },
+        { status: 400 }
+      );
+    }
+    const gridText = rows
+      .slice(0, 200)
+      .map(
+        (r, i) =>
+          `${i}: ` +
+          r.map((c) => (c === null ? "" : String(c).slice(0, 40))).join(" | ")
+      )
+      .join("\n");
+    try {
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        tools: [SETTLEMENT_COLUMNS_TOOL],
+        tool_choice: { type: "tool", name: SETTLEMENT_COLUMNS_TOOL.name },
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "This is a timber settlement spreadsheet (logger or mill statement), one row per line shown as '<row index>: cell | cell | ...'. Map the columns and every distinct product spelling. Indexes are 0-based. Only map what is actually there.\n\n" +
+                  gridText +
+                  (rows.length > 200 ? `\n(${rows.length - 200} more rows not shown)` : ""),
+              },
+            ],
+          },
+        ],
+      });
+      const toolUse = response.content.find(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+      if (!toolUse) {
+        return NextResponse.json(
+          { error: "The model could not map the spreadsheet. Enter the settlement manually." },
+          { status: 502 }
+        );
+      }
+      const m = toolUse.input as {
+        header_row: number;
+        ticket_col?: number | null;
+        date_col?: number | null;
+        product_col: number;
+        quantity_col: number;
+        rate_col?: number | null;
+        amount_col?: number | null;
+        quantity_unit: "ton" | "mbf";
+        products: SettlementColumnMap["products"];
+        payer_name?: string | null;
+        settlement_date?: string | null;
+        check_number?: string | null;
+        unsure_fields: string[];
+      };
+      const lines = collapseLoads(rows, {
+        header_row: m.header_row,
+        ticket: m.ticket_col,
+        date: m.date_col,
+        product: m.product_col,
+        quantity: m.quantity_col,
+        rate: m.rate_col,
+        amount: m.amount_col,
+        unit: m.quantity_unit,
+        products: m.products ?? [],
+      });
+      if (lines.length === 0) {
+        return NextResponse.json(
+          { error: "No settlement rows could be read from the spreadsheet. Enter it manually." },
+          { status: 422 }
+        );
+      }
+      const total =
+        Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+      const fromDates = lines.map((l) => l.date_from).filter(Boolean) as string[];
+      const toDates = lines.map((l) => l.date_to).filter(Boolean) as string[];
+      return NextResponse.json({
+        extraction: {
+          payer_name: m.payer_name ?? null,
+          date: m.settlement_date ?? null,
+          period_start: fromDates.sort()[0] ?? null,
+          period_end: toDates.sort()[toDates.length - 1] ?? null,
+          check_number: m.check_number ?? null,
+          total_amount: total,
+          lines,
+          source_rows: rows.length,
+          unsure_fields: m.unsure_fields ?? [],
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Anthropic.APIError
+          ? `Extraction failed (${err.status}): ${err.message}`
+          : "Extraction failed.";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
   const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
   const tool =
     kind === "timber"
       ? TIMBER_TOOL
-      : kind === "tax"
-        ? TAX_TOOL
-        : kind === "payment"
-          ? PAYMENT_TOOL
-          : LEASE_TOOL;
-  const client = new Anthropic();
+      : kind === "timber_settlement"
+        ? TIMBER_SETTLEMENT_TOOL
+        : kind === "tax"
+          ? TAX_TOOL
+          : kind === "payment"
+            ? PAYMENT_TOOL
+            : LEASE_TOOL;
 
   const fileBlock: Anthropic.ContentBlockParam = isPdf
     ? {
@@ -375,7 +642,9 @@ export async function POST(request: Request) {
               type: "text",
               text:
                 kind === "timber"
-                  ? "Extract the terms of this timber sale contract. Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. List every field you are unsure about in unsure_fields."
+                  ? "Extract the terms of this timber sale contract. Only record what the document actually states; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. Classify the sale type honestly (lump sum vs pay-as-cut vs delivered-price-net) and record the harvest/cutting type when stated. Surface penalty and BMP clauses in notes. List every field you are unsure about in unsure_fields."
+                  : kind === "timber_settlement"
+                    ? "Extract this logger or mill timber settlement statement (it may be a phone photo or several pages; read carefully). Collapse per-load/scale-ticket detail to ONE line per product, keeping the load count and the date range of the loads. Only record what is actually shown; use null for anything absent. Dates as YYYY-MM-DD, dollar amounts as plain numbers. List every field you are unsure about in unsure_fields."
                   : kind === "payment"
                     ? "Extract what this rent payment document shows: a check image or a crop share / timber settlement sheet (it may be a phone photo; read carefully, several pages possible). Only record what is actually shown; use null for anything absent. Keep the payer name exactly as printed. Dates as YYYY-MM-DD, dollar amounts as plain numbers. Classify the document_kind honestly. List every field you are unsure about in unsure_fields."
                     : kind === "tax"

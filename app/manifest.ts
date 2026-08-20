@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Landowner",
     description:
       "See and keep track of your farmland, timberland, and ranchland.",
-    start_url: "/dashboard",
+    start_url: "/map",
     display: "standalone",
     theme_color: "#39b54a",
     background_color: "#ffffff",
