@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { scanKindFor, type DocType } from "@/lib/documents";
 import {
@@ -12,7 +12,15 @@ import {
   type VerifiedMatches,
 } from "@/lib/documentMatch";
 import type { DocumentEntityType } from "@/types/db";
-import { intakeFile, largeFileWarning, uploadDocument, type IntakeResult } from "../classify";
+import {
+  intakeFile,
+  intakeStoragePath,
+  largeFileWarning,
+  uploadDocument,
+  uploadErrorCopy,
+  uploadToStorage,
+  type IntakeResult,
+} from "../classify";
 import { finalizeValues, initialValuesFor } from "../ExtractedFieldsEditor";
 import type { SelectableProperty } from "../PropertyMultiSelect";
 import DropZone from "./DropZone";
@@ -135,6 +143,10 @@ export default function IntakeFlow({
   );
 
   // ---- step 1 -> 2: the AI pass
+  // The storage object uploaded for the current file (reused on save,
+  // removed if the user walks away without saving).
+  const uploadedPathRef = useRef<string | null>(null);
+
   async function handleFile(f: File) {
     setFile(f);
     setError(null);
@@ -143,7 +155,18 @@ export default function IntakeFlow({
     setHandoffDismissed(false);
     setMismatchDismissed(false);
     setStep("reading");
-    const res = await intakeFile(f, {
+    // Upload FIRST (resumable over 6 MB), then the server reads the
+    // file by path; the request body never carries the document.
+    const path = intakeStoragePath(orgId, f);
+    const upErr = await uploadToStorage(supabase, path, f);
+    if (upErr) {
+      setDraft(emptyDraft(context));
+      setManualMessage(uploadErrorCopy(f.name, upErr));
+      setStep("manual");
+      return;
+    }
+    uploadedPathRef.current = path;
+    const res = await intakeFile({ storagePath: path, fileName: f.name, contentType: f.type || "application/pdf" }, {
       properties: properties.map((p) => ({
         name: p.name,
         county: p.county,
@@ -280,6 +303,7 @@ export default function IntakeFlow({
       aiSuggestedType: result?.doc_type ?? null,
       propertyIds,
       extracted,
+      storagePath: uploadedPathRef.current,
     });
     if ("error" in res) {
       setError(res.error);
@@ -300,6 +324,12 @@ export default function IntakeFlow({
   }
 
   function reset() {
+    // Walking away from an unsaved file: drop its storage object.
+    if (uploadedPathRef.current && !saved) {
+      const stale = uploadedPathRef.current;
+      supabase.storage.from("documents").remove([stale]).then(() => undefined, () => undefined);
+    }
+    uploadedPathRef.current = null;
     setFile(null);
     setResult(null);
     setVerified(null);

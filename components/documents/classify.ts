@@ -90,13 +90,18 @@ export interface IntakeContext {
 
 // Runs the intake pass. Returns { result } or { error } (never throws):
 // the flow drops into the manual form on any error, including 429.
+// The file is ALREADY in storage when this runs (uploaded first, by
+// path), so the server pulls it itself and the request body stays tiny
+// regardless of document size (Vercel caps request bodies at 4.5 MB).
 export async function intakeFile(
-  file: File,
+  stored: { storagePath: string; fileName: string; contentType: string },
   context: IntakeContext
 ): Promise<{ result: IntakeResult } | { error: string }> {
   try {
     const fd = new FormData();
-    fd.append("file", file);
+    fd.append("storage_path", stored.storagePath);
+    fd.append("file_name", stored.fileName);
+    fd.append("content_type", stored.contentType);
     fd.append("kind", "intake");
     fd.append(
       "context",
@@ -223,11 +228,18 @@ export async function uploadDocument(
     // Reviewed extracted fields from the intake confirm screen (saved as
     // already reviewed, with scan_kind for the row's Extracted block).
     extracted?: Record<string, unknown> | null;
+    // When the intake flow already uploaded the file (to read it by
+    // path), reuse that object instead of uploading again.
+    storagePath?: string | null;
   }
 ): Promise<{ id: string } | { error: string }> {
-  const path = `${args.orgId}/${args.entityType}/${crypto.randomUUID()}-${args.file.name}`;
-  const upErr = await uploadToStorage(supabase, path, args.file);
-  if (upErr) return { error: uploadErrorCopy(args.file.name, upErr) };
+  const path =
+    args.storagePath ??
+    `${args.orgId}/${args.entityType}/${crypto.randomUUID()}-${args.file.name}`;
+  if (!args.storagePath) {
+    const upErr = await uploadToStorage(supabase, path, args.file);
+    if (upErr) return { error: uploadErrorCopy(args.file.name, upErr) };
+  }
   const { data, error: insErr } = await supabase
     .from("documents")
     .insert({
@@ -346,4 +358,9 @@ export async function openDocument(
 ): Promise<void> {
   const { data } = await supabase.storage.from("documents").createSignedUrl(storagePath, 300);
   if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+}
+
+// Storage path for a file read by the intake before its row exists.
+export function intakeStoragePath(orgId: string, file: File): string {
+  return `${orgId}/intake/${crypto.randomUUID()}-${file.name}`;
 }
