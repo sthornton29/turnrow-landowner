@@ -9,7 +9,7 @@ import { displayTitle } from "@/lib/documentTitle";
 import type { DocumentRow } from "@/types/db";
 import DocTypeChip from "@/components/documents/DocTypeChip";
 import { DocTypeSelect } from "@/components/documents/DocTypeSelect";
-import { classifyFile } from "@/components/documents/classify";
+import { classifyStored } from "@/components/documents/classify";
 
 const ENTITY_LABEL: Record<string, string> = {
   property: "Property",
@@ -61,13 +61,7 @@ export default function RetypeClient({ docs }: { docs: DocumentRow[] }) {
       i++;
       setProgress(`Reading ${i} of ${pending.length}: ${d.file_name}`);
       try {
-        const { data: signed } = await supabase.storage
-          .from("documents")
-          .createSignedUrl(d.storage_path, 300);
-        if (!signed?.signedUrl) continue;
-        const blob = await (await fetch(signed.signedUrl)).blob();
-        const file = new File([blob], d.file_name, { type: d.content_type ?? blob.type });
-        const s = await classifyFile(file);
+        const s = await classifyStored(d);
         if (s && s.doc_type !== "other") {
           setSuggested((m) => ({ ...m, [d.id]: { type: s.doc_type, reason: s.reason } }));
           setChoice((c) => (c[d.id] === "other" ? { ...c, [d.id]: s.doc_type } : c));

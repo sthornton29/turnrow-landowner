@@ -6,6 +6,7 @@ import type { Geometry, MultiPolygon, Polygon } from "geojson";
 import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatNumber } from "@/lib/format";
 import { displayTitle } from "@/lib/documentTitle";
+import { extractStored } from "@/components/documents/classify";
 import {
   parseBearing,
   traverse,
@@ -349,21 +350,15 @@ export default function PlotClient({
     setExtracting(true);
     setError(null);
     try {
-      const { data: signed, error: sErr } = await supabase.storage
-        .from("documents")
-        .createSignedUrl(doc.storage_path, 300);
-      if (sErr || !signed?.signedUrl) throw new Error("Could not open the file.");
-      const blob = await (await fetch(signed.signedUrl)).blob();
-      const file = new File([blob], doc.file_name, {
-        type: doc.content_type ?? blob.type,
+      // The document is already in storage: read it by path.
+      const res = await extractStored({
+        storagePath: doc.storage_path,
+        fileName: doc.file_name,
+        contentType: doc.content_type ?? "application/pdf",
+        kind: "legal_description",
       });
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("kind", "legal_description");
-      const res = await fetch("/api/extract", { method: "POST", body: fd });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Extraction failed.");
-      const x = body.extraction as Extraction;
+      if ("error" in res) throw new Error(res.error);
+      const x = res.extraction as unknown as Extraction;
       applyExtraction(x);
       // Keep the raw extraction on the document so re-opening this page
       // does not re-spend an extraction; the review edits live in state.

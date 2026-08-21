@@ -67,6 +67,30 @@ export async function classifyFile(
   }
 }
 
+// Classification of a document already in storage (the bulk re-type),
+// by path: nothing travels through the request body.
+export async function classifyStored(
+  doc: Pick<DocumentRow, "storage_path" | "file_name" | "content_type">
+): Promise<ClassifySuggestion | null> {
+  const res = await extractStored({
+    storagePath: doc.storage_path,
+    fileName: doc.file_name,
+    contentType: doc.content_type ?? "application/pdf",
+    kind: "classify",
+  });
+  if ("error" in res) return null;
+  const x = res.extraction as Partial<ClassifySuggestion>;
+  if (!x.doc_type) return null;
+  return {
+    doc_type: x.doc_type,
+    confidence: typeof x.confidence === "string" ? x.confidence : null,
+    title: x.title ?? null,
+    reason: x.reason ?? null,
+    property_hints: x.property_hints ?? null,
+    matched_properties: Array.isArray(x.matched_properties) ? x.matched_properties : [],
+  };
+}
+
 // The one-pass intake result (kind=intake): type, key fields, and
 // association claims the client verifies before showing as found.
 export interface IntakeResult {
@@ -465,4 +489,63 @@ export async function openDocument(
 // Storage path for a file read by the intake before its row exists.
 export function intakeStoragePath(orgId: string, file: File): string {
   return `${orgId}/intake/${crypto.randomUUID()}-${file.name}`;
+}
+
+// Every extraction goes BY STORAGE PATH: the browser uploads the file
+// straight to storage (resumable over 6 MB) and the route pulls it
+// under the caller's session, so the request body never carries the
+// document and Vercel's 4.5 MB body limit ("Request Entity Too Large",
+// which comes back as HTML, not JSON) cannot be hit. Returns the
+// extraction and the path so the caller can keep the object as the
+// attached document instead of uploading twice.
+export async function extractFile(
+  supabase: SupabaseClient,
+  args: { orgId: string; file: File; kind: string }
+): Promise<{ extraction: Record<string, unknown>; storagePath: string } | { error: string }> {
+  const path = intakeStoragePath(args.orgId, args.file);
+  const upErr = await uploadToStorage(supabase, path, args.file);
+  if (upErr) return { error: uploadErrorCopy(args.file.name, upErr) };
+  const res = await extractStored({
+    storagePath: path,
+    fileName: args.file.name,
+    contentType: args.file.type || "application/pdf",
+    kind: args.kind,
+  });
+  if ("error" in res) return res;
+  return { extraction: res.extraction, storagePath: path };
+}
+
+// Extraction of a file already in the documents bucket (a saved
+// document's rescan, the plot screen, the bulk re-type).
+export async function extractStored(args: {
+  storagePath: string;
+  fileName: string;
+  contentType: string;
+  kind: string;
+  extra?: Record<string, string>;
+}): Promise<{ extraction: Record<string, unknown> } | { error: string }> {
+  try {
+    const fd = new FormData();
+    fd.append("storage_path", args.storagePath);
+    fd.append("file_name", args.fileName);
+    fd.append("content_type", args.contentType);
+    fd.append("kind", args.kind);
+    for (const [k, v] of Object.entries(args.extra ?? {})) fd.append(k, v);
+    const res = await fetch("/api/extract", { method: "POST", body: fd });
+    const text = await res.text();
+    let body: { extraction?: Record<string, unknown>; error?: string } = {};
+    try {
+      body = JSON.parse(text) as typeof body;
+    } catch {
+      // An HTML error page from the platform (413, 504, 502).
+      if (res.status === 413) return { error: "This file is too large to read in one piece. Split the PDF and try again." };
+      if (res.status === 504) return { error: "Reading this file took too long. Try a smaller file or enter the details by hand." };
+      return { error: `Extraction failed (${res.status}).` };
+    }
+    if (res.status === 429) return { error: body.error ?? "The reader is busy for a few minutes. Try again later or enter the details by hand." };
+    if (!res.ok || !body.extraction) return { error: body.error ?? "Extraction failed." };
+    return { extraction: body.extraction };
+  } catch {
+    return { error: "Extraction failed. Check your connection and try again." };
+  }
 }

@@ -7,6 +7,7 @@ import { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatDollars } from "@/lib/format";
+import { extractFile, uploadToStorage } from "@/components/documents/classify";
 import {
   defaultDates,
   matchParcel,
@@ -47,6 +48,8 @@ interface UploadItem {
   newParcelCounty: string;
   newParcelPropertyId: string;
   rememberDates: boolean;
+  // The storage object the extraction uploaded (reused as the attachment).
+  storagePath?: string;
 }
 
 const inputClass = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm";
@@ -132,13 +135,11 @@ export default function TaxUploadClient({
 
   async function extractItem(item: UploadItem) {
     try {
-      const formData = new FormData();
-      formData.append("file", item.file);
-      formData.append("kind", "tax");
-      const res = await fetch("/api/extract", { method: "POST", body: formData });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Extraction failed.");
-      const x = body.extraction as Record<string, unknown>;
+      // By storage path (never through the request body).
+      const res = await extractFile(supabase, { orgId, file: item.file, kind: "tax" });
+      if ("error" in res) throw new Error(res.error);
+      patchItem(item.localId, { storagePath: res.storagePath });
+      const x = res.extraction;
       const taxYear = Number(x.tax_year) || new Date().getFullYear();
       const county = String(x.county ?? "");
       const state = String(x.state ?? "");
@@ -247,11 +248,15 @@ export default function TaxUploadClient({
       return;
     }
 
-    // Attach the source PDF/photo.
-    const path = `${orgId}/tax_statement/${crypto.randomUUID()}-${item.file.name}`;
-    const { error: upErr } = await supabase.storage
-      .from("documents")
-      .upload(path, item.file, { contentType: item.file.type });
+    // Attach the source PDF/photo: reuse the object the extraction
+    // uploaded, else upload now.
+    let path = item.storagePath ?? "";
+    let upErr: { message: string } | null = null;
+    if (!path) {
+      path = `${orgId}/tax_statement/${crypto.randomUUID()}-${item.file.name}`;
+      const up = await uploadToStorage(supabase, path, item.file);
+      upErr = up ? { message: up } : null;
+    }
     if (!upErr) {
       await supabase.from("documents").insert({
         organization_id: orgId,

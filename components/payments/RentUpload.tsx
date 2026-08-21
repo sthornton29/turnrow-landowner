@@ -16,6 +16,7 @@ import { takeHandoffFile } from "@/lib/fileHandoff";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { extractFile } from "@/components/documents/classify";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   CLUSTER_THRESHOLD,
@@ -239,14 +240,12 @@ export default function RentUpload({
           mode: "lease", timberSaleId: "", allocations: {},
         },
       ]);
-      const form = new FormData();
-      form.append("file", file);
-      form.append("kind", "payment");
       try {
-        const res = await fetch("/api/extract", { method: "POST", body: form });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "Extraction failed.");
-        const x = body.extraction as Extraction;
+        // By storage path (never through the request body).
+        const res = await extractFile(supabase, { orgId, file, kind: "payment" });
+        if ("error" in res) throw new Error(res.error);
+        supabase.storage.from("documents").remove([res.storagePath]).then(() => undefined, () => undefined);
+        const x = res.extraction as unknown as Extraction;
         setItems((prev) =>
           prev.map((it) => {
             if (it.localId !== localId) return it;

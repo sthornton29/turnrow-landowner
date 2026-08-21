@@ -7,6 +7,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { extractFile } from "@/components/documents/classify";
 import { suggestSaleId } from "@/lib/timberMatch";
 import SettlementReview, {
   type SaleOption,
@@ -35,6 +37,7 @@ export default function SettlementUpload({
   buttonClass?: string;
 }) {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
@@ -59,14 +62,12 @@ export default function SettlementUpload({
           suggested: false,
         },
       ]);
-      const form = new FormData();
-      form.append("file", file);
-      form.append("kind", "timber_settlement");
       try {
-        const res = await fetch("/api/extract", { method: "POST", body: form });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "Extraction failed.");
-        const x = body.extraction as SettlementExtraction;
+        // By storage path (never through the request body).
+        const res = await extractFile(supabase, { orgId, file, kind: "timber_settlement" });
+        if ("error" in res) throw new Error(res.error);
+        supabase.storage.from("documents").remove([res.storagePath]).then(() => undefined, () => undefined);
+        const x = res.extraction as unknown as SettlementExtraction;
         setItems((prev) =>
           prev.map((it) => {
             if (it.localId !== localId) return it;

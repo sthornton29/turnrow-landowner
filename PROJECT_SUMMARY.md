@@ -281,6 +281,20 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  EVERY EXTRACTION GOES BY STORAGE PATH (2026-08-21 fix for "Unexpected
+  token 'R', Request En..." on a tax statement upload, which was
+  Vercel's 4.5 MB body limit answering with an HTML 413):
+  components/documents/classify.ts extractFile(supabase, { orgId,
+  file, kind }) uploads to <org>/intake/<uuid>-<name> (resumable over
+  6 MB) and posts only storage_path / file_name / content_type /
+  kind; extractStored does the same for a file already in the bucket;
+  classifyStored wraps it for the re-type screen. Non-JSON platform
+  replies (413, 504) become plain messages. Callers: TaxUploadClient
+  (keeps the uploaded object as the statement's attachment instead of
+  uploading twice), RentUpload and SettlementUpload (remove the temp
+  object after reading), PlotClient and RetypeClient (read the saved
+  document by its own path; no download and re-post). No client posts
+  a file body to /api/extract any more.
   PARCEL NUMBER CANONICAL FORM (2026-08-21, lib/parcelNumber.ts, unit
   tested): one equivalence shared by the tax statement matcher
   (lib/tax.ts normalizeParcelNumber), the document matcher
