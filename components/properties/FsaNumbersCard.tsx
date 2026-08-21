@@ -61,7 +61,9 @@ export default function FsaNumbersCard({
       </div>
       <p className="mt-1 text-xs text-gray-500">
         Add every FSA farm number on this land. A scanned FSA-156EZ links its
-        farms and base acres to the properties whose numbers match.
+        farms and base acres to the properties whose numbers match; when a
+        farm spans several properties the base acres split pro rata by each
+        property{"'"}s ag field acres.
       </p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {list.map((n) => (

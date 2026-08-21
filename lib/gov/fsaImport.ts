@@ -262,12 +262,32 @@ export async function createOrUpdateFarmFromExtraction(
       ? ((props ?? []) as Array<{ id: string; name: string }>).filter((p) => p.id === opts.propertyId)
       : []
   if (targets.length > 0) {
-    const share = Math.floor((100 / targets.length) * 100) / 100
+    // Several properties on one farm number: split PRO RATA by each
+    // property's ag field acres (the cropland the base acres sit on);
+    // equal shares only when no field acres exist to weigh by.
+    const { data: fieldRows } = targets.length > 1
+      ? await supabase
+          .from('fields')
+          .select('property_id, acres')
+          .in('property_id', targets.map((p) => p.id))
+      : { data: [] as Array<{ property_id: string; acres: number | null }> }
+    const fieldAcres = new Map<string, number>()
+    for (const f of (fieldRows ?? []) as Array<{ property_id: string; acres: number | null }>) {
+      fieldAcres.set(f.property_id, (fieldAcres.get(f.property_id) ?? 0) + (Number(f.acres) || 0))
+    }
+    const weights = targets.map((p) => fieldAcres.get(p.id) ?? 0)
+    const totalWeight = weights.reduce((a, b) => a + b, 0)
+    const pcts = totalWeight > 0
+      ? weights.map((w) => Math.round((w / totalWeight) * 10000) / 100)
+      : targets.map(() => Math.floor((100 / targets.length) * 100) / 100)
+    // Rounding drift lands on the last property so the shares total 100.
+    const drift = Math.round((100 - pcts.reduce((a, b) => a + b, 0)) * 100) / 100
+    pcts[pcts.length - 1] = Math.round((pcts[pcts.length - 1] + drift) * 100) / 100
     const links = targets.map((p, i) => ({
       organization_id: orgId,
       fsa_farm_id: farmId,
       property_id: p.id,
-      allocation_pct: i === targets.length - 1 ? Math.round((100 - share * (targets.length - 1)) * 100) / 100 : share,
+      allocation_pct: pcts[i],
     }))
     const { error } = await supabase
       .from('fsa_farm_properties')
