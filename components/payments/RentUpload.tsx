@@ -23,7 +23,12 @@ import {
   ownerSimilarity,
 } from "@/lib/ownerNames";
 import { sameCrop } from "@/lib/crops";
-import { cropAssumptions, type YearAssumptions } from "@/lib/leaseLogic";
+import {
+  cropAssumptions,
+  govPaymentTreatment,
+  type LeaseTerms,
+  type YearAssumptions,
+} from "@/lib/leaseLogic";
 import {
   proposeAllocation,
   type OpenExpectedPayment,
@@ -44,6 +49,7 @@ interface Lease {
   name: string;
   tenant_id: string;
   status: string;
+  terms?: LeaseTerms | null;
 }
 interface TimberSale extends SaleOption {
   buyer_tenant_id: string | null;
@@ -137,7 +143,7 @@ export default function RentUpload({
       const year = new Date().getFullYear();
       const [t, l, s, e, p, a] = await Promise.all([
         supabase.from("tenants").select("id, name").order("name"),
-        supabase.from("leases").select("id, name, tenant_id, status"),
+        supabase.from("leases").select("id, name, tenant_id, status, terms"),
         supabase
           .from("timber_sales")
           .select(
@@ -432,6 +438,13 @@ export default function RentUpload({
             const leaseAssumptions = item.leaseId
               ? cropAssumptions(assumptionsByLease.get(item.leaseId))
               : [];
+            // FSA-direct government shares are never in a tenant check,
+            // so no expected row exists for them; say why it is absent.
+            const itemLease = item.leaseId ? leases.find((l) => l.id === item.leaseId) : null;
+            const govNote =
+              itemLease && govPaymentTreatment(itemLease.terms).receivedVia === "fsa_direct"
+                ? "FSA pays the government share directly; not expected in tenant checks."
+                : null;
             return (
               <div
                 key={item.localId}
@@ -646,6 +659,7 @@ export default function RentUpload({
                                   />
                                 </div>
                               ))}
+                              {govNote ? <p className="text-xs text-amber-800">{govNote}</p> : null}
                               <p className="text-xs text-gray-500">
                                 {leftover > 0.005
                                   ? `${formatDollars(leftover)} unallocated: records as an unscheduled payment.`

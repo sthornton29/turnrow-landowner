@@ -5,6 +5,11 @@ import {
   cornerLabel,
   nearestVertices,
   unionAll,
+  PLOT_DISTANCE_WARN_MILES,
+  haversineMiles,
+  nearestBoundary,
+  partsToText,
+  chainLargestFirst,
 } from "./plotPreview";
 import type { Polygon } from "geojson";
 
@@ -42,5 +47,26 @@ describe("plot preview helpers", () => {
     expect(near[0].coord).toEqual([0, 0]);
     expect(near.length).toBe(3);
     expect(new Set(near.map((n) => n.coord.join(","))).size).toBe(3);
+  });
+});
+
+describe("plot gates and chain text", () => {
+  it("measures miles to the nearest boundary vertex", () => {
+    const courtland: [number, number] = [-87.307, 34.658];
+    const baldwin: [number, number] = [-87.4, 30.656];
+    expect(haversineMiles(courtland, baldwin)).toBeGreaterThan(270);
+    const near = nearestBoundary(courtland, [
+      { name: "River Place", geometry: { type: "Point", coordinates: [-87.33, 34.67] } },
+      { name: "Far", geometry: { type: "Point", coordinates: baldwin } },
+    ]);
+    expect(near?.name).toBe("River Place");
+    expect(near!.miles).toBeLessThan(PLOT_DISTANCE_WARN_MILES);
+    expect(nearestBoundary(courtland, [])).toBeNull();
+  });
+
+  it("writes chains back as text, smallest first, largest-first for display", () => {
+    expect(partsToText([["NW", "SE"]])).toBe("NW1/4 of SE1/4");
+    expect(partsToText([["E", "NW"], ["SE"]])).toBe("E1/2 of NW1/4 and SE1/4");
+    expect(chainLargestFirst(["NW", "SE"])).toEqual(["SE", "NW"]);
   });
 });

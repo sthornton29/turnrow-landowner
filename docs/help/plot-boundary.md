@@ -14,7 +14,7 @@ keywords: plot, deed, legal description, aliquot, quarter, section, township, ra
 ## The steps
 
 - **Read**: the description is extracted from the document and shown for review, amber where unsure. Fix tracts or calls in the table. Bearings that cannot be read are flagged red.
-- **Resolve or plot**: aliquot tracts resolve against the survey grid (if the meridian is unknown you pick among candidates). Metes and bounds calls plot into a shape with the **error of closure** shown up front: the gap between where the last call ends and the starting point, as feet and as a ratio. Green is 1:5,000 or better, amber down to 1:1,000, red worse. **Force close** spreads the gap across the courses and is labeled as an adjustment.
+- **Resolve or plot**: aliquot tracts resolve against the survey grid. Before anything is fetched you see the reference as fields, not prose: the county the deed states, the principal meridian that county sits in, township number and N or S, range number and E or W, the section, and the aliquot parts as ordered chips (largest division first, each next chip a part of the one before). Fix a misread letter or digit there. After the lookup, two checks run: the resolved section must sit in the deed's county (a failure is a red flag with one-tap retries), and a section far from all your boundaries gets a distance warning. Metes and bounds calls plot into a shape with the **error of closure** shown up front: the gap between where the last call ends and the starting point, as feet and as a ratio. Green is 1:5,000 or better, amber down to 1:1,000, red worse. **Force close** spreads the gap across the courses and is labeled as an adjustment.
 - **Place** (metes and bounds only): pin the point of beginning on the satellite map, drag it to fit, and nudge the rotation a fraction of a degree if the deed's basis of bearing differs from true north. The shape follows live.
 - **Preview and save**: the plotted boundary overlays the current one with acres side by side (plotted, current, deeded). Save it as a new property or parcel, or replace an existing boundary after a confirmation that states the old acres. The document remembers which boundary it produced.
 
@@ -25,4 +25,13 @@ Plot quality follows description quality. Old deeds omit curves, mix units, or r
 ## Common questions
 
 - **The shape is mirrored or spun.** Check bearing quadrants (N 45 E vs N 45 W) in the calls table, then use the rotation control for small differences.
-- **Units?** Feet, chains (66 ft), poles or rods (16.5 ft), links, varas, and meters are all understood; pick the unit per call when the deed mixes them.
+- **Units?** Feet, chains (66 ft), poles or rods (16.5 ft), links, and meters are understood; pick the unit per call when the deed mixes them. Varas are not converted (the vara differs by state and era); convert those calls to feet first.
+
+## Why did my plot land in the wrong place?
+
+Almost always one of two things, and the app now guards against both.
+
+- **The wrong survey (meridian).** Township and range numbers repeat across a state. Alabama has three main surveys: Huntsville for the Tennessee Valley and north Alabama, St. Stephens for the middle and south, Tallahassee for the southeast corner. "T4S R7W" exists under more than one of them, so the lookup must name the survey. The app takes it from the county the deed states; you can override it per tract. A lookup without a meridian is never made.
+- **A flipped direction letter.** If the reader turns R7W into R7E (or T4S into T4N), a real section comes back hundreds of miles away. The county check catches this: the resolved section has to sit in the county the deed names. When it does not, you see "resolved to Baldwin County, deed says Lawrence" and one-tap retries for the likely fixes (flip the township letter, flip the range letter, try the other survey).
+
+Two more aids: a section more than 25 miles from every boundary you already have shows a distance warning (new land is possible; a misread is likelier), and each resolved tract prints a diagnostic line ("Resolved: Huntsville PM (from Lawrence County), T4S R7W, Sec 31, BLM CadNSDI section layer, county check passed (Lawrence), 2.1 mi from River Place") that is also saved with the boundary, so a wrong plot can be traced later. For metes and bounds, the point-of-beginning pin shows the county it sits in beside the deed's county.

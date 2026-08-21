@@ -265,6 +265,77 @@ export interface VerifiedMatches {
   verified: PropertySuggestion[];
   downgraded: Array<{ name: string; signal: string; reason: string }>;
   entity: { entityId: string; why: string } | null;
+  // Property ids to pre-check on the confirm screen (empty on conflict).
+  preselect: string[];
+  // Set when a parcel/FSA signal names one property and the described
+  // land overlaps only another: both are shown, nothing preselected.
+  conflict: boolean;
+}
+
+// What the intake's spatial tier computed (server side, under RLS).
+export interface SpatialMatch {
+  entity_type: "property" | "parcel" | string;
+  id: string;
+  name: string;
+  overlap_acres: number;
+  pct_of_described: number;
+  pct_of_boundary: number | null;
+}
+
+export interface SpatialEvidence {
+  reference_label?: string | null;
+  described_acres?: number | null;
+  county_check?: { deed: string | null; resolved: string | null; matches: boolean | null } | null;
+  resolution?: { meridianName?: string | null; source?: string | null; cached?: boolean } | null;
+  matches?: SpatialMatch[];
+  polygon?: unknown;
+  computed?: boolean;
+  notes?: string[];
+}
+
+// Spatial scoring: a described tract overlapping a property is the
+// strongest evidence there is, but only once the intersection really
+// computed (computed = true with a matches array).
+export const SPATIAL_MIN_PCT = 5;
+const SPATIAL_STRONG = 80; // >= 50% of the described area
+const SPATIAL_PARTIAL = 60; // 5% to 50%
+
+export function spatialSuggestions(
+  spatial: SpatialEvidence | null | undefined,
+  properties: MatchableProperty[],
+  parcels: MatchableParcel[]
+): PropertySuggestion[] {
+  if (!spatial || !spatial.computed || !Array.isArray(spatial.matches)) return [];
+  const label = spatial.reference_label ? `describes land in ${spatial.reference_label}` : "the described land";
+  const byProperty = new Map<string, { pct: number; name: string }>();
+  for (const m of spatial.matches) {
+    let propertyId: string | null = null;
+    let propertyName = m.name;
+    if (m.entity_type === "property") {
+      propertyId = m.id;
+    } else if (m.entity_type === "parcel") {
+      const pc = parcels.find((x) => x.id === m.id);
+      if (!pc) continue;
+      propertyId = pc.property_id;
+      propertyName = properties.find((p) => p.id === pc.property_id)?.name ?? m.name;
+    }
+    if (!propertyId || !properties.some((p) => p.id === propertyId)) continue;
+    const pct = Number(m.pct_of_described) || 0;
+    const cur = byProperty.get(propertyId);
+    // Parcels sit inside their property: keep the larger share, never add.
+    if (!cur || pct > cur.pct) byProperty.set(propertyId, { pct, name: propertyName });
+  }
+  const out: PropertySuggestion[] = [];
+  for (const [propertyId, { pct, name }] of byProperty) {
+    if (pct < SPATIAL_MIN_PCT) continue;
+    const score = pct >= 50 ? SPATIAL_STRONG : SPATIAL_PARTIAL;
+    out.push({
+      propertyId,
+      score,
+      reasons: [`${label}, overlapping ${name} (${Math.round(pct)}% of described area)`],
+    });
+  }
+  return out.sort((a, b) => b.score - a.score);
 }
 
 const NAME_SIMILARITY = 0.75;
@@ -292,7 +363,8 @@ export function verifyMatches(
   parcels: MatchableParcel[],
   entities: MatchableEntity[] = [],
   entityClaim: AiEntityMatch | null | undefined = null,
-  propertyEntity: Record<string, string | null> = {}
+  propertyEntity: Record<string, string | null> = {},
+  spatial: SpatialEvidence | null | undefined = null
 ): VerifiedMatches {
   const verified = new Map<string, PropertySuggestion>();
   const downgraded: VerifiedMatches["downgraded"] = [];
@@ -390,6 +462,39 @@ export function verifyMatches(
     }
   }
 
+  // Number signals (parcel, FSA) carry their own identity for the
+  // conflict rule below.
+  const numberSignalIds = new Set(
+    [...verified.values()]
+      .filter((v) => v.reasons.some((r) => /^parcel |^FSA farm /.test(r)))
+      .map((v) => v.propertyId)
+  );
+
+  // Spatial tier: merged in as the strongest evidence when computed.
+  const spatialHits = spatialSuggestions(spatial, properties, parcels);
+  const spatialIds = new Set(spatialHits.map((h) => h.propertyId));
+  for (const h of spatialHits) {
+    const p = properties.find((x) => x.id === h.propertyId);
+    if (!p) continue;
+    add(p, h.score, h.reasons[0]);
+  }
+
+  // Conflict: a parcel/FSA number names property A, the described land
+  // overlaps only other properties (none of it touches A). Show both
+  // sides with their evidence and preselect nothing.
+  let conflict = false;
+  if (spatialHits.length > 0 && numberSignalIds.size > 0) {
+    const numberOnly = [...numberSignalIds].filter((id) => !spatialIds.has(id));
+    const spatialOnly = [...spatialIds].filter((id) => !numberSignalIds.has(id));
+    if (numberOnly.length > 0 && spatialOnly.length > 0) conflict = true;
+  }
+
   const out = [...verified.values()].sort((a, b) => b.score - a.score || a.propertyId.localeCompare(b.propertyId));
-  return { verified: out, downgraded, entity };
+  const preselect = conflict
+    ? []
+    : spatialHits.length > 0
+      ? // Every overlapping property (>= 5%) plus any other confident signal.
+        [...new Set([...spatialHits.map((h) => h.propertyId), ...out.filter((v) => v.score >= CONFIDENT_SCORE).map((v) => v.propertyId)])]
+      : out.filter((v) => v.score >= CONFIDENT_SCORE).map((v) => v.propertyId);
+  return { verified: out, downgraded, entity, preselect, conflict };
 }

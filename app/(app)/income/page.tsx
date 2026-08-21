@@ -11,6 +11,7 @@ import {
   summarizeByYear,
   type IncomeType,
   type PropertyTotals,
+  govShareRows,
 } from "@/lib/income";
 import RentUpload from "@/components/payments/RentUpload";
 
@@ -48,6 +49,9 @@ export default async function IncomePage({
   const totalExpected = sumTypes(totals.expected);
   const totalReceived = sumTypes(totals.received);
   const govInfo = informationalGovPayments(inputs, selectedYear);
+  const govRowsYear = govShareRows(inputs, selectedYear);
+  const fsaDirectShare = govRowsYear.some((r) => r.landownerAmount > 0 && r.receivedVia === "fsa_direct");
+  const tenantRemitShare = govRowsYear.some((r) => r.landownerAmount > 0 && r.receivedVia === "tenant_remits");
 
   const byProperty = allocateToProperties(inputs, selectedYear);
   const propertyName = new Map((properties ?? []).map((p) => [p.id, p.name]));
@@ -257,6 +261,15 @@ export default async function IncomePage({
                 <tr key={type} className="border-b border-gray-100 last:border-0">
                   <td className="px-4 py-2">
                     {TYPE_LABELS[type]}
+                    {type === "government" && (fsaDirectShare || tenantRemitShare) ? (
+                      <span className="block text-xs font-normal text-gray-500">
+                        {fsaDirectShare && tenantRemitShare
+                          ? "Part paid by FSA directly, part remitted by the tenant"
+                          : fsaDirectShare
+                            ? "Paid by FSA directly (not expected in tenant checks)"
+                            : "Remitted by the tenant (expected each October)"}
+                      </span>
+                    ) : null}
                     {type === "government" && govInfo.total > 0 ? (
                       <span className="block text-xs font-normal text-gray-500">
                         Base acres on your land generate approximately{" "}

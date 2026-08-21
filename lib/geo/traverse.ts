@@ -25,7 +25,9 @@ export const FEET_PER_UNIT: Record<Unit, number> = {
   chains: 66,
   poles: 16.5,
   links: 0.66,
-  varas: 33.333,
+  // Varas vary by state and era (Texas 33.333 ft, Spanish-era Florida
+  // and California differ); not converted, flagged unsupported instead.
+  varas: NaN,
   meters: 3.28084,
   yards: 3,
 };
@@ -166,7 +168,9 @@ const UNIT_WORDS: Array<[RegExp, Unit]> = [
 
 export function parseDistance(input: string | number, defaultUnit: Unit = "feet"): number | null {
   if (typeof input === "number") {
-    return Number.isFinite(input) ? input * FEET_PER_UNIT[defaultUnit] : null;
+    return Number.isFinite(input) && Number.isFinite(FEET_PER_UNIT[defaultUnit])
+      ? input * FEET_PER_UNIT[defaultUnit]
+      : null;
   }
   const text = input.replace(/,/g, "").trim();
   const num = text.match(/-?\d+(?:\.\d+)?/);
@@ -181,7 +185,13 @@ export function parseDistance(input: string | number, defaultUnit: Unit = "feet"
       break;
     }
   }
+  // Unsupported unit (varas): no silent conversion.
+  if (!Number.isFinite(FEET_PER_UNIT[unit])) return null;
   return value * FEET_PER_UNIT[unit];
+}
+
+export function unitSupported(unit: Unit): boolean {
+  return Number.isFinite(FEET_PER_UNIT[unit]);
 }
 
 // ---------------------------------------------------------------- traverse
@@ -194,6 +204,12 @@ interface Course {
 
 function courseFor(call: Call, prevTangentAz: number | null, index: number, warnings: string[]): Course | null {
   const unitFactor = FEET_PER_UNIT[call.unit ?? "feet"];
+  if (!Number.isFinite(unitFactor)) {
+    warnings.push(
+      `Call ${index + 1}: distances in ${call.unit} are not supported (the vara differs by state and era); convert to feet and re-enter.`
+    );
+    return null;
+  }
   const curve = call.curve;
   if (!curve) {
     const az = azimuthOf(call.bearing);

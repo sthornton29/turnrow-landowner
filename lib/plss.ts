@@ -53,23 +53,22 @@ export const PLSS_FIELDS = {
 
 // Principal meridians by BLM code. Alabama's three are what this app
 // meets first; the rest of the table can grow as needed.
+// Principal meridian codes as the BLM CadNSDI PLSSID carries them.
+// Re-verified live 2026-08-20 by intersecting the township layer with
+// county polygons (distinct PRINMERCD + PRINMER): Chickasaw 09,
+// Choctaw 10, Huntsville 16, Louisiana 18, St. Helena 24, St. Stephens
+// 25, Tallahassee 29, Washington 32, 5th Principal 05. Only verified
+// codes are listed; add a meridian only after checking the service.
 export const MERIDIANS: Record<string, { code: string; name: string; states: string[] }> = {
   HU: { code: "16", name: "Huntsville", states: ["AL", "MS"] },
   SS: { code: "25", name: "St. Stephens", states: ["AL", "MS"] },
   TA: { code: "29", name: "Tallahassee", states: ["AL", "FL"] },
-  CH: { code: "07", name: "Choctaw", states: ["MS"] },
-  WA: { code: "31", name: "Washington", states: ["MS"] },
-  LA: { code: "19", name: "Louisiana", states: ["LA"] },
-  SH: { code: "24", name: "St. Helena", states: ["LA"] },
-  FI: { code: "05", name: "5th Principal", states: ["AR", "MO", "IA", "MN", "ND", "SD"] },
-  SE: { code: "02", name: "2nd Principal", states: ["IN", "IL"] },
-  TH: { code: "03", name: "3rd Principal", states: ["IL"] },
-  FO: { code: "04", name: "4th Principal", states: ["IL", "WI", "MN"] },
-  SI: { code: "06", name: "6th Principal", states: ["KS", "NE", "CO", "WY", "SD"] },
-  IN: { code: "17", name: "Indian", states: ["OK"] },
-  CI: { code: "08", name: "Cimarron", states: ["OK"] },
-  MI: { code: "21", name: "Michigan", states: ["MI", "OH"] },
-  TE: { code: "30", name: "Tallahassee (FL)", states: ["FL"] },
+  CK: { code: "09", name: "Chickasaw", states: ["AL", "MS"] },
+  CH: { code: "10", name: "Choctaw", states: ["AL", "MS"] },
+  WA: { code: "32", name: "Washington", states: ["MS", "LA"] },
+  LA: { code: "18", name: "Louisiana", states: ["LA", "MS"] },
+  SH: { code: "24", name: "St. Helena", states: ["LA", "MS"] },
+  FI: { code: "05", name: "5th Principal", states: ["AR", "MO", "IA", "MN", "ND", "SD", "MS", "LA"] },
 };
 
 export interface PlssRequest {
@@ -121,8 +120,16 @@ export function meridiansForState(state: string): string[] {
 // The PLSSID prefix for a township. Fractional townships and duplicate
 // codes are wildcarded (underscore) so "T4S R8W" matches its standard
 // instance; the meridian is wildcarded when unknown.
+// The PLSSID composition (re-verified 2026-08-20 on the CadNSDI section
+// layer): STATE(2) + MERIDIAN CODE(2) + TTT + township fraction(1) +
+// N/S + RRR + range fraction(1) + E/W + duplicate(1), e.g.
+// AL160040S0070W0 = Alabama, Huntsville (16), T4S R7W. The meridian is
+// REQUIRED: a wildcard there lets a misread direction match a real
+// section under another survey, which is exactly how a Courtland deed
+// once resolved to Baldwin County.
 export function plssIdPattern(req: PlssRequest): string {
-  const code = meridianCode(req.meridian) ?? "__";
+  const code = meridianCode(req.meridian);
+  if (!code) throw new Error("A principal meridian is required to look up a section.");
   return (
     req.state.toUpperCase() +
     code +

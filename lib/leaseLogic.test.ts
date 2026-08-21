@@ -3,6 +3,9 @@ import {
   annualRent,
   cropAssumptions,
   generateLeasePayments,
+  govPaymentTreatment,
+  govTreatmentSentence,
+  isGovShareLabel,
   type LeaseLike,
   type YearAssumptions,
 } from "./leaseLogic";
@@ -121,5 +124,56 @@ describe("annualRent crop share", () => {
       expected_price: 4.5,
     });
     expect(rent).toBe(100 * 180 * 4.5 * 0.25);
+  });
+});
+
+describe("government payment treatment", () => {
+  it("explicit choices resolve as chosen", () => {
+    const r = govPaymentTreatment({ gov_payment_treatment: "landowner_share", gov_payment_share_pct: 33, gov_payment_received_via: "tenant_remits" });
+    expect(r).toMatchObject({ treatment: "landowner_share", sharePct: 33, receivedVia: "tenant_remits", chosen: true, needsReceivedVia: false });
+    expect(govPaymentTreatment({ gov_payment_treatment: "tenant_retains", gov_payment_share_pct: 40 })).toMatchObject({ treatment: "tenant_retains", sharePct: 0, chosen: true });
+  });
+  it("migrates an old nonzero share to landowner share, flagged unconfirmed", () => {
+    const r = govPaymentTreatment({ gov_payment_share_pct: 25 });
+    expect(r).toMatchObject({ treatment: "landowner_share", sharePct: 25, chosen: false, needsReceivedVia: true });
+    expect(govTreatmentSentence({ gov_payment_share_pct: 25 })).toContain("confirm");
+  });
+  it("migrates a zero or missing share to tenant retains, not yet chosen", () => {
+    expect(govPaymentTreatment({})).toMatchObject({ treatment: "tenant_retains", chosen: false });
+    expect(govTreatmentSentence({})).toBe("Government payments: not chosen yet");
+    expect(govTreatmentSentence({ gov_payment_treatment: "tenant_retains" })).toBe("Tenant keeps all government payments");
+  });
+});
+
+describe("government share expected rows", () => {
+  const gov = new Map([[2026, 964.92], [2027, 1000]]);
+  const base = (terms: Record<string, unknown>) =>
+    cropShareLease({
+      terms: { landowner_share_pct: 25, ...terms },
+      start_date: "2026-01-01",
+      end_date: "2027-12-31",
+      payment_schedule: [{ label: "Rent", month: 12, day: 1, percent: 100 }],
+    });
+  it("tenant remits: one row per program year, due October of the payment year", () => {
+    const rows = generateLeasePayments(
+      base({ gov_payment_treatment: "landowner_share", gov_payment_share_pct: 50, gov_payment_received_via: "tenant_remits" }),
+      100,
+      new Map(),
+      gov
+    ).filter((r) => isGovShareLabel(r.label));
+    expect(rows).toEqual([
+      { year: 2027, label: "Government payment share (program year 2026)", due_date: "2027-10-01", expected_amount: 964.92 },
+      { year: 2028, label: "Government payment share (program year 2027)", due_date: "2028-10-01", expected_amount: 1000 },
+    ]);
+  });
+  it("FSA direct and tenant retains generate no government rows", () => {
+    for (const terms of [
+      { gov_payment_treatment: "landowner_share", gov_payment_share_pct: 50, gov_payment_received_via: "fsa_direct" },
+      { gov_payment_treatment: "tenant_retains" },
+      { gov_payment_share_pct: 50 }, // unconfirmed migration: never generates
+    ]) {
+      const rows = generateLeasePayments(base(terms), 100, new Map(), gov).filter((r) => isGovShareLabel(r.label));
+      expect(rows).toHaveLength(0);
+    }
   });
 });

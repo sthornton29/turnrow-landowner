@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DocType } from "@/lib/documents";
-import type { AiEntityMatch, AiPropertyMatch, PropertyHints } from "@/lib/documentMatch";
+import type { AiEntityMatch, AiPropertyMatch, PropertyHints, SpatialEvidence } from "@/lib/documentMatch";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 
 export interface ClassifySuggestion {
@@ -78,6 +78,7 @@ export interface IntakeResult {
   matched_entity: AiEntityMatch | null;
   fields: Record<string, unknown>;
   unsure_fields: string[];
+  spatial?: SpatialEvidence | null;
   pages_scanned?: number;
   total_pages?: number;
   chunks?: number;
@@ -133,6 +134,7 @@ export async function intakeFile(
         matched_properties: Array.isArray(x.matched_properties) ? x.matched_properties : [],
         matched_entity: x.matched_entity ?? null,
         fields: (x.fields && typeof x.fields === "object" ? x.fields : {}) as Record<string, unknown>,
+        spatial: ((x as { spatial?: SpatialEvidence | null }).spatial ?? null),
         unsure_fields: Array.isArray(x.unsure_fields) ? x.unsure_fields.map(String) : [],
         pages_scanned: typeof x.pages_scanned === "number" ? x.pages_scanned : undefined,
         total_pages: typeof x.total_pages === "number" ? x.total_pages : undefined,

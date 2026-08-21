@@ -22,7 +22,7 @@ describe("PLSS where builder", () => {
   });
 
   it("wildcards the meridian when none is given", () => {
-    expect(plssIdPattern(t4s8w)).toBe("AL__004_S008_W_");
+    expect(() => plssIdPattern(t4s8w)).toThrow(/meridian/i); // never a wildcard meridian
   });
 
   it("accepts a BLM code directly", () => {
@@ -38,11 +38,11 @@ describe("PLSS where builder", () => {
   });
 
   it("escapes quotes defensively", () => {
-    expect(buildPlssWhere({ ...t4s8w, state: "A'" })).toContain("A''");
+    expect(buildPlssWhere({ ...t4s8w, state: "A'", meridian: "HU" })).toContain("A''");
   });
 
   it("lists Alabama's three meridians", () => {
-    expect(meridiansForState("AL").sort()).toEqual(["HU", "SS", "TA"]);
+    expect(meridiansForState("AL")).toEqual(expect.arrayContaining(["HU", "SS", "TA"]));
   });
 });
 

@@ -5,6 +5,7 @@ import {
   projectedLeaseYears,
   summarizeByYear,
   type IncomeInputs,
+  govShareByYearForLease,
 } from "./income";
 
 const emptyInputs = (): IncomeInputs => ({
@@ -142,9 +143,10 @@ describe("government payment share", () => {
     configs: [],
     benchmarks: [],
   });
-  const lease = (sharePct: number) => ({
+  const lease = (sharePct: number, extraTerms: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({
     ...emptyInputs(),
-    leases: [{ id: "L", status: "active", lease_type: "agricultural", rent_structure: "crop_share" as const, start_date: `${year - 1}-01-01`, end_date: `${year + 2}-12-31`, terms: { landowner_share_pct: 25, gov_payment_share_pct: sharePct }, payment_schedule: [] } as never],
+    leases: [{ id: "L", status: "active", lease_type: "agricultural", rent_structure: "crop_share" as const, start_date: `${year - 1}-01-01`, end_date: `${year + 2}-12-31`, terms: { landowner_share_pct: 25, gov_payment_share_pct: sharePct, ...extraTerms }, payment_schedule: [] } as never],
+    ...extra,
     leaseLands: [{ lease_id: "L", property_id: "p1", leased_acres: 50 }],
     propertyAcres: [{ id: "p1", acres: 100 }],
     gov: govInputs(),
@@ -170,5 +172,41 @@ describe("government payment share", () => {
     expect(allocateToProperties(inputs, year).get("p1")?.expected).toBe(964.92);
     // Nothing lands in the program year itself (it pays the following year).
     expect(govShareRows(inputs, year - 1)).toHaveLength(0);
+  });
+
+  it("tenant retains all: the share is zero even if an old percent lingers", () => {
+    const inputs = lease(50, { gov_payment_treatment: "tenant_retains" });
+    const rows = govShareRows(inputs, year);
+    expect(rows[0].landownerAmount).toBe(0);
+    expect(rows[0].treatment).toBe("tenant_retains");
+    expect(summarizeByYear(inputs).get(year)?.expected.government ?? 0).toBe(0);
+  });
+
+  it("FSA direct: projected as government income, tagged so matchers skip it", () => {
+    const inputs = lease(50, { gov_payment_treatment: "landowner_share", gov_payment_received_via: "fsa_direct" });
+    const rows = govShareRows(inputs, year);
+    expect(rows[0].receivedVia).toBe("fsa_direct");
+    expect(rows[0].generated).toBe(false);
+    expect(summarizeByYear(inputs).get(year)?.expected.government).toBe(964.92);
+    expect(govShareByYearForLease(inputs, "L").get(year - 1)).toBe(964.92);
+  });
+
+  it("tenant remits with a generated row: the row counts once, projection steps aside", () => {
+    const inputs = lease(
+      50,
+      { gov_payment_treatment: "landowner_share", gov_payment_received_via: "tenant_remits" },
+      {
+        expected: [
+          { id: "g1", lease_id: "L", timber_sale_id: null, year, expected_amount: 964.92, label: `Government payment share (program year ${year - 1})` },
+        ],
+        payments: [{ lease_id: "L", timber_sale_id: null, amount: 964.92, received_date: `${year}-10-05`, expected_payment_id: "g1" }],
+      }
+    );
+    expect(govShareRows(inputs, year)[0].generated).toBe(true);
+    const totals = summarizeByYear(inputs).get(year)!;
+    expect(totals.expected.government).toBe(964.92);
+    expect(totals.received.government).toBe(964.92);
+    expect(totals.received.agricultural).toBe(0);
+    expect(allocateToProperties(inputs, year).get("p1")?.expected).toBe(964.92);
   });
 });

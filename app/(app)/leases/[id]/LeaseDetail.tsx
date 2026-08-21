@@ -20,8 +20,11 @@ import {
   type RentStructure,
   type SchedulePayment,
   type YearAssumptions,
+  govPaymentTreatment,
+  govTreatmentSentence,
 } from "@/lib/leaseLogic";
 import LeaseForm from "@/components/leases/LeaseForm";
+import { govShareByYearForLease, loadIncomeInputs } from "@/lib/income";
 import PaymentsSection from "@/components/payments/PaymentsSection";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import type { FarmFieldDataRow, FieldMappingRow } from "@/lib/farmDisplay";
@@ -181,9 +184,35 @@ export default function LeaseDetail({
     [assumptions]
   );
 
+  // Tenant-remitted government shares become expected rows (due each
+  // October of the payment year); the amounts come from the same engine
+  // the Income page uses, loaded on demand. FSA-direct shares never do.
+  const govResolved = govPaymentTreatment(lease.terms);
+  const wantsGovRows =
+    govResolved.treatment === "landowner_share" && govResolved.receivedVia === "tenant_remits";
+  const [govShareByYear, setGovShareByYear] = useState<Map<number, number> | null>(null);
+  useEffect(() => {
+    if (!wantsGovRows) {
+      setGovShareByYear(null);
+      return;
+    }
+    let cancelled = false;
+    loadIncomeInputs(supabase)
+      .then((inputs) => {
+        if (!cancelled) setGovShareByYear(govShareByYearForLease(inputs, lease.id));
+      })
+      .catch(() => {
+        if (!cancelled) setGovShareByYear(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsGovRows, lease.id, lease.terms]);
+
   const computeExpected = useCallback(
-    () => generateLeasePayments(lease, totalAcres, assumptionsByYear),
-    [lease, totalAcres, assumptionsByYear]
+    () => generateLeasePayments(lease, totalAcres, assumptionsByYear, govShareByYear),
+    [lease, totalAcres, assumptionsByYear, govShareByYear]
   );
 
   // Which farm connections and remote fields cover this lease's land
@@ -442,6 +471,25 @@ export default function LeaseDetail({
           {" · "}
           {formatAcres(totalAcres)} leased acres
         </p>
+        {lease.lease_type === "agricultural" &&
+        (lease.rent_structure === "flex" || lease.rent_structure === "crop_share") ? (
+          <p className="mt-2 text-sm text-gray-700">
+            <span className="font-medium">Government payments:</span>{" "}
+            {govTreatmentSentence(lease.terms)}
+            {!govResolved.chosen || govResolved.needsReceivedVia ? (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className="font-medium text-kelly-700 hover:underline"
+                >
+                  Choose in Edit lease terms
+                </button>
+              </>
+            ) : null}
+          </p>
+        ) : null}
         {insuranceWarning ? (
           <p className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {insuranceWarning}{" "}

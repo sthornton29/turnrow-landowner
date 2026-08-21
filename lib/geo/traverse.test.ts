@@ -58,7 +58,7 @@ describe("parseDistance", () => {
     expect(parseDistance("2 poles")).toBe(33);
     expect(parseDistance("2 rods")).toBe(33);
     expect(parseDistance("50 links")).toBeCloseTo(33);
-    expect(parseDistance("3 varas")).toBeCloseTo(99.999);
+    expect(parseDistance("3 varas")).toBeNull(); // varas are flagged, never converted
     expect(parseDistance("10 m")).toBeCloseTo(32.8084);
     expect(parseDistance("2 yards")).toBe(6);
     expect(parseDistance(5, "chains")).toBe(330);

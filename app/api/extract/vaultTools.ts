@@ -442,11 +442,44 @@ export const INTAKE_TOOL: Anthropic.Tool = {
         ],
         additionalProperties: false,
       },
+      plss_reference: {
+        type: ["object", "null"],
+        description:
+          "The PLSS (section, township, range) reference in the legal description, copied with the digits and direction letters EXACTLY as printed (never swap N/S or E/W, never infer a meridian that is not printed). Null when the document has no such reference.",
+        properties: {
+          county: nullable("string", "County of the land as the description states it (without the word County)"),
+          state: nullable("string", "Two-letter state"),
+          meridian_hint: nullable("string", "Principal meridian ONLY if printed (e.g. Huntsville, St. Stephens); else null"),
+          township_num: nullable("number", "Township number"),
+          township_dir: { type: ["string", "null"], enum: ["N", "S", null] },
+          range_num: nullable("number", "Range number"),
+          range_dir: { type: ["string", "null"], enum: ["E", "W", null] },
+          section: nullable("number", "Section 1 to 36"),
+          aliquot_text: nullable("string", "The aliquot chain as printed, e.g. 'NW1/4 of SE1/4'; null when the tract is metes and bounds"),
+          exceptions: { type: "array", items: { type: "string" }, description: "Each 'less and except' clause, verbatim; empty when none" },
+        },
+        required: ["county", "state", "meridian_hint", "township_num", "township_dir", "range_num", "range_dir", "section", "aliquot_text", "exceptions"],
+        additionalProperties: false,
+      },
+      mb_anchor: {
+        type: ["object", "null"],
+        description:
+          "For metes and bounds descriptions: the county, state, and the section/township/range the point of beginning is tied to, exactly as printed. Null when not a metes and bounds description or no anchor is stated.",
+        properties: {
+          county: nullable("string", "County"),
+          state: nullable("string", "Two-letter state"),
+          section: nullable("number", "Section the POB sits in, if stated"),
+          township: nullable("string", "Township as printed, e.g. 4S"),
+          range: nullable("string", "Range as printed, e.g. 8W"),
+        },
+        required: ["county", "state", "section", "township", "range"],
+        additionalProperties: false,
+      },
       unsure_fields: unsure,
     },
     required: [
       "doc_type", "confidence", "title", "reason", "specialized_kind", "property_hints",
-      "matched_properties", "matched_entity", "fields", "unsure_fields",
+      "matched_properties", "matched_entity", "fields", "plss_reference", "mb_anchor", "unsure_fields",
     ],
     additionalProperties: false,
   },
@@ -479,7 +512,7 @@ export const VAULT_TOOLS: Record<VaultKind, Anthropic.Tool> = {
 
 export const VAULT_PROMPTS: Record<VaultKind, string> = {
   intake:
-    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and suggest a short title. 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. List uncertain field names in unsure_fields.",
+    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and suggest a short title. 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. 6) If the legal description carries a section, township, and range, fill plss_reference with the digits and direction letters EXACTLY as printed (a misread N/S or E/W lands the tract in the wrong county); for metes and bounds fill mb_anchor with the stated county and any section tie. List uncertain field names in unsure_fields.",
   classify:
     "Classify this document for a rural landowner's records. Look at the heading, the first page, and any recording stamps. Pick exactly one type; 'other' when nothing fits. Suggest a short title.",
   deed:

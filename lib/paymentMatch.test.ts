@@ -70,3 +70,15 @@ describe("proposeAllocation", () => {
     expect(result.lines).toEqual([{ expectedId: "fall", amount: 5000 }]);
   });
 });
+
+describe("government share rows in the matcher", () => {
+  it("a tenant-remitted government share row is allocatable like any expected row", () => {
+    const open = [
+      { id: "rent", label: "Rent", due_date: "2027-12-01", expected_amount: 5000, received_total: 0 },
+      { id: "gov", label: "Government payment share (program year 2026)", due_date: "2027-10-01", expected_amount: 964.92, received_total: 0 },
+    ];
+    const p = proposeAllocation(964.92, "2027-10-03", open);
+    expect(p.lines).toEqual([{ expectedId: "gov", amount: 964.92 }]);
+    expect(p.leftover).toBe(0);
+  });
+});

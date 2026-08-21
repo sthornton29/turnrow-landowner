@@ -51,6 +51,7 @@ export default function GovPaymentsClient({
   configNotice,
   config,
   shareRows,
+  leaseTreatments,
 }: {
   orgId: string;
   isPlatformAdmin: boolean;
@@ -81,6 +82,14 @@ export default function GovPaymentsClient({
   configNotice: string | null;
   config: { paymentFactor: number; sequestrationPct: number; arcGuaranteePct: number; arcPaymentCapPct: number };
   shareRows: GovShareRow[];
+  leaseTreatments: Array<{
+    id: string;
+    name: string;
+    sentence: string;
+    treatment: "landowner_share" | "tenant_retains";
+    chosen: boolean;
+    receivedVia: "fsa_direct" | "tenant_remits" | null;
+  }>;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -129,6 +138,10 @@ export default function GovPaymentsClient({
 
   const totalNet = Math.round(allocations.reduce((s, a) => s + a.net, 0) * 100) / 100;
   const landownerShare = Math.round(shareRows.reduce((s, r) => s + r.landownerAmount, 0) * 100) / 100;
+  // The informational "to your tenant" line belongs only when every
+  // share lease leaves the payments with the tenant.
+  const tenantRetainsAll =
+    leaseTreatments.length > 0 && leaseTreatments.every((l) => l.treatment === "tenant_retains");
   const myaFor = (slug: string) => {
     const r = rows.find((x) => x.commodity === slug);
     return r ? { price: r.myaPrice, state: r.myaState as MyaState } : null;
@@ -401,8 +414,25 @@ export default function GovPaymentsClient({
           <p className="text-xs text-gray-500">
             {landownerShare > 0
               ? "flows into Income as Government payments"
-              : `base acres on this land generate approximately ${formatDollars(totalNet)}/yr to your tenant`}
+              : tenantRetainsAll
+                ? `base acres on this land generate approximately ${formatDollars(totalNet)}/yr to your tenant`
+                : leaseTreatments.length === 0
+                  ? "no crop share or flex lease on this land"
+                  : "choose the government payment treatment on each lease"}
           </p>
+          {leaseTreatments.length > 0 ? (
+            <ul className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-700">
+              {leaseTreatments.map((l) => (
+                <li key={l.id}>
+                  <Link href={`/leases/${l.id}`} className="font-medium text-kelly-700 hover:underline">
+                    {l.name}
+                  </Link>
+                  : {l.sentence}
+                  {l.receivedVia === "fsa_direct" ? " (paid by FSA directly, not in tenant checks)" : ""}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <p className="text-xs uppercase tracking-wide text-gray-500">Prices in use ({programYear})</p>

@@ -2,6 +2,7 @@ import { requireOrg } from "@/lib/auth";
 import { loadGovInputs, projectOrg } from "@/lib/gov/govData";
 import { programConfigNotice } from "@/lib/gov/programConfig";
 import { loadIncomeInputs, govShareRows } from "@/lib/income";
+import { govPaymentTreatment, govTreatmentSentence } from "@/lib/leaseLogic";
 import GovPaymentsClient from "./GovPaymentsClient";
 
 export const metadata = { title: "Government Payments" };
@@ -33,6 +34,27 @@ export default async function GovPaymentsPage({
   ]);
   const projection = projectOrg(gov, programYear);
   const shareRows = govShareRows(income, programYear + 1);
+  const { data: leaseNameRows } = await supabase.from("leases").select("id, name");
+  const leaseName = new Map(((leaseNameRows ?? []) as Array<{ id: string; name: string }>).map((l) => [l.id, l.name]));
+  // How each share/flex lease treats government payments, for the page.
+  const leaseTreatments = income.leases
+    .filter(
+      (l) =>
+        (l.rent_structure === "crop_share" || l.rent_structure === "flex") &&
+        l.status !== "expired" &&
+        l.status !== "terminated"
+    )
+    .map((l) => {
+      const r = govPaymentTreatment(l.terms);
+      return {
+        id: l.id,
+        name: leaseName.get(l.id) ?? "Lease",
+        sentence: govTreatmentSentence(l.terms),
+        treatment: r.treatment,
+        chosen: r.chosen,
+        receivedVia: r.receivedVia,
+      };
+    });
 
   return (
     <GovPaymentsClient
@@ -70,6 +92,7 @@ export default async function GovPaymentsPage({
         arcPaymentCapPct: projection.config.arcPaymentCapPct,
       }}
       shareRows={shareRows}
+      leaseTreatments={leaseTreatments}
     />
   );
 }

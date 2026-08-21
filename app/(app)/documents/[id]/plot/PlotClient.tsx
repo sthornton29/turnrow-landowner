@@ -13,13 +13,27 @@ import {
   type Call,
   type Unit,
 } from "@/lib/geo/traverse";
-import { parseAliquot, resolveDescription } from "@/lib/geo/aliquot";
+import {
+  parseAliquot,
+  resolveDescription,
+  type AliquotPart,
+  type AliquotToken,
+} from "@/lib/geo/aliquot";
+import { MERIDIANS } from "@/lib/plss";
+import { meridiansForCounty } from "@/lib/plssMeridians";
+import { countyMatches } from "@/lib/countyLookup";
 import { approxAcres, toMultiPolygon } from "@/lib/geo/normalize";
 import {
+  ALIQUOT_TOKENS,
+  PLOT_DISTANCE_WARN_MILES,
   centroidOf,
+  chainLargestFirst,
   closureGrade,
   cornerLabel,
+  nearestBoundary,
   nearestVertices,
+  partsToText,
+  tokenLabel,
   unionAll,
 } from "@/lib/geo/plotPreview";
 import type { PlssCandidate } from "@/lib/plss";
@@ -48,6 +62,22 @@ interface Tract {
   notes?: string[];
   error?: string | null;
   loading?: boolean;
+  // Diagnostics and sanity gates (set after a resolution)
+  resolution?: {
+    meridian: string;
+    meridianKey: string | null;
+    meridianName: string | null;
+    source: "stated" | "county" | "alternate";
+    certain: boolean;
+    service: string;
+    cached: boolean;
+  } | null;
+  gateCounty?: string | null; // county the resolved section actually sits in
+  gateOk?: boolean | null; // null = not checked / unknown
+  gateChecking?: boolean;
+  distanceMi?: number | null; // to the nearest existing boundary
+  nearestName?: string | null;
+  needMeridian?: boolean;
 }
 
 interface CallRow {
@@ -216,6 +246,19 @@ export default function PlotClient({
   const [defaultState, setDefaultState] = useState(
     (properties.find((p) => p.state)?.state ?? "AL").toUpperCase().slice(0, 2)
   );
+  // The county the deed states: it pins the principal meridian and is
+  // the reference for the county gate after resolution.
+  const [deedCounty, setDeedCounty] = useState<string>(
+    countyFromText(storedExtraction?.source_text ?? storedLegalText ?? "") ??
+      properties.find((p) => p.county)?.county ??
+      ""
+  );
+  const [pobCounty, setPobCounty] = useState<string | null>(null);
+  const meridianPlan = meridiansForCounty(defaultState, deedCounty);
+  const meridianOptions = (meridianPlan.stateMeridians.length > 0
+    ? meridianPlan.stateMeridians
+    : Object.keys(MERIDIANS)
+  ).filter((k) => MERIDIANS[k]);
 
   // Target
   const [targetMode, setTargetMode] = useState<TargetMode>("new_property");
@@ -235,6 +278,8 @@ export default function PlotClient({
   function applyExtraction(x: Extraction) {
     setKind(x.kind ?? "unknown");
     setSourceText(x.source_text ?? storedLegalText ?? "");
+    const c = countyFromText(x.source_text ?? "");
+    if (c) setDeedCounty(c);
     setUnsure(x.unsure_fields ?? []);
     setTracts(
       (x.aliquot?.tracts ?? []).map((t) => ({
@@ -320,8 +365,9 @@ export default function PlotClient({
 
   // ---------------------------------------------------------- aliquot path
 
-  async function resolveTract(i: number, chosenKey?: string) {
-    const t = tracts[i];
+  async function resolveTract(i: number, chosenKey?: string, override: Partial<Tract> = {}) {
+    const t = { ...tracts[i], ...override };
+    if (Object.keys(override).length > 0) patchTract(i, { ...override, candidates: undefined, polygon: null });
     const tn = Number(t.township_num);
     const rn = Number(t.range_num);
     const sec = Number(t.section);
@@ -329,9 +375,19 @@ export default function PlotClient({
       patchTract(i, { error: "Section, township, and range are all needed." });
       return;
     }
-    patchTract(i, { loading: true, error: null });
+    if (!t.meridian && !meridianPlan.primary) {
+      patchTract(i, {
+        error: deedCounty
+          ? `The meridian for ${deedCounty} County is not on file. Pick the principal meridian.`
+          : "Enter the deed's county (it decides the principal meridian) or pick the meridian.",
+        needMeridian: true,
+      });
+      return;
+    }
+    patchTract(i, { loading: true, error: null, needMeridian: false, gateOk: null, gateCounty: null });
     try {
-      let candidates = t.candidates;
+      let candidates = override.candidates === undefined && Object.keys(override).length === 0 ? t.candidates : undefined;
+      let resolution: Tract["resolution"] = t.resolution ?? null;
       if (!candidates || candidates.length === 0) {
         const res = await fetch("/api/plss", {
           method: "POST",
@@ -342,24 +398,31 @@ export default function PlotClient({
             range: { num: rn, dir: t.range_dir },
             section: sec,
             meridian: t.meridian || undefined,
+            county: deedCounty || undefined,
           }),
         });
         const body = await res.json();
+        if (res.status === 422 && body.needMeridian) {
+          patchTract(i, { loading: false, error: body.error, needMeridian: true });
+          return;
+        }
         if (!res.ok) throw new Error(body.error ?? "PLSS lookup failed.");
         candidates = body.candidates as PlssCandidate[];
-      }
-      if (!candidates || candidates.length === 0) {
-        patchTract(i, {
-          loading: false,
-          candidates: [],
-          error: "No section found for that township and range. Check the numbers and state.",
-        });
-        return;
+        resolution = body.resolution ?? null;
+        if (!candidates || candidates.length === 0) {
+          patchTract(i, {
+            loading: false,
+            candidates: [],
+            resolution: null,
+            error: body.error ?? "No section found for that township and range. Check the numbers and directions.",
+          });
+          return;
+        }
       }
       const key =
         chosenKey ?? (candidates.length === 1 ? candidates[0].key : (t.chosenKey ?? null));
       if (!key) {
-        patchTract(i, { loading: false, candidates, chosenKey: null, polygon: null });
+        patchTract(i, { loading: false, candidates, resolution, chosenKey: null, polygon: null });
         return;
       }
       const cand = candidates.find((c) => c.key === key) ?? candidates[0];
@@ -376,29 +439,102 @@ export default function PlotClient({
       const notes = [...resolved.notes];
       if (parsed.parts.length === 0 && parsed.lots.length === 0) {
         notes.push(
-          "No aliquot parts were recognized in the text; the whole section is shown. Edit the aliquot text (for example NW1/4 of SE1/4)."
+          "No aliquot parts were recognized; the whole section is shown. Add parts with the chips (for example SE1/4, then NW1/4 of it)."
         );
       }
       if (cand.polygon.type === "MultiPolygon" && cand.polygon.coordinates.length > 1) {
         notes.push("The section polygon had several parts; the largest was used.");
       }
+      const polygon =
+        resolved.polygon ?? (parsed.parts.length === 0 ? toMultiPolygon(sectionPoly) : null);
+      // Distance gate (client-side, instant).
+      const center = centroidOf(polygon ?? sectionPoly);
+      const near = center
+        ? nearestBoundary(
+            center,
+            properties.map((p) => ({ name: p.name, geometry: p.boundary_geojson }))
+          )
+        : null;
       patchTract(i, {
         loading: false,
         candidates,
         chosenKey: key,
-        polygon:
-          resolved.polygon ?? (parsed.parts.length === 0 ? toMultiPolygon(sectionPoly) : null),
-        acres:
-          resolved.polygon ? resolved.acres : approxAcres(toMultiPolygon(sectionPoly)!),
+        resolution,
+        polygon,
+        acres: resolved.polygon ? resolved.acres : approxAcres(toMultiPolygon(sectionPoly)!),
         notes,
         error: null,
+        distanceMi: near?.miles ?? null,
+        nearestName: near?.name ?? null,
+        gateChecking: !!center,
+        gateCounty: null,
+        gateOk: null,
       });
+      // County gate (server lookup): the resolved section must sit in
+      // the county the deed states.
+      if (center) {
+        try {
+          const res = await fetch("/api/county-lookup", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ lon: center[0], lat: center[1] }),
+          });
+          const body = await res.json();
+          const county: string | null = body?.county?.county ?? null;
+          patchTract(i, {
+            gateChecking: false,
+            gateCounty: county,
+            gateOk: county ? countyMatches(deedCounty, county) : null,
+          });
+        } catch {
+          patchTract(i, { gateChecking: false, gateCounty: null, gateOk: null });
+        }
+      }
     } catch (e) {
       patchTract(i, {
         loading: false,
         error: e instanceof Error ? e.message : "Could not resolve this tract.",
       });
     }
+  }
+
+  // One-tap retries when the county gate fails: the plausible misreads.
+  function retryOptions(t: Tract): Array<{ label: string; patch: Partial<Tract> }> {
+    const out: Array<{ label: string; patch: Partial<Tract> }> = [];
+    if (t.township_dir) {
+      const flip = t.township_dir === "N" ? "S" : "N";
+      out.push({ label: `Try T${t.township_num}${flip}`, patch: { township_dir: flip } });
+    }
+    if (t.range_dir) {
+      const flip = t.range_dir === "E" ? "W" : "E";
+      out.push({ label: `Try R${t.range_num}${flip}`, patch: { range_dir: flip } });
+    }
+    const current = t.resolution?.meridianKey ?? t.meridian ?? meridianPlan.primary;
+    for (const k of meridianOptions) {
+      if (k !== current) out.push({ label: `Try ${MERIDIANS[k].name} meridian`, patch: { meridian: k } });
+    }
+    return out;
+  }
+
+  function diagnosticLine(t: Tract): string | null {
+    if (!t.polygon || !t.resolution) return null;
+    const r = t.resolution;
+    const mer = `${r.meridianName ?? `meridian ${r.meridian}`} PM (${
+      r.source === "stated" ? "as entered" : r.source === "county" ? `from ${deedCounty || "county"} County` : `alternate for ${deedCounty || "county"} County`
+    })`;
+    const gate =
+      t.gateChecking
+        ? "county check running"
+        : t.gateOk === true
+          ? `county check passed (${t.gateCounty})`
+          : t.gateOk === false
+            ? `COUNTY MISMATCH: resolved to ${t.gateCounty}, deed says ${deedCounty}`
+            : "county check unavailable";
+    const dist =
+      t.distanceMi != null && t.nearestName
+        ? `${formatNumber(t.distanceMi)} mi from ${t.nearestName}`
+        : "no existing boundaries to compare";
+    return `Resolved: ${mer}, T${t.township_num}${t.township_dir} R${t.range_num}${t.range_dir}, Sec ${t.section}, ${r.service}${r.cached ? " (cached)" : ""}, ${gate}, ${dist}.`;
   }
 
   function patchTract(i: number, patch: Partial<Tract>) {
@@ -454,6 +590,25 @@ export default function PlotClient({
     const c = centroidOf(referenceGeometry);
     if (c) setPob(c);
   }, [referenceGeometry, pob, useAliquot]);
+  // County under the point of beginning, beside the deed's county.
+  useEffect(() => {
+    if (!pob || useAliquot) return;
+    const [lon, lat] = pob;
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/county-lookup", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ lon, lat }),
+        });
+        const body = await res.json();
+        setPobCounty(body?.county?.county ?? null);
+      } catch {
+        setPobCounty(null);
+      }
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [pob, useAliquot]);
   const refCentroid = centroidOf(referenceGeometry);
   const cornerPicks = refCentroid
     ? nearestVertices(referenceGeometry, pob ?? refCentroid, 6)
@@ -536,6 +691,24 @@ export default function PlotClient({
         rotation: useAliquot ? null : rotation,
         pob: useAliquot ? null : pob,
         plotted_acres: plottedAcres,
+        deed_county: deedCounty || null,
+        state: defaultState,
+        tracts: useAliquot
+          ? tracts.map((t) => ({
+              section: t.section,
+              township: `${t.township_num}${t.township_dir}`,
+              range: `${t.range_num}${t.range_dir}`,
+              meridian: t.resolution?.meridianKey ?? t.meridian ?? null,
+              meridian_source: t.resolution?.source ?? null,
+              aliquot: t.aliquot_text,
+              resolved_county: t.gateCounty ?? null,
+              county_gate: t.gateOk ?? null,
+              distance_mi: t.distanceMi ?? null,
+              nearest: t.nearestName ?? null,
+              diagnostic: diagnosticLine(t),
+            }))
+          : null,
+        pob_county: useAliquot ? null : pobCounty,
         saved_at: new Date().toISOString(),
         target: { entity_type: entityType, entity_id: entityId, mode: targetMode },
       };
@@ -570,7 +743,8 @@ export default function PlotClient({
   const canContinueFrom1 =
     hasExtraction &&
     ((useAliquot && tracts.length > 0) || (!useAliquot && calls.length >= 3));
-  const canContinueFrom2 = !!plotted;
+  const gateFailed = useAliquot && tracts.some((t) => t.polygon && t.gateOk === false);
+  const canContinueFrom2 = !!plotted && !gateFailed;
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
@@ -684,16 +858,41 @@ export default function PlotClient({
 
               {useAliquot ? (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-semibold text-gray-900">Tracts</h3>
-                    <label className="ml-auto flex items-center gap-1 text-xs text-gray-600">
+                  <div className="grid grid-cols-1 gap-2 rounded-lg border border-gray-200 bg-gray-50 p-2 sm:grid-cols-3">
+                    <label className="text-xs font-medium text-gray-700">
                       State
                       <input
                         value={defaultState}
                         onChange={(e) => setDefaultState(e.target.value.toUpperCase().slice(0, 2))}
-                        className="w-12 rounded border border-gray-300 px-1.5 py-0.5 text-xs"
+                        className={inputClass}
                       />
                     </label>
+                    <label className="text-xs font-medium text-gray-700 sm:col-span-2">
+                      County the deed states
+                      <input
+                        value={deedCounty}
+                        onChange={(e) => setDeedCounty(e.target.value)}
+                        placeholder="e.g. Lawrence"
+                        className={inputClass}
+                      />
+                      <span className="mt-0.5 block text-[11px] font-normal text-gray-500">
+                        {meridianPlan.primary
+                          ? `Principal meridian from the county: ${MERIDIANS[meridianPlan.primary].name}${
+                              meridianPlan.alternates.length > 0
+                                ? ` (survey line crosses this county; also tries ${meridianPlan.alternates
+                                    .map((k) => MERIDIANS[k]?.name ?? k)
+                                    .join(", ")})`
+                                : ""
+                            }. The resolved section is checked against this county.`
+                          : deedCounty
+                            ? `The meridian for ${deedCounty} County is not on file; pick it per tract.`
+                            : "Enter the county: it decides which survey (meridian) the township and range belong to."}
+                      </span>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold text-gray-900">Tracts</h3>
+                    <span className="text-xs text-gray-500">Check every field before resolving; nothing is fetched until you do.</span>
                     <button
                       type="button"
                       onClick={() =>
@@ -732,16 +931,14 @@ export default function PlotClient({
                           Remove
                         </button>
                       </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-700">
-                          Aliquot parts (e.g. NW1/4 of SE1/4 and S1/2 of NE1/4)
-                        </label>
-                        <input
-                          value={t.aliquot_text}
-                          onChange={(e) => patchTract(i, { aliquot_text: e.target.value, polygon: null })}
-                          className={amber("aliquot")}
-                        />
-                      </div>
+                      <ChainChips
+                        text={t.aliquot_text}
+                        exceptions={t.exceptions}
+                        unsure={unsure.includes("aliquot")}
+                        onChange={(aliquot_text, exceptions) =>
+                          patchTract(i, { aliquot_text, exceptions, polygon: null })
+                        }
+                      />
                       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                         <label className="text-xs text-gray-600">
                           Section
@@ -801,28 +998,18 @@ export default function PlotClient({
                             onChange={(e) => patchTract(i, { meridian: e.target.value, candidates: undefined, polygon: null })}
                             className={inputClass}
                           >
-                            <option value="">Unknown</option>
-                            <option value="HU">Huntsville</option>
-                            <option value="SS">St. Stephens</option>
-                            <option value="TA">Tallahassee</option>
+                            <option value="">
+                              {meridianPlan.primary
+                                ? `From county (${MERIDIANS[meridianPlan.primary].name})`
+                                : "Pick..."}
+                            </option>
+                            {meridianOptions.map((k) => (
+                              <option key={k} value={k}>
+                                {MERIDIANS[k].name}
+                              </option>
+                            ))}
                           </select>
                         </label>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-700">
-                          Exceptions (one per line; aliquot exceptions are cut automatically)
-                        </label>
-                        <textarea
-                          value={t.exceptions.join("\n")}
-                          onChange={(e) =>
-                            patchTract(i, {
-                              exceptions: e.target.value.split("\n").filter((s) => s.trim() !== ""),
-                              polygon: null,
-                            })
-                          }
-                          rows={2}
-                          className={inputClass}
-                        />
                       </div>
                     </div>
                   ))}
@@ -900,7 +1087,7 @@ export default function PlotClient({
               {t.candidates && t.candidates.length > 1 ? (
                 <div>
                   <p className="mb-1 text-xs font-medium text-amber-800">
-                    Several sections match (the meridian was not stated). Pick the right one:
+                    Several sections match under this meridian (duplicate township). Pick the right one:
                   </p>
                   <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                     {t.candidates.map((c) => (
@@ -936,10 +1123,52 @@ export default function PlotClient({
                   />
                 </div>
               ) : null}
+              {t.needMeridian ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {meridianOptions.map((k) => (
+                    <button
+                      key={k}
+                      onClick={() => resolveTract(i, undefined, { meridian: k })}
+                      className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                    >
+                      Use {MERIDIANS[k].name} meridian
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {t.polygon ? (
                 <p className="text-xs text-gray-700">
                   Resolved: about {formatAcres(t.acres ?? 0)} acres.
                 </p>
+              ) : null}
+              {t.polygon && t.gateOk === false ? (
+                <div className="rounded-lg border border-red-400 bg-red-50 p-2 text-xs text-red-800">
+                  <p className="font-semibold">
+                    County check failed: this section is in {t.gateCounty} County, the deed says {deedCounty}.
+                  </p>
+                  <p className="mt-0.5">
+                    A flipped direction letter or the wrong survey is the usual cause. Try the likely fixes:
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {retryOptions(t).map((o) => (
+                      <button
+                        key={o.label}
+                        onClick={() => resolveTract(i, undefined, o.patch)}
+                        className="rounded-full border border-red-300 bg-white px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-100"
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {t.polygon && t.distanceMi != null && t.distanceMi > PLOT_DISTANCE_WARN_MILES ? (
+                <p className="rounded-lg border border-amber-400 bg-amber-50 p-2 text-xs font-medium text-amber-900">
+                  This section is {formatNumber(t.distanceMi)} miles from your nearest boundary ({t.nearestName}). New land is possible, but check the township, range, directions, and county before saving.
+                </p>
+              ) : null}
+              {diagnosticLine(t) ? (
+                <p className="font-mono text-[11px] leading-snug text-gray-500">{diagnosticLine(t)}</p>
               ) : null}
               {t.notes && t.notes.length > 0 ? (
                 <ul className="list-disc pl-4 text-xs text-amber-800">
@@ -1100,6 +1329,13 @@ export default function PlotClient({
             <p className="text-xs text-gray-500">
               POB {pob[1].toFixed(6)}, {pob[0].toFixed(6)}
               {plottedAcres !== null ? ` · plotted ${formatAcres(plottedAcres)} acres` : ""}
+              {pobCounty ? ` · pin is in ${pobCounty} County` : ""}
+              {deedCounty ? ` · deed says ${deedCounty}` : ""}
+            </p>
+          ) : null}
+          {pob && pobCounty && deedCounty && !countyMatches(deedCounty, pobCounty) ? (
+            <p className="rounded-lg border border-red-400 bg-red-50 p-2 text-xs font-medium text-red-800">
+              The point of beginning is pinned in {pobCounty} County but the deed describes land in {deedCounty} County. Move the pin before saving.
             </p>
           ) : null}
           <div className="flex justify-between">
@@ -1227,6 +1463,25 @@ export default function PlotClient({
                 </label>
               ) : null}
 
+              {useAliquot && tracts.some(diagnosticLine) ? (
+                <div className="space-y-0.5 rounded-lg bg-gray-50 p-2">
+                  {tracts.map((t, i) =>
+                    diagnosticLine(t) ? (
+                      <p key={i} className="font-mono text-[11px] leading-snug text-gray-600">
+                        Tract {i + 1}: {diagnosticLine(t)}
+                      </p>
+                    ) : null
+                  )}
+                </div>
+              ) : null}
+              {!useAliquot && pob ? (
+                <p className="rounded-lg bg-gray-50 p-2 font-mono text-[11px] leading-snug text-gray-600">
+                  Point of beginning {pob[1].toFixed(5)}, {pob[0].toFixed(5)}
+                  {pobCounty ? `, in ${pobCounty} County` : ""}
+                  {deedCounty ? ` (deed: ${deedCounty})` : ""}; rotation {rotation.toFixed(1)} degrees
+                  {trav ? `; ${formatClosure(trav)}` : ""}.
+                </p>
+              ) : null}
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-lg bg-kelly-50 p-2">
                   <p className="text-[11px] uppercase tracking-wide text-gray-500">Plotted</p>
@@ -1423,6 +1678,129 @@ function CallsGrid({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// "... in Lawrence County, Alabama ..." -> "Lawrence" (first county named).
+function countyFromText(text: string): string | null {
+  const m = /\b([A-Z][A-Za-z.'\- ]{2,30}?)\s+(?:County|Parish)\b/.exec(text ?? "");
+  if (!m) return null;
+  const name = m[1].trim().replace(/^(of|in|the)\s+/i, "");
+  return name.length > 1 ? name : null;
+}
+
+// The aliquot chain as ORDERED, EDITABLE chips (largest division first,
+// each smaller division "of" the previous), with exception chips. The
+// text stays as the source of truth underneath; chips rewrite it.
+function ChainChips({
+  text,
+  exceptions,
+  unsure,
+  onChange,
+}: {
+  text: string;
+  exceptions: string[];
+  unsure: boolean;
+  onChange: (text: string, exceptions: string[]) => void;
+}) {
+  const parsed = parseAliquot(text);
+  const parts: AliquotPart[] = parsed.parts;
+  const [exDraft, setExDraft] = useState("");
+  const setParts = (next: AliquotPart[]) => onChange(partsToText(next), exceptions);
+  const addPart = () => setParts([...parts, ["NE"]]);
+  const removePart = (pi: number) => setParts(parts.filter((_, j) => j !== pi));
+  const setToken = (pi: number, ti: number, tok: AliquotToken) =>
+    setParts(parts.map((p, j) => (j === pi ? p.map((x, k) => (k === ti ? tok : x)) : p)));
+  const addSmaller = (pi: number) =>
+    setParts(parts.map((p, j) => (j === pi ? ["NE", ...p] : p)));
+  const dropSmallest = (pi: number) =>
+    setParts(parts.map((p, j) => (j === pi && p.length > 1 ? p.slice(1) : p)));
+  return (
+    <div className={"space-y-2 rounded-lg border p-2 " + (unsure ? "border-amber-400 bg-amber-50" : "border-gray-200")}>
+      <p className="text-xs font-medium text-gray-700">
+        Aliquot parts, largest division first (each next chip is a part of the one before it)
+      </p>
+      {parts.length === 0 ? (
+        <p className="text-xs text-gray-500">No parts yet: the whole section. Add a part below.</p>
+      ) : null}
+      {parts.map((part, pi) => (
+        <div key={pi} className="flex flex-wrap items-center gap-1">
+          {chainLargestFirst(part).map((tok, k) => {
+            const ti = part.length - 1 - k; // index in the smallest-first chain
+            return (
+              <span key={k} className="flex items-center gap-1">
+                {k > 0 ? <span className="text-[11px] text-gray-400">then its</span> : null}
+                <select
+                  value={tok}
+                  onChange={(e) => setToken(pi, ti, e.target.value as AliquotToken)}
+                  className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-800"
+                >
+                  {ALIQUOT_TOKENS.map((t) => (
+                    <option key={t} value={t}>
+                      {tokenLabel(t)}
+                    </option>
+                  ))}
+                </select>
+              </span>
+            );
+          })}
+          <button type="button" onClick={() => addSmaller(pi)} className="text-[11px] font-medium text-kelly-700 hover:underline">
+            + smaller part
+          </button>
+          {part.length > 1 ? (
+            <button type="button" onClick={() => dropSmallest(pi)} className="text-[11px] text-gray-500 hover:underline">
+              drop smallest
+            </button>
+          ) : null}
+          <button type="button" onClick={() => removePart(pi)} className="text-[11px] text-red-600 hover:underline">
+            remove
+          </button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={addPart} className="rounded-lg border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50">
+          + Add part
+        </button>
+        <label className="flex flex-1 items-center gap-1 text-[11px] text-gray-500">
+          Text
+          <input
+            value={text}
+            onChange={(e) => onChange(e.target.value, exceptions)}
+            placeholder="NW1/4 of SE1/4 and S1/2 of NE1/4"
+            className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+          />
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-medium text-gray-600">Less and except:</span>
+        {exceptions.map((ex, k) => (
+          <span key={k} className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
+            {ex}
+            <button
+              type="button"
+              onClick={() => onChange(text, exceptions.filter((_, j) => j !== k))}
+              className="text-gray-400 hover:text-red-600"
+              aria-label="Remove exception"
+            >
+              &times;
+            </button>
+          </span>
+        ))}
+        <input
+          value={exDraft}
+          onChange={(e) => setExDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && exDraft.trim()) {
+              e.preventDefault();
+              onChange(text, [...exceptions, exDraft.trim()]);
+              setExDraft("");
+            }
+          }}
+          placeholder="e.g. SE1/4 of NE1/4, Enter to add"
+          className="w-48 rounded border border-gray-300 px-2 py-0.5 text-xs"
+        />
       </div>
     </div>
   );

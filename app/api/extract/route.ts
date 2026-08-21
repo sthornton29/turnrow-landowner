@@ -10,6 +10,7 @@ import {
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
 import { MODEL_PDF_MAX_BYTES, firstPages, pageCount, splitPdf } from "./pdfChunks";
 import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
+import { resolvePlssReference, type PlssReferenceInput } from "@/lib/plssResolve";
 import {
   VAULT_KINDS,
   VAULT_PROMPTS,
@@ -94,6 +95,27 @@ const LEASE_TOOL: Anthropic.Tool = {
         type: ["string", "null"],
         description:
           "The lease's pricing clause VERBATIM (the sentences defining how the price is determined), for later recipe setup. Null if the document has none.",
+      },
+      gov_payment_clause: {
+        type: ["string", "null"],
+        description:
+          "Crop share and flex leases: any clause about ARC/PLC, farm program, FSA, or government payments, VERBATIM. Null when the lease is silent.",
+      },
+      gov_payment_treatment: {
+        type: ["string", "null"],
+        enum: ["landowner_share", "tenant_retains", null],
+        description:
+          "From that clause: landowner_share when the landowner receives part of the government payments; tenant_retains when the tenant keeps them all. Null when the lease is silent (never guess).",
+      },
+      gov_payment_share_pct: {
+        type: ["number", "null"],
+        description: "Landowner's percent of government payments when stated (often the same as the crop share percent). Null if not stated.",
+      },
+      gov_payment_received_via: {
+        type: ["string", "null"],
+        enum: ["fsa_direct", "tenant_remits", null],
+        description:
+          "How the landowner's share arrives when the clause says: fsa_direct when FSA pays the landowner directly as a party on the farm record; tenant_remits when the tenant passes the money on. Null when not stated.",
       },
       leased_properties: {
         type: "array",
@@ -426,6 +448,64 @@ const PAYMENT_TOOL: Anthropic.Tool = {
 };
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+
+// The intake's spatial evidence: a described polygon and which of the
+// caller's properties/parcels it overlaps (match_boundaries RPC, RLS).
+async function spatialEvidenceFor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  extraction: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const ref = (extraction.plss_reference ?? null) as PlssReferenceInput | null;
+  const mb = (extraction.mb_anchor ?? null) as
+    | { county: string | null; state: string | null; section: number | null; township: string | null; range: string | null }
+    | null;
+  let input: PlssReferenceInput | null = ref && ref.section ? ref : null;
+  if (!input && mb && mb.section && mb.township && mb.range) {
+    const t = /^(\d+)\s*([NS])/i.exec(String(mb.township));
+    const r = /^(\d+)\s*([EW])/i.exec(String(mb.range));
+    if (t && r) {
+      input = {
+        county: mb.county,
+        state: mb.state,
+        township_num: Number(t[1]),
+        township_dir: t[2].toUpperCase(),
+        range_num: Number(r[1]),
+        range_dir: r[2].toUpperCase(),
+        section: mb.section,
+        aliquot_text: null,
+        exceptions: [],
+      };
+    }
+  }
+  if (!input) return { notes: [] };
+  // Default the state from the hints when the description omits it.
+  if (!input.state) {
+    const hints = (extraction.property_hints ?? {}) as { states?: string[] };
+    input = { ...input, state: hints.states?.[0] ?? null };
+  }
+  const resolved = await resolvePlssReference(input);
+  const base: Record<string, unknown> = {
+    reference_label: resolved.referenceLabel,
+    resolution: resolved.resolution,
+    county_check: resolved.countyCheck,
+    described_acres: resolved.describedAcres,
+    notes: resolved.notes,
+  };
+  if (!resolved.polygon) return base;
+  const { data, error } = await supabase.rpc("match_boundaries", { p_geojson: resolved.polygon });
+  if (error) {
+    return { ...base, notes: [...resolved.notes, "Overlap check unavailable: " + error.message] };
+  }
+  const matches = ((data as Array<Record<string, unknown>> | null) ?? []).map((m) => ({
+    entity_type: String(m.entity_type),
+    id: String(m.id),
+    name: String(m.name ?? ""),
+    overlap_acres: Number(m.overlap_acres) || 0,
+    pct_of_described: Number(m.pct_of_described) || 0,
+    pct_of_boundary: m.pct_of_boundary === null ? null : Number(m.pct_of_boundary) || 0,
+  }));
+  return { ...base, matches, polygon: resolved.polygon, computed: true };
+}
 
 export async function POST(request: Request) {
   // Only signed-in users may hit this (it spends API credits).
@@ -801,6 +881,11 @@ export async function POST(request: Request) {
             extraction.unsure_fields = [...new Set([...unsure, ...more])];
           }
         }
+        // Spatial matching tier: resolve the PLSS reference through the
+        // plotting engine (pinned meridian, county gate) and intersect
+        // it with the caller's boundaries under RLS. Any failure leaves
+        // notes only; the name/number signals still stand.
+        extraction.spatial = await spatialEvidenceFor(supabase, extraction);
       } else if (!isPdf) {
         extraction = await runTool(fileBytes, promptText);
       } else if (vaultKind === "classify") {

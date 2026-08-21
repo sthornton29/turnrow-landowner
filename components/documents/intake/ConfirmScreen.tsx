@@ -1,7 +1,10 @@
 "use client";
 
 import { DOC_TYPE_LABELS, scanKindFor } from "@/lib/documents";
-import type { PropertySuggestion } from "@/lib/documentMatch";
+import type { PropertySuggestion, SpatialEvidence } from "@/lib/documentMatch";
+import { staticMapUrl } from "@/lib/staticMap";
+import { formatAcres } from "@/lib/format";
+import type { Geometry } from "geojson";
 import { DocTypeSelect } from "../DocTypeSelect";
 import PropertyMultiSelect, { type SelectableProperty } from "../PropertyMultiSelect";
 import ExtractedFieldsEditor from "../ExtractedFieldsEditor";
@@ -22,6 +25,8 @@ export default function ConfirmScreen({
   onChange,
   properties,
   suggestions,
+  spatial = null,
+  conflict = false,
   entityWhy,
   entityName,
   context,
@@ -36,6 +41,9 @@ export default function ConfirmScreen({
   onChange: (d: Draft) => void;
   properties: SelectableProperty[];
   suggestions: PropertySuggestion[];
+  // The spatial tier's evidence (shown only when the overlap computed).
+  spatial?: SpatialEvidence | null;
+  conflict?: boolean;
   entityWhy: string | null;
   entityName: string | null;
   context: IntakeContextTarget | null;
@@ -101,6 +109,8 @@ export default function ConfirmScreen({
         </div>
       </div>
 
+      <SpatialEvidenceBlock spatial={spatial} properties={properties} conflict={conflict} />
+
       <div>
         <label className="mb-1 block text-sm font-medium text-gray-700">
           Properties
@@ -162,6 +172,86 @@ export default function ConfirmScreen({
             </p>
           ) : null}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+// "Evidence from the description": the resolved reference, the county
+// check, and each overlap with the caller's land, plus a small map chip
+// of the described tract when the URL fits the Static Images API.
+function SpatialEvidenceBlock({
+  spatial,
+  properties,
+  conflict,
+}: {
+  spatial: SpatialEvidence | null;
+  properties: SelectableProperty[];
+  conflict: boolean;
+}) {
+  if (!spatial) return null;
+  const computed = spatial.computed === true && Array.isArray(spatial.matches);
+  const matches = computed
+    ? (spatial.matches ?? []).filter((m) => m.pct_of_described >= 5)
+    : [];
+  const county = spatial.county_check ?? null;
+  const countyFailed = county?.matches === false;
+  if (!computed && !countyFailed) return null;
+  const mapUrl = computed && spatial.polygon
+    ? staticMapUrl(spatial.polygon as Geometry, { width: 320, height: 200 })
+    : null;
+  const propName = (m: { entity_type: string; id: string; name: string }) =>
+    m.entity_type === "property"
+      ? (properties.find((p) => p.id === m.id)?.name ?? m.name)
+      : `parcel ${m.name}`;
+  return (
+    <div
+      className={
+        "rounded-xl border p-3 " +
+        (conflict ? "border-amber-300 bg-amber-50" : countyFailed ? "border-red-200 bg-red-50" : "border-kelly-100 bg-kelly-50")
+      }
+    >
+      <p className="text-sm font-medium text-gray-900">Evidence from the description</p>
+      {spatial.reference_label ? (
+        <p className="mt-0.5 text-xs text-gray-700">
+          Describes land in {spatial.reference_label}
+          {spatial.described_acres != null ? ` (${formatAcres(spatial.described_acres)} acres described)` : ""}
+          {spatial.resolution?.source === "county" ? `; meridian from ${county?.deed ?? "the deed's"} County` : ""}
+          {county?.matches === true && county.resolved ? `; county check passed (${county.resolved})` : ""}
+        </p>
+      ) : null}
+      {countyFailed ? (
+        <p className="mt-1 text-xs font-medium text-red-800">
+          The section resolved to {county?.resolved} County but the deed says {county?.deed}; the description was not used for matching. Check the township and range directions on the plot screen.
+        </p>
+      ) : null}
+      {computed && matches.length === 0 ? (
+        <p className="mt-1 text-xs text-gray-700">The described tract does not overlap any of your boundaries.</p>
+      ) : null}
+      {matches.length > 0 ? (
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-start">
+          <ul className="flex-1 space-y-0.5 text-xs text-gray-800">
+            {matches.map((m) => (
+              <li key={`${m.entity_type}:${m.id}`}>
+                Overlaps <span className="font-medium">{propName(m)}</span>: {Math.round(m.pct_of_described)}% of the described area
+                {m.overlap_acres ? ` (${formatAcres(m.overlap_acres)} acres)` : ""}
+              </li>
+            ))}
+          </ul>
+          {mapUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={mapUrl}
+              alt="The described tract"
+              className="h-24 w-40 shrink-0 rounded-lg border border-gray-200 object-cover"
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {conflict ? (
+        <p className="mt-2 text-xs font-medium text-amber-900">
+          The signals disagree: a parcel or farm number points to one property and the described land overlaps another. Both are listed below with their evidence; pick the right one.
+        </p>
       ) : null}
     </div>
   );

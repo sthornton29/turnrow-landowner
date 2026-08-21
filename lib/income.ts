@@ -10,7 +10,15 @@
 // schedule's rows. Views label projection-sourced totals as estimates
 // that will change.
 
-import { annualRent, type LeaseLike, type YearAssumptions } from "@/lib/leaseLogic";
+import {
+  annualRent,
+  govPaymentTreatment,
+  isGovShareLabel,
+  type GovPaymentReceivedVia,
+  type GovPaymentTreatment,
+  type LeaseLike,
+  type YearAssumptions,
+} from "@/lib/leaseLogic";
 import { loadGovInputs, projectForPaymentYear, type GovInputs } from "@/lib/gov/govData";
 
 // "government" = the landowner's contractual share (terms.gov_payment_share_pct)
@@ -34,12 +42,14 @@ export interface IncomeInputs {
     timber_sale_id: string | null;
     year: number;
     expected_amount: number;
+    label?: string | null; // "Government payment share (...)" rows type as government
   }>;
   payments: Array<{
     lease_id: string | null;
     timber_sale_id: string | null;
     amount: number;
     received_date: string;
+    expected_payment_id?: string | null;
   }>;
   settlements: Array<{
     timber_sale_id: string;
@@ -134,6 +144,7 @@ interface EffectiveExpected {
   year: number;
   amount: number;
   projection: boolean; // computed from assumptions, no generated rows yet
+  gov?: boolean; // a generated government-share row (tenant remits)
 }
 
 // One expected amount per source-year: generated expected_payments win
@@ -143,6 +154,7 @@ interface EffectiveExpected {
 function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
   const entries: EffectiveExpected[] = [];
   const generated = new Map<string, number>();
+  const generatedGov = new Map<string, number>();
   for (const e of inputs.expected) {
     if (e.timber_sale_id) {
       entries.push({
@@ -152,6 +164,11 @@ function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
         amount: e.expected_amount,
         projection: false,
       });
+    } else if (e.lease_id && isGovShareLabel(e.label)) {
+      // Generated government-share rows are their own income type and
+      // never block the rent projection for their year.
+      const key = `${e.lease_id}|${e.year}`;
+      generatedGov.set(key, (generatedGov.get(key) ?? 0) + e.expected_amount);
     } else if (e.lease_id) {
       const key = `${e.lease_id}|${e.year}`;
       generated.set(key, (generated.get(key) ?? 0) + e.expected_amount);
@@ -166,6 +183,10 @@ function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
       amount,
       projection: false,
     });
+  }
+  for (const [key, amount] of generatedGov) {
+    const [leaseId, year] = key.split("|");
+    entries.push({ leaseId, timberSaleId: null, year: Number(year), amount, projection: false, gov: true });
   }
   for (const [leaseId, byYear] of projectedLeaseYears(inputs)) {
     for (const [year, amount] of byYear) {
@@ -183,8 +204,47 @@ export interface GovShareRow {
   propertyId: string;
   paymentYear: number;
   tenantAmount: number; // the whole projected payment attributable to the leased land
-  landownerAmount: number; // tenantAmount x gov_payment_share_pct / 100
+  landownerAmount: number; // tenantAmount x share / 100 (0 when the tenant retains all)
   sharePct: number;
+  treatment: GovPaymentTreatment;
+  receivedVia: GovPaymentReceivedVia | null;
+  // A generated expected row already carries this lease-year (tenant
+  // remits): views count the row, not this projection.
+  generated: boolean;
+}
+
+// Generated government-share expected rows keyed lease|paymentYear.
+function generatedGovKeys(inputs: IncomeInputs): Set<string> {
+  const keys = new Set<string>();
+  for (const e of inputs.expected) {
+    if (e.lease_id && isGovShareLabel(e.label)) keys.add(`${e.lease_id}|${e.year}`);
+  }
+  return keys;
+}
+
+// Ids of generated government-share rows (payments recorded against
+// them are received government income).
+function govExpectedIds(inputs: IncomeInputs): Set<string> {
+  return new Set(inputs.expected.filter((e) => e.lease_id && isGovShareLabel(e.label)).map((e) => e.id));
+}
+
+// The landowner's projected share per PROGRAM year for one lease over
+// its term: the input generateLeasePayments needs for tenant-remitted
+// shares. Payment year = program year + 1.
+export function govShareByYearForLease(inputs: IncomeInputs, leaseId: string): Map<number, number> {
+  const out = new Map<number, number>();
+  const lease = inputs.leases.find((l) => l.id === leaseId);
+  if (!lease || !lease.start_date || !lease.end_date) return out;
+  const startYear = Number(lease.start_date.slice(0, 4));
+  const endYear = Number(lease.end_date.slice(0, 4));
+  if (!startYear || !endYear || endYear < startYear || endYear - startYear > 50) return out;
+  for (let programYear = startYear; programYear <= endYear; programYear++) {
+    const total = govShareRows(inputs, programYear + 1)
+      .filter((r) => r.leaseId === leaseId)
+      .reduce((s, r) => s + r.landownerAmount, 0);
+    if (total > 0) out.set(programYear, Math.round(total * 100) / 100);
+  }
+  return out;
 }
 
 // For one PAYMENT year: each active crop share / flex lease's share of the
@@ -194,6 +254,7 @@ export interface GovShareRow {
 // property acreage figure take the whole property allocation.
 export function govShareRows(inputs: IncomeInputs, paymentYear: number): GovShareRow[] {
   if (!inputs.gov || inputs.gov.farms.length === 0) return [];
+  const generatedKeys = generatedGovKeys(inputs);
   const projection = projectForPaymentYear(inputs.gov, paymentYear);
   if (projection.netByProperty.size === 0) return [];
   const acresOf = new Map((inputs.propertyAcres ?? []).map((p) => [p.id, p.acres ?? 0]));
@@ -205,7 +266,9 @@ export function govShareRows(inputs: IncomeInputs, paymentYear: number): GovShar
     const endYear = Number((lease.end_date ?? "").slice(0, 4));
     if (startYear && paymentYear < startYear) continue;
     if (endYear && paymentYear > endYear) continue;
-    const sharePct = Number(lease.terms?.gov_payment_share_pct ?? 0) || 0;
+    const gov = govPaymentTreatment(lease.terms);
+    const sharePct = gov.sharePct;
+    const generated = generatedKeys.has(`${lease.id}|${paymentYear}`);
     for (const land of inputs.leaseLands.filter((l) => l.lease_id === lease.id)) {
       const propertyNet = projection.netByProperty.get(land.property_id) ?? 0;
       if (propertyNet <= 0) continue;
@@ -223,6 +286,9 @@ export function govShareRows(inputs: IncomeInputs, paymentYear: number): GovShar
         tenantAmount,
         landownerAmount: Math.round(tenantAmount * sharePct) / 100,
         sharePct,
+        treatment: gov.treatment,
+        receivedVia: gov.receivedVia,
+        generated,
       });
     }
   }
@@ -266,9 +332,10 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
     return map.get(year)!;
   };
 
+  const govIds = govExpectedIds(inputs);
   for (const year of govYears(inputs)) {
     for (const r of govShareRows(inputs, year)) {
-      if (r.landownerAmount <= 0) continue;
+      if (r.landownerAmount <= 0 || r.generated) continue;
       const totals = get(year);
       totals.expected.government += r.landownerAmount;
       totals.hasProjection = true;
@@ -277,12 +344,16 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
 
   for (const e of effectiveExpectedEntries(inputs)) {
     const totals = get(e.year);
-    totals.expected[typeOf(inputs, e.leaseId, e.timberSaleId)] += e.amount;
+    totals.expected[e.gov ? "government" : typeOf(inputs, e.leaseId, e.timberSaleId)] += e.amount;
     if (e.projection) totals.hasProjection = true;
   }
   for (const p of inputs.payments) {
     const year = Number(p.received_date.slice(0, 4));
-    get(year).received[typeOf(inputs, p.lease_id, p.timber_sale_id)] += p.amount;
+    const type =
+      p.expected_payment_id && govIds.has(p.expected_payment_id)
+        ? "government"
+        : typeOf(inputs, p.lease_id, p.timber_sale_id);
+    get(year).received[type] += p.amount;
   }
   for (const s of inputs.settlements) {
     const year = Number(s.settlement_date.slice(0, 4));
@@ -385,7 +456,7 @@ export function allocateToProperties(
     spread(e.leaseId, e.timberSaleId, "expected", e.amount);
   }
   for (const r of govShareRows(inputs, year)) {
-    if (r.landownerAmount > 0) add(r.propertyId, "expected", r.landownerAmount);
+    if (r.landownerAmount > 0 && !r.generated) add(r.propertyId, "expected", r.landownerAmount);
   }
   for (const p of inputs.payments) {
     if (Number(p.received_date.slice(0, 4)) !== year) continue;
@@ -441,10 +512,10 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     supabase.from("lease_lands").select("lease_id, property_id, leased_acres"),
     supabase
       .from("expected_payments")
-      .select("id, lease_id, timber_sale_id, year, expected_amount"),
+      .select("id, lease_id, timber_sale_id, year, expected_amount, label"),
     supabase
       .from("payments")
-      .select("lease_id, timber_sale_id, amount, received_date"),
+      .select("lease_id, timber_sale_id, amount, received_date, expected_payment_id"),
     supabase
       .from("timber_settlements")
       .select("timber_sale_id, settlement_date, total_amount"),

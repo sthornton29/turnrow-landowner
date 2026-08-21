@@ -45,3 +45,17 @@ Deeds, plats, and legal descriptions offer **Plot boundary**: the app reads the 
 - **Photos of a well or barn?** Asset pages have an Add photos button for gallery photos; those are stored as-is without reading.
 - **Can I rename a file?** Give it a title; the original file name stays.
 - **Who can see my documents?** Only members of your organization.
+
+## A plotted boundary landed in the wrong place
+
+See "Why did my plot land in the wrong place?" under Plotting a boundary from a deed. In short: the survey (principal meridian) now comes from the county the deed states and is never left open, and the resolved section is checked against that county before you can save, with one-tap retries for a flipped direction letter or the other survey.
+
+## How the description match works
+
+When a deed or plat carries a section, township, and range, the upload reads those fields exactly as printed, pins the principal meridian from the county the deed names, looks up the section from the BLM PLSS service, and checks that the section really sits in that county. If it does, the described tract is laid over your boundaries and the confirm screen shows "Evidence from the description": which property it overlaps and how much of the described land falls inside it. That overlap is the strongest match there is, so those properties come pre-checked.
+
+Two things to know:
+
+- If the county check fails (the section resolved somewhere else), the description is not used for matching and the screen says so. Open Plot boundary to correct the township or range direction.
+- If a parcel or farm number points to one property and the description overlaps another, both are listed with their evidence and nothing is pre-checked. You pick.
+

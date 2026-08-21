@@ -12,6 +12,11 @@ import {
   type PriceMethod,
   type RentStructure,
   type SchedulePayment,
+  GOV_RECEIVED_VIA_LABELS,
+  GOV_TREATMENT_LABELS,
+  govPaymentTreatment,
+  type GovPaymentReceivedVia,
+  type GovPaymentTreatment
 } from "@/lib/leaseLogic";
 import {
   matchLeaseLand,
@@ -36,6 +41,10 @@ export interface LeasePrefill {
   leased_acres_total?: number | null;
   price_method?: PriceMethod | null;
   pricing_clause?: string | null;
+  gov_payment_clause?: string | null;
+  gov_payment_treatment?: GovPaymentTreatment | null;
+  gov_payment_share_pct?: number | null;
+  gov_payment_received_via?: GovPaymentReceivedVia | null;
 }
 
 // One row of the Leased land section: a lease can cover several
@@ -126,7 +135,20 @@ export default function LeaseForm({
     // top level; fold them into terms where they live.
     ...(!lease && prefill?.price_method ? { price_method: prefill.price_method } : {}),
     ...(!lease && prefill?.pricing_clause ? { pricing_clause: prefill.pricing_clause } : {}),
+    ...(!lease && prefill?.gov_payment_clause ? { gov_payment_clause: prefill.gov_payment_clause } : {}),
+    ...(!lease && prefill?.gov_payment_treatment ? { gov_payment_treatment: prefill.gov_payment_treatment } : {}),
+    ...(!lease && prefill?.gov_payment_share_pct != null ? { gov_payment_share_pct: prefill.gov_payment_share_pct } : {}),
+    ...(!lease && prefill?.gov_payment_received_via ? { gov_payment_received_via: prefill.gov_payment_received_via } : {}),
+    // Existing leases saved before the explicit choice: preselect the
+    // migration default and say so (saved only when the user saves).
+    ...(lease && !lease.terms?.gov_payment_treatment
+      ? { gov_payment_treatment: govPaymentTreatment(lease.terms).treatment }
+      : {}),
   }));
+  const [govMigrated, setGovMigrated] = useState<boolean>(
+    !!lease && !lease.terms?.gov_payment_treatment &&
+      (lease.rent_structure === "flex" || lease.rent_structure === "crop_share")
+  );
   const [schedule, setSchedule] = useState<SchedulePayment[]>(
     lease?.payment_schedule?.length
       ? lease.payment_schedule
@@ -193,6 +215,21 @@ export default function LeaseForm({
   async function save() {
     setBusy(true);
     setError(null);
+    if (
+      leaseType === "agricultural" &&
+      (rentStructure === "flex" || rentStructure === "crop_share")
+    ) {
+      if (!terms.gov_payment_treatment) {
+        setError("Choose how government payments are treated (landowner share or tenant retains all).");
+        setBusy(false);
+        return;
+      }
+      if (terms.gov_payment_treatment === "landowner_share" && !terms.gov_payment_received_via) {
+        setError("Choose how your government payment share is received (FSA directly or tenant remits).");
+        setBusy(false);
+        return;
+      }
+    }
 
     let finalTenantId = tenantId;
     if (tenantId === "__new__") {
@@ -506,25 +543,6 @@ export default function LeaseForm({
                   Projections use a bonus estimate you enter per year on the lease page.
                 </p>
               </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Government payment share (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min={0}
-                  max={100}
-                  value={terms.gov_payment_share_pct ?? ""}
-                  onChange={(e) => setTerm("gov_payment_share_pct", num(e.target.value))}
-                  placeholder="0"
-                  className={inputClass}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Share of ARC/PLC payments on the leased base acres that comes to
-                  you under this lease. Most leases leave them with the operator (0).
-                </p>
-              </div>
             </div>
           ) : null}
 
@@ -565,31 +583,97 @@ export default function LeaseForm({
                     onChange={(e) => setTerm("expense_share_pct", num(e.target.value))}
                     className={inputClass + ring("expense_share_pct")}
                   />
-                              <div className="sm:col-span-3">
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Government payment share (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min={0}
-                  max={100}
-                  value={terms.gov_payment_share_pct ?? ""}
-                  onChange={(e) => setTerm("gov_payment_share_pct", num(e.target.value))}
-                  placeholder="0"
-                  className={inputClass}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Share of ARC/PLC payments on the leased base acres that comes to
-                  you under this lease. Most leases leave them with the operator (0).
-                </p>
-              </div>
             </div>
               ) : null}
               <p className="text-xs text-gray-500 sm:col-span-3">
                 Projections use per-year assumptions (crop, acres, yield, price, shared
                 expenses) you enter on the lease page.
               </p>
+            </div>
+          ) : null}
+
+          {/* Government payments (ARC/PLC on the leased base acres): an
+              explicit choice, never a defaulted percentage. */}
+          {rentStructure === "flex" || rentStructure === "crop_share" ? (
+            <div className="space-y-2 border-t border-gray-200 pt-2">
+              <p className="text-sm font-medium text-gray-700">
+                Government payments (ARC/PLC) <span className="text-red-600">*</span>
+              </p>
+              {govMigrated ? (
+                <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                  This lease was saved before this choice existed; the selection below is a best guess from its old share percent. Confirm it and save.
+                </p>
+              ) : null}
+              <div className={"space-y-1.5 rounded-lg border p-2.5" + (isUnsure("gov_payment_treatment") ? " border-amber-400 ring-2 ring-amber-100" : " border-gray-200")}>
+                {(Object.keys(GOV_TREATMENT_LABELS) as GovPaymentTreatment[]).map((opt) => (
+                  <label key={opt} className="flex cursor-pointer items-start gap-2 text-sm text-gray-800">
+                    <input
+                      type="radio"
+                      name="gov_payment_treatment"
+                      checked={terms.gov_payment_treatment === opt}
+                      onChange={() => {
+                        setTerms((t) => ({
+                          ...t,
+                          gov_payment_treatment: opt,
+                          // Landowner share prefills from the crop share percent.
+                          gov_payment_share_pct:
+                            opt === "landowner_share"
+                              ? (t.gov_payment_share_pct ?? (rentStructure === "crop_share" ? (t.landowner_share_pct ?? null) : null))
+                              : null,
+                          gov_payment_received_via: opt === "landowner_share" ? (t.gov_payment_received_via ?? null) : null,
+                        }));
+                        setGovMigrated(false);
+                      }}
+                      className="mt-0.5 accent-kelly-500"
+                    />
+                    <span>{GOV_TREATMENT_LABELS[opt]}</span>
+                  </label>
+                ))}
+              </div>
+              {terms.gov_payment_treatment === "landowner_share" ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Your share (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={100}
+                      value={terms.gov_payment_share_pct ?? ""}
+                      onChange={(e) => setTerm("gov_payment_share_pct", num(e.target.value))}
+                      className={inputClass + ring("gov_payment_share_pct")}
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Prefilled from the crop share percent; edit if the lease says otherwise.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="mb-1 block text-sm font-medium text-gray-700">Received via</p>
+                    <div className={"space-y-1.5 rounded-lg border p-2.5" + (isUnsure("gov_payment_received_via") ? " border-amber-400 ring-2 ring-amber-100" : " border-gray-200")}>
+                      {(Object.keys(GOV_RECEIVED_VIA_LABELS) as GovPaymentReceivedVia[]).map((opt) => (
+                        <label key={opt} className="flex cursor-pointer items-start gap-2 text-sm text-gray-800">
+                          <input
+                            type="radio"
+                            name="gov_payment_received_via"
+                            checked={terms.gov_payment_received_via === opt}
+                            onChange={() => setTerm("gov_payment_received_via", opt)}
+                            className="mt-0.5 accent-kelly-500"
+                          />
+                          <span>{GOV_RECEIVED_VIA_LABELS[opt]}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      FSA-direct money is never expected in a tenant check; a tenant-remitted share becomes an expected payment due each October.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+              {terms.gov_payment_clause ? (
+                <p className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600">
+                  From the lease: {terms.gov_payment_clause}
+                </p>
+              ) : null}
             </div>
           ) : null}
 

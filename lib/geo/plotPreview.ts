@@ -5,6 +5,7 @@
 import type { Feature, Geometry, MultiPolygon, Polygon, Position } from "geojson";
 import turfUnion from "@turf/union";
 import { toMultiPolygon } from "./normalize";
+import type { AliquotPart, AliquotToken } from "./aliquot";
 
 export type ClosureGrade = "good" | "fair" | "poor" | "closed";
 
@@ -100,4 +101,59 @@ export function cornerLabel(coord: [number, number], centroid: [number, number])
   const ns = coord[1] >= centroid[1] ? "N" : "S";
   const ew = coord[0] >= centroid[0] ? "E" : "W";
   return `${ns}${ew} corner`;
+}
+
+// ---------------------------------------------------------------- gates
+
+// A resolution farther than this from every boundary the org already
+// has gets a prominent warning (new land exists; a wrong meridian or a
+// flipped direction is far likelier). One constant, one place.
+export const PLOT_DISTANCE_WARN_MILES = 25;
+
+export function haversineMiles(a: [number, number], b: [number, number]): number {
+  const R = 3958.7613;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b[1] - a[1]);
+  const dLon = toRad(b[0] - a[0]);
+  const la1 = toRad(a[1]);
+  const la2 = toRad(b[1]);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Nearest vertex of any named boundary to a point, in miles.
+export function nearestBoundary(
+  point: [number, number],
+  items: Array<{ name: string; geometry: Geometry | null | undefined }>
+): { name: string; miles: number } | null {
+  let best: { name: string; miles: number } | null = null;
+  for (const item of items) {
+    for (const v of vertices(item.geometry)) {
+      const miles = haversineMiles(point, v as [number, number]);
+      if (!best || miles < best.miles) best = { name: item.name, miles };
+    }
+  }
+  return best ? { name: best.name, miles: Math.round(best.miles * 10) / 10 } : null;
+}
+
+// ---------------------------------------------------------------- chain text
+
+export const ALIQUOT_TOKENS: AliquotToken[] = ["NE", "NW", "SE", "SW", "N", "S", "E", "W"];
+
+export function tokenLabel(tok: AliquotToken): string {
+  return tok.length === 2 ? `${tok}1/4` : `${tok}1/2`;
+}
+
+// Smallest-first chain -> "NW1/4 of SE1/4"; several parts joined by and.
+export function partsToText(parts: AliquotPart[]): string {
+  return parts
+    .filter((p) => p.length > 0)
+    .map((p) => p.map(tokenLabel).join(" of "))
+    .join(" and ");
+}
+
+// Largest-first reading of a chain for display: "SE1/4, then its NW1/4".
+export function chainLargestFirst(part: AliquotPart): AliquotToken[] {
+  return [...part].reverse();
 }

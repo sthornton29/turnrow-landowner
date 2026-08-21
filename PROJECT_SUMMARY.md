@@ -18,7 +18,9 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
    0022_assistant.sql, 0023_document_properties.sql,
    0024_unfiled_documents.sql, 0025_storage_limits.sql, and
-   0026_storage_bucket_unlimited.sql in Supabase, in that order, BEFORE
+   0026_storage_bucket_unlimited.sql, and
+   0027_match_boundaries.sql (the match_boundaries overlap RPC behind the
+   intake's spatial matching; SECURITY INVOKER, RLS applies) in Supabase, in that order, BEFORE
    the deploy goes live (the Documents page reads documents.doc_type and
    the government payments pages read the fsa_* tables; a deploy without
    the migrations breaks those pages). All seven were run on 2026-08-20.
@@ -256,6 +258,36 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  SPATIAL PROPERTY MATCHING (migration 0027): the intake tool also
+  returns a structured plss_reference (county, state, meridian hint,
+  township number + N/S, range number + E/W, section, aliquot text,
+  exceptions) and an mb_anchor for metes and bounds. After the AI pass
+  the route resolves it server-side through lib/plssResolve.ts (the
+  same engine as the plot screen: meridian pinned from the deed's
+  county via lib/plssMeridians, BLM CadNSDI section layer with the
+  plss_cache, aliquot subdivision or the whole section when the text is
+  not an aliquot, and the TIGERweb county gate; a county mismatch
+  returns no polygon with the note "resolved to X County, the deed says
+  Y"; time-boxed to about 12 s; never throws) and intersects the
+  described polygon with the caller's boundaries through the
+  match_boundaries RPC on the SESSION client (overlap acres, percent of
+  the described area, percent of the boundary; RLS applies). Failures
+  attach notes only and the name/number signals stand. Scoring
+  (lib/documentMatch.ts spatialSuggestions, unit tested in
+  documentMatchSpatial.test.ts): an overlap is shown ONLY when the
+  intersection actually computed; >= 50% of the described area scores
+  80, 5% to 50% scores 60, parcels map to their property without double
+  counting; the why line reads "describes land in Sec 12, T4S R8W,
+  Huntsville PM, overlapping River Place (94% of described area)".
+  verifyMatches now returns preselect + conflict: every overlapping
+  property (>= 5%) is pre-checked alongside confident signals, but when
+  a parcel/FSA number names one property and the description overlaps
+  only another, both are listed with their evidence and NOTHING is
+  pre-checked (conflict). The confirm screen shows an "Evidence from
+  the description" block (reference label, county check result,
+  described acres, each overlap line, a small static map chip of the
+  described tract when the URL fits) in green, amber on conflict, red
+  when the county gate failed.
   LARGE DOCUMENTS AND 156EZ PACKETS (migrations 0025 + 0026): the
   documents bucket has no size cap of its own (the dashboard's
   project-wide Storage limit is the single control, see the deploy
@@ -650,6 +682,37 @@ limits, Barchart futures, and SCO dropped):
   file is served, not_found shape), POST /api/gov/mya-estimate (the
   blend for display; persists mya_price_estimate only for platform
   admins and never over a manual or final value).
+- GOVERNMENT PAYMENT TREATMENT ON SHARE AND FLEX LEASES (explicit, not
+  a defaulted percent; jsonb only, no migration): LeaseTerms carries
+  gov_payment_treatment (landowner_share | tenant_retains, REQUIRED by
+  the lease form on crop share and flex), gov_payment_share_pct
+  (prefilled from landowner_share_pct when the landowner share is
+  chosen, editable), gov_payment_received_via (fsa_direct |
+  tenant_remits, required with landowner_share), and
+  gov_payment_clause (verbatim from extraction). govPaymentTreatment()
+  in lib/leaseLogic.ts resolves older leases in-app: a nonzero share
+  reads as landowner_share (received via unknown, flagged "confirm"),
+  otherwise tenant_retains, both flagged not yet chosen until saved;
+  the lease form preselects that default with a note. EXPECTED ROWS:
+  generateLeasePayments(lease, acres, assumptions, govShareByProgramYear)
+  adds "Government payment share (program year Y)" rows due Y+1-10-01
+  ONLY for landowner_share + tenant_remits (the lease page loads the
+  amounts through govShareByYearForLease on the income engine); FSA
+  direct and tenant retains never generate rows, so the rent-upload
+  matcher never expects FSA money in a tenant check (RentUpload shows
+  "FSA pays the government share directly; not expected in tenant
+  checks" on such leases). lib/income.ts types generated gov rows as
+  IncomeType "government" by their label (never blocking the rent
+  projection for that year), skips the projection for a lease-year
+  that has a generated gov row, and counts payments recorded against a
+  gov row as received government income; govShareRows carries
+  treatment/receivedVia/generated. The lease AI extraction proposes
+  gov_payment_clause/treatment/share/received_via (amber, reviewed).
+  Lease detail pages and /gov-payments show the treatment per lease in
+  a plain sentence; the informational "generates about $X/yr to your
+  tenant" line shows only when every share lease leaves the payments
+  with the tenant; the Income page labels FSA-direct shares "paid by
+  FSA directly".
 - Leases: LeaseTerms.gov_payment_share_pct (jsonb only, default 0) on
   crop share and flex terms, edited on the lease form.
 

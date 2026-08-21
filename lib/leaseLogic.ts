@@ -51,6 +51,18 @@ export interface PriceRecipe {
   expression: string;
 }
 
+export type GovPaymentTreatment = "landowner_share" | "tenant_retains";
+export type GovPaymentReceivedVia = "fsa_direct" | "tenant_remits";
+
+export const GOV_TREATMENT_LABELS: Record<GovPaymentTreatment, string> = {
+  landowner_share: "Landowner receives a share of government payments",
+  tenant_retains: "Tenant retains all government payments",
+};
+export const GOV_RECEIVED_VIA_LABELS: Record<GovPaymentReceivedVia, string> = {
+  fsa_direct: "FSA pays me directly (I am a party on the farm record)",
+  tenant_remits: "Tenant remits my share",
+};
+
 export interface LeaseTerms {
   // cash
   cash_basis?: "per_acre" | "lump_sum" | null;
@@ -68,16 +80,85 @@ export interface LeaseTerms {
   rma_config?: RmaBenchmarkConfig[] | null;
   custom_recipe?: PriceRecipe | null;
   pricing_clause?: string | null; // verbatim clause from extraction, prefills recipe setup
-  // Share (0-100) of the tenant's ARC/PLC payments on the leased base acres
-  // that flows to the landowner under the lease. Default 0: most leases
-  // leave program payments with the operator; the figure still shows as
-  // informational on the Government Payments page.
+  // Government payments (ARC/PLC on the leased base acres) are an
+  // EXPLICIT choice on crop share and flex leases: the landowner
+  // receives a share (percent, prefilled from the crop share) or the
+  // tenant retains all. When the landowner receives a share, how it
+  // arrives matters for payment matching: FSA pays the landowner
+  // directly (never expected in a tenant check) or the tenant remits it
+  // (an expected payment the rent upload can match).
+  gov_payment_treatment?: GovPaymentTreatment | null;
   gov_payment_share_pct?: number | null;
+  gov_payment_received_via?: GovPaymentReceivedVia | null;
+  gov_payment_clause?: string | null; // verbatim clause from extraction
   // hunting
   hunt_basis?: "lump_sum" | "per_acre" | null;
   amount?: number | null;
   hunt_rate_per_acre?: number | null;
   insurance_required?: boolean | null;
+}
+
+export interface ResolvedGovTreatment {
+  treatment: GovPaymentTreatment;
+  sharePct: number; // 0 when the tenant retains all
+  receivedVia: GovPaymentReceivedVia | null;
+  chosen: boolean; // false = migrated default, not yet confirmed by the user
+  needsReceivedVia: boolean; // landowner share chosen but how it arrives is unknown
+}
+
+// Resolves the explicit treatment with the in-app migration rule for
+// leases saved before the choice existed: a nonzero share means the
+// landowner receives a share (how it arrives unknown), otherwise the
+// tenant retains all; either way flagged as not chosen until saved.
+export function govPaymentTreatment(terms: LeaseTerms | null | undefined): ResolvedGovTreatment {
+  const t = terms ?? {};
+  const pct = Number(t.gov_payment_share_pct ?? 0) || 0;
+  if (t.gov_payment_treatment === "landowner_share") {
+    return {
+      treatment: "landowner_share",
+      sharePct: pct,
+      receivedVia: t.gov_payment_received_via ?? null,
+      chosen: true,
+      needsReceivedVia: !t.gov_payment_received_via,
+    };
+  }
+  if (t.gov_payment_treatment === "tenant_retains") {
+    return { treatment: "tenant_retains", sharePct: 0, receivedVia: null, chosen: true, needsReceivedVia: false };
+  }
+  if (pct > 0) {
+    return {
+      treatment: "landowner_share",
+      sharePct: pct,
+      receivedVia: t.gov_payment_received_via ?? null,
+      chosen: false,
+      needsReceivedVia: !t.gov_payment_received_via,
+    };
+  }
+  return { treatment: "tenant_retains", sharePct: 0, receivedVia: null, chosen: false, needsReceivedVia: false };
+}
+
+// Plain sentence for lease pages and the Government Payments page.
+export function govTreatmentSentence(terms: LeaseTerms | null | undefined): string {
+  const r = govPaymentTreatment(terms);
+  if (!r.chosen && r.treatment === "tenant_retains") return "Government payments: not chosen yet";
+  if (r.treatment === "tenant_retains") return "Tenant keeps all government payments";
+  const via =
+    r.receivedVia === "fsa_direct"
+      ? ", paid to you by FSA directly"
+      : r.receivedVia === "tenant_remits"
+        ? ", remitted by the tenant"
+        : " (confirm how it is received)";
+  return `You receive ${r.sharePct}% of ARC/PLC payments on this land${via}${r.chosen ? "" : " (confirm)"}`;
+}
+
+// Expected-payment rows for the government share carry this label
+// prefix so income views and the rent upload recognize them.
+export const GOV_SHARE_LABEL_PREFIX = "Government payment share";
+export function isGovShareLabel(label: string | null | undefined): boolean {
+  return (label ?? "").startsWith(GOV_SHARE_LABEL_PREFIX);
+}
+export function govShareLabel(programYear: number): string {
+  return `${GOV_SHARE_LABEL_PREFIX} (program year ${programYear})`;
 }
 
 // One entry of a lease payment schedule (1 to 4 per year). Either percent
@@ -244,10 +325,17 @@ function isoDate(year: number, month: number, day: number): string {
 
 // Expected payment rows for every year of the lease term. The caller diffs
 // these against existing rows (never touching rows that have payments).
+// govShareByProgramYear: the landowner's projected share per PROGRAM
+// year (from lib/income.ts govShareByYearForLease). A row is generated
+// ONLY when the landowner receives a share AND the tenant remits it; it
+// lands in the PAYMENT year (program year + 1, due October 1), the date
+// FSA money reaches the operator. FSA-direct shares never become rows:
+// that money is not expected in a tenant check.
 export function generateLeasePayments(
   lease: LeaseLike,
   totalLeasedAcres: number,
-  assumptionsByYear: Map<number, YearAssumptions>
+  assumptionsByYear: Map<number, YearAssumptions>,
+  govShareByProgramYear?: Map<number, number> | null
 ): GeneratedPayment[] {
   if (!lease.start_date || !lease.end_date) return [];
   const startYear = Number(lease.start_date.slice(0, 4));
@@ -277,6 +365,24 @@ export function generateLeasePayments(
         year,
         label: p.label || "Payment",
         due_date: isoDate(year, p.month, p.day),
+        expected_amount: amount,
+      });
+    }
+  }
+  const gov = govPaymentTreatment(lease.terms);
+  if (
+    govShareByProgramYear &&
+    gov.treatment === "landowner_share" &&
+    gov.receivedVia === "tenant_remits" &&
+    (lease.rent_structure === "crop_share" || lease.rent_structure === "flex")
+  ) {
+    for (let year = startYear; year <= endYear; year++) {
+      const amount = Math.round((govShareByProgramYear.get(year) ?? 0) * 100) / 100;
+      if (!(amount > 0)) continue;
+      rows.push({
+        year: year + 1,
+        label: govShareLabel(year),
+        due_date: `${year + 1}-10-01`,
         expected_amount: amount,
       });
     }

@@ -27,6 +27,9 @@ These are estimates. FSA determines actual payments after the marketing year clo
 
 ## Leases and income
 
+Each crop share or flex lease states its treatment plainly on this page and on the lease page: you receive a share (with the percent and whether FSA or the tenant pays it) or the tenant keeps all. The line "base acres on this land generate about $X per year to your tenant" shows only when every lease leaves the payments with the tenant.
+
+
 Crop share and flex leases carry a **Government payment share percent**. When it is above zero, your share flows into Income as a Government payments line in the payment year. At zero, Income is unchanged and this page still shows "base acres on this land generate approximately this much per year to your tenant."
 
 ## Common questions

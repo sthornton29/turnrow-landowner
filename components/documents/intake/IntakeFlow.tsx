@@ -192,15 +192,18 @@ export default function IntakeFlow({
       parcels,
       entities,
       r.matched_entity,
-      propertyEntity
+      propertyEntity,
+      r.spatial ?? null
     );
     setResult(r);
     setVerified(v);
     const kind = scanKindFor(r.doc_type);
     const base = emptyDraft(context);
-    const confident = v.verified.filter((s) => s.score >= 50).map((s) => s.propertyId);
-    // Context wins silently when the AI agrees or found nothing; with
-    // no context the verified matches are pre-checked.
+    // verifyMatches decides what is pre-checked: confident signals,
+    // every overlapping property from the description, and NOTHING when
+    // the signals conflict. Context wins silently when the AI agrees or
+    // found nothing.
+    const confident = v.preselect;
     const propertyIds = context
       ? base.propertyIds
       : confident;
@@ -403,6 +406,8 @@ export default function IntakeFlow({
                 onChange={changeDraft}
                 properties={selectable}
                 suggestions={suggestions}
+                spatial={result.spatial ?? null}
+                conflict={verified?.conflict ?? false}
                 entityWhy={entityMatch?.why ?? null}
                 entityName={entityMatch?.name ?? null}
                 context={context}
