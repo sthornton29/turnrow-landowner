@@ -283,6 +283,26 @@ export interface DocumentRow {
   produced_boundary_type: string | null;
   produced_boundary_id: string | null;
   search_text: string | null;
+  // Document pages (migration 0028): notes, the one-time title review
+  // flag, extraction dates, and updated_at.
+  notes: string | null;
+  title_reviewed: boolean;
+  extraction_history: Array<{ at: string; kind: string }>;
+  updated_at: string;
+}
+
+// A superseded file kept when Replace file runs (migration 0028).
+export interface DocumentVersionRow {
+  id: string;
+  organization_id: string;
+  document_id: string;
+  storage_path: string;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string | null;
+  uploaded_at: string | null;
+  replaced_at: string;
 }
 
 // A document can apply to several properties (migration 0023);
@@ -293,6 +313,7 @@ export interface DocumentPropertyRow {
   document_id: string;
   property_id: string;
   created_at: string;
+  evidence: string | null; // why the AI attached it (migration 0028)
 }
 
 // Every entity that can appear on the map or carry documents.

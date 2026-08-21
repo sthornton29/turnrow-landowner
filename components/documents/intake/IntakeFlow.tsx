@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { scanKindFor, type DocType } from "@/lib/documents";
+import { proposeTitle } from "@/lib/documentTitle";
 import {
   verifyMatches,
   type MatchableEntity,
@@ -296,15 +297,32 @@ export default function IntakeFlow({
       entityType = "entity";
       entityId = entityMatch.id;
     }
+    // Title: the user's, else the AI's, else the pattern title built
+    // from the reviewed fields (never a raw file name).
+    const firstPropertyName = properties.find((p) => p.id === propertyIds[0])?.name ?? null;
+    const title =
+      draft.title.trim() ||
+      proposeTitle(draft.docType, extracted, file.name, {
+        uploadedAt: new Date().toISOString(),
+        propertyName: firstPropertyName,
+      });
+    // Why each AI-matched property was attached, kept on the link.
+    const evidence: Record<string, string> = {};
+    for (const sug of suggestions) {
+      if (propertyIds.includes(sug.propertyId) && sug.reasons.length > 0) {
+        evidence[sug.propertyId] = sug.reasons.join("; ");
+      }
+    }
     const res = await uploadDocument(supabase, {
       orgId,
       entityType,
       entityId,
       file,
       docType: draft.docType,
-      title: draft.title.trim() || null,
+      title,
       aiSuggestedType: result?.doc_type ?? null,
       propertyIds,
+      evidence,
       extracted,
       storagePath: uploadedPathRef.current,
     });
@@ -320,7 +338,7 @@ export default function IntakeFlow({
       extracted,
       storagePath: (path.data?.storage_path as string) ?? "",
       propertyId: propertyIds[0] ?? null,
-      title: draft.title.trim() || file.name,
+      title,
     });
     setStep("saved");
     onSaved(res.id);

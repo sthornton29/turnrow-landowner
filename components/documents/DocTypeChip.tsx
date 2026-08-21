@@ -3,7 +3,7 @@
 import { DOC_TYPE_GROUP, DOC_TYPE_LABELS, type DocType } from "@/lib/documents";
 
 // Small colored chip naming a document's type; color by taxonomy group.
-const GROUP_CLASS: Record<string, string> = {
+export const GROUP_CLASS: Record<string, string> = {
   title: "bg-amber-50 text-amber-800 border-amber-200",
   survey: "bg-sky-50 text-sky-800 border-sky-200",
   encumbrance: "bg-rose-50 text-rose-800 border-rose-200",

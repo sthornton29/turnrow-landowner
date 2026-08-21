@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Geometry, MultiPolygon, Polygon } from "geojson";
 import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatNumber } from "@/lib/format";
+import { displayTitle } from "@/lib/documentTitle";
 import {
   parseBearing,
   traverse,
@@ -751,7 +752,7 @@ export default function PlotClient({
       <p className="flex flex-wrap items-center gap-1 text-sm text-gray-500">
         <Link href="/documents" className="hover:underline">Documents</Link>
         <span>/</span>
-        <span className="truncate">{doc.title ?? doc.file_name}</span>
+        <Link href={`/documents/${doc.id}`} className="truncate hover:underline">{displayTitle(doc)}</Link>
       </p>
       <h1 className="text-2xl font-semibold text-gray-900">Plot boundary from this document</h1>
 

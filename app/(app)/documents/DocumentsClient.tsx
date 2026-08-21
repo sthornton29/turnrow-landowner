@@ -1,32 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  DOC_GROUPS,
   DOC_GROUP_LABELS,
   DOC_TYPES_BY_GROUP,
   DOC_TYPE_GROUP,
   DOC_TYPE_LABELS,
-  canPlotBoundary,
   extractedHighlights,
   type DocGroup,
   type DocType,
 } from "@/lib/documents";
+import { displayTitle } from "@/lib/documentTitle";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
-import type { MatchableParcel, MatchableProperty } from "@/lib/documentMatch";
-import DocTypeChip from "@/components/documents/DocTypeChip";
-import PropertyMultiSelect from "@/components/documents/PropertyMultiSelect";
-import ScanDocumentButton from "@/components/documents/ScanDocumentButton";
-import { DocTypeSelect } from "@/components/documents/DocTypeSelect";
+import DocumentCard from "@/components/documents/DocumentCard";
 import IntakeFlow from "@/components/documents/intake/IntakeFlow";
-import {
-  deleteDocumentEverywhere,
-  openDocument,
-  removeDocumentFromProperty,
-  setDocumentProperties,
-} from "@/components/documents/classify";
 
 export interface AttachTarget {
   entityType: DocumentEntityType;
@@ -36,18 +26,30 @@ export interface AttachTarget {
   propertyId: string | null;
 }
 
-const inputClass =
-  "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none";
-
-// Property filter value for documents not yet filed to any property.
-const UNFILED_FILTER = "__unfiled";
-
 export interface DocPropertyLink {
   document_id: string;
   property_id: string;
 }
 
-export default function DocumentsClient({
+const inputClass =
+  "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none";
+
+type GroupBy = "none" | "type" | "property";
+
+export default function DocumentsClient(props: Parameters<typeof DocumentsInner>[0]) {
+  // useSearchParams needs a Suspense boundary.
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading documents...</div>}>
+      <DocumentsInner {...props} />
+    </Suspense>
+  );
+}
+
+// ONE organizing system at a time: a recent-first list of cards, search
+// and a property/entity dropdown on top, the taxonomy as a rail (desktop)
+// or chip rows (mobile) that filters, and an optional Group by. Filters
+// live in the URL so Back from a document page restores the view.
+function DocumentsInner({
   orgId,
   docs,
   targets,
@@ -61,64 +63,76 @@ export default function DocumentsClient({
   properties: Array<{ id: string; name: string; entityId: string | null; county: string | null; state: string | null }>;
   entities: Array<{ id: string; name: string }>;
   links: DocPropertyLink[]; // document_properties (migration 0023)
-  // Kept for the page's props shape; the intake flow loads its own
-  // matching context.
-  matchProperties?: MatchableProperty[];
-  matchParcels?: MatchableParcel[];
 }) {
-  const supabase = createClient();
   const router = useRouter();
-  const [propertyFilter, setPropertyFilter] = useState("");
-  const [entityFilter, setEntityFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const q = params.get("q") ?? "";
+  const filter = params.get("filter") ?? ""; // p:<id> | e:<id> | unfiled
+  const group = (params.get("group") ?? "") as DocGroup | "";
+  const type = (params.get("type") ?? "") as DocType | "";
+  const groupBy = (params.get("groupBy") ?? "none") as GroupBy;
   const [uploadOpen, setUploadOpen] = useState(false);
+
+  const setParams = useCallback(
+    (patch: Record<string, string>) => {
+      const next = new URLSearchParams(params.toString());
+      for (const [k, v] of Object.entries(patch)) {
+        if (v) next.set(k, v);
+        else next.delete(k);
+      }
+      const qs = next.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [params, pathname, router]
+  );
 
   const targetByKey = useMemo(() => {
     const m = new Map<string, AttachTarget>();
     for (const t of targets) m.set(`${t.entityType}:${t.id}`, t);
     return m;
   }, [targets]);
-  const propertyEntity = useMemo(
-    () => new Map(properties.map((p) => [p.id, p.entityId])),
-    [properties]
-  );
+  const propertyEntity = useMemo(() => new Map(properties.map((p) => [p.id, p.entityId])), [properties]);
   const propertyName = useMemo(() => new Map(properties.map((p) => [p.id, p.name])), [properties]);
-  // Every property a document applies to: its links plus the property
-  // its primary attachment sits on.
   const linkedProps = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const l of links) m.set(l.document_id, [...(m.get(l.document_id) ?? []), l.property_id]);
     return m;
   }, [links]);
-  const propsFor = (d: DocumentRow): string[] => {
-    const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
-    const ids = new Set(linkedProps.get(d.id) ?? []);
-    if (target?.propertyId) ids.add(target.propertyId);
-    return [...ids];
-  };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  // Every property a document applies to: its links plus the property
+  // its primary attachment sits on.
+  const propsFor = useCallback(
+    (d: DocumentRow): string[] => {
+      const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
+      const ids = new Set(linkedProps.get(d.id) ?? []);
+      if (target?.propertyId) ids.add(target.propertyId);
+      return [...ids];
+    },
+    [targetByKey, linkedProps]
+  );
+  const isUnfiled = (d: DocumentRow) => d.entity_type === "organization" && propsFor(d).length === 0;
+
+  // Search + property/entity filter (the type rail is applied after, so
+  // rail counts reflect these but not themselves).
+  const base = useMemo(() => {
+    const needle = q.trim().toLowerCase();
     return docs.filter((d) => {
       const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
       const docProps = propsFor(d);
-      const unfiled = d.entity_type === "organization" && docProps.length === 0;
-      if (propertyFilter === UNFILED_FILTER) {
-        if (!unfiled) return false;
-      } else if (propertyFilter && !docProps.includes(propertyFilter)) return false;
-      if (entityFilter) {
-        const ok =
-          (d.entity_type === "entity" && d.entity_id === entityFilter) ||
-          docProps.some((pid) => propertyEntity.get(pid) === entityFilter);
+      if (filter === "unfiled") {
+        if (!(d.entity_type === "organization" && docProps.length === 0)) return false;
+      } else if (filter.startsWith("p:")) {
+        if (!docProps.includes(filter.slice(2))) return false;
+      } else if (filter.startsWith("e:")) {
+        const eid = filter.slice(2);
+        const ok = (d.entity_type === "entity" && d.entity_id === eid) || docProps.some((pid) => propertyEntity.get(pid) === eid);
         if (!ok) return false;
       }
-      if (typeFilter && (d.doc_type ?? "other") !== typeFilter) return false;
-      if (q) {
+      if (needle) {
         const hay = [
+          displayTitle(d),
           d.file_name,
-          d.title ?? "",
           d.search_text ?? "",
           target?.label ?? "",
           ...docProps.map((pid) => propertyName.get(pid) ?? ""),
@@ -126,26 +140,106 @@ export default function DocumentsClient({
         ]
           .join(" ")
           .toLowerCase();
-        if (!hay.includes(q)) return false;
+        if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docs, search, propertyFilter, entityFilter, typeFilter, targetByKey, propertyEntity, linkedProps, propertyName]);
+  }, [docs, q, filter, targetByKey, propsFor, propertyEntity, propertyName]);
 
-  const isUnfiled = (d: DocumentRow) => d.entity_type === "organization" && propsFor(d).length === 0;
-  const unfiledDocs = filtered.filter(isUnfiled);
-  const groups = (Object.keys(DOC_TYPES_BY_GROUP) as DocGroup[]).map((g) => ({
-    key: g,
-    label: DOC_GROUP_LABELS[g],
-    docs: filtered.filter(
-      (d) => !isUnfiled(d) && (DOC_TYPE_GROUP[(d.doc_type ?? "other") as DocType] ?? "other") === g
-    ),
-  }));
+  const groupCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const d of base) {
+      const g = DOC_TYPE_GROUP[(d.doc_type ?? "other") as DocType] ?? "other";
+      c[g] = (c[g] ?? 0) + 1;
+    }
+    return c;
+  }, [base]);
+  const typeCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const d of base) {
+      const t = d.doc_type ?? "other";
+      c[t] = (c[t] ?? 0) + 1;
+    }
+    return c;
+  }, [base]);
+
+  const filtered = useMemo(
+    () =>
+      base.filter((d) => {
+        const t = (d.doc_type ?? "other") as DocType;
+        if (type) return t === type;
+        if (group) return (DOC_TYPE_GROUP[t] ?? "other") === group;
+        return true;
+      }),
+    [base, group, type]
+  );
+
+  // Group by: section headers only when chosen.
+  const sections = useMemo((): Array<{ key: string; label: string; docs: DocumentRow[] }> => {
+    if (groupBy === "type") {
+      const m = new Map<string, DocumentRow[]>();
+      for (const d of filtered) {
+        const t = d.doc_type ?? "other";
+        m.set(t, [...(m.get(t) ?? []), d]);
+      }
+      return DOC_GROUPS.flatMap((g) => DOC_TYPES_BY_GROUP[g])
+        .filter((t) => m.has(t))
+        .map((t) => ({ key: t, label: DOC_TYPE_LABELS[t], docs: m.get(t)! }));
+    }
+    if (groupBy === "property") {
+      const m = new Map<string, DocumentRow[]>();
+      const unfiledDocs: DocumentRow[] = [];
+      const other: DocumentRow[] = [];
+      for (const d of filtered) {
+        const ps = propsFor(d);
+        if (ps.length === 0) {
+          (isUnfiled(d) ? unfiledDocs : other).push(d);
+          continue;
+        }
+        for (const p of ps) m.set(p, [...(m.get(p) ?? []), d]);
+      }
+      const out = properties.filter((p) => m.has(p.id)).map((p) => ({ key: p.id, label: p.name, docs: m.get(p.id)! }));
+      if (other.length) out.push({ key: "__other", label: "Not on a property", docs: other });
+      if (unfiledDocs.length) out.push({ key: "__unfiled", label: "Unfiled", docs: unfiledDocs });
+      return out;
+    }
+    return [{ key: "all", label: "", docs: filtered }];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, groupBy, properties, propsFor]);
+
   const untypedCount = docs.filter((d) => (d.doc_type ?? "other") === "other").length;
+  const unreviewedTitles = docs.filter((d) => d.title_reviewed === false).length;
+  const filterName =
+    filter === "unfiled"
+      ? "Unfiled"
+      : filter.startsWith("p:")
+        ? (propertyName.get(filter.slice(2)) ?? "this property")
+        : filter.startsWith("e:")
+          ? (entities.find((e) => e.id === filter.slice(2))?.name ?? "this entity")
+          : null;
+
+  function emptyCopy(): string {
+    if (type) return `No ${DOC_TYPE_LABELS[type]} documents yet. Upload one and Turnrow will read it.`;
+    if (group) return `No ${DOC_GROUP_LABELS[group]} documents yet. Upload one and Turnrow will read it.`;
+    if (q.trim()) return `Nothing matches "${q.trim()}".`;
+    if (filterName) return filter === "unfiled" ? "Nothing is unfiled. Every document has a property." : `Nothing filed to ${filterName} yet.`;
+    return "No documents match.";
+  }
+
+  const railItem = (active: boolean) =>
+    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm " +
+    (active ? "bg-kelly-50 font-semibold text-pine-900" : "text-gray-700 hover:bg-gray-50");
+  const chip = (active: boolean) =>
+    "inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium " +
+    (active ? "border-kelly-500 bg-kelly-50 text-pine-900" : "border-gray-300 bg-white text-gray-700");
+  const count = (n: number | undefined) => (
+    <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">{n ?? 0}</span>
+  );
+
+  const typesInGroup = group ? DOC_TYPES_BY_GROUP[group] : [];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Documents</h1>
@@ -155,6 +249,14 @@ export default function DocumentsClient({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {unreviewedTitles > 0 ? (
+            <Link
+              href="/documents/titles"
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+            >
+              Review {unreviewedTitles} title{unreviewedTitles === 1 ? "" : "s"}
+            </Link>
+          ) : null}
           {untypedCount > 0 ? (
             <Link
               href="/documents/retype"
@@ -172,112 +274,150 @@ export default function DocumentsClient({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+      {/* Search and the one property/entity control. */}
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search names and extracted fields"
-          className={inputClass + " sm:col-span-1"}
+          type="search"
+          value={q}
+          onChange={(e) => setParams({ q: e.target.value })}
+          placeholder="Search titles, extracted fields, and file names"
+          className={inputClass + " sm:flex-1"}
         />
-        <select value={propertyFilter} onChange={(e) => setPropertyFilter(e.target.value)} className={inputClass}>
+        <select value={filter} onChange={(e) => setParams({ filter: e.target.value })} className={inputClass + " sm:w-56"}>
           <option value="">All properties</option>
-          <option value={UNFILED_FILTER}>Unfiled</option>
-          {properties.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-        {entities.length > 0 ? (
-          <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className={inputClass}>
-            <option value="">All entities</option>
-            {entities.map((e) => (
-              <option key={e.id} value={e.id}>{e.name}</option>
+          <option value="unfiled">Unfiled</option>
+          <optgroup label="Properties">
+            {properties.map((p) => (
+              <option key={p.id} value={`p:${p.id}`}>{p.name}</option>
             ))}
-          </select>
-        ) : <span className="hidden sm:block" />}
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={inputClass}>
-          <option value="">All types</option>
-          {(Object.keys(DOC_TYPES_BY_GROUP) as DocGroup[]).map((g) => (
-            <optgroup key={g} label={DOC_GROUP_LABELS[g]}>
-              {DOC_TYPES_BY_GROUP[g].map((t) => (
-                <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
+          </optgroup>
+          {entities.length > 0 ? (
+            <optgroup label="Entities">
+              {entities.map((e) => (
+                <option key={e.id} value={`e:${e.id}`}>{e.name}</option>
               ))}
             </optgroup>
-          ))}
+          ) : null}
         </select>
       </div>
 
-      {docs.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
-          <p className="text-sm font-medium text-gray-800">No documents yet</p>
-          <p className="mt-1 text-xs text-gray-500">
-            Upload a deed, survey, or FSA-156EZ here, or from any property, lease, or sale page.
-          </p>
-        </div>
-      ) : null}
-
-      {unfiledDocs.length > 0 ? (
-        <section className="rounded-xl border border-amber-200 bg-white">
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-              <span className="h-2 w-2 rounded-full bg-amber-400" />
-              Unfiled
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
-                {unfiledDocs.length}
-              </span>
-            </span>
-            <span className="text-xs text-gray-500">Not yet assigned to a property. Use Edit properties on a row.</span>
-          </div>
-          <ul className="divide-y divide-gray-100 border-t border-gray-100">
-            {unfiledDocs.map((d) => (
-              <DocumentRowView
-                key={d.id}
-                doc={d}
-                target={null}
-                propertyIds={[]}
-                properties={properties}
-                filterPropertyId={null}
-                onChanged={() => router.refresh()}
-              />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {groups.map((g) => (
-        <section key={g.key} className="rounded-xl border border-gray-200 bg-white">
-          <button
-            onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !c[g.key] }))}
-            className="flex w-full items-center justify-between px-4 py-3 text-left"
-          >
-            <span className="text-sm font-semibold text-gray-900">
-              {g.label}
-              <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                {g.docs.length}
-              </span>
-            </span>
-            <span className="text-xs text-gray-400">{collapsed[g.key] ? "Show" : "Hide"}</span>
+      {/* Mobile: group chips, then the selected group's type chips. */}
+      <div className="space-y-2 md:hidden">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button className={chip(!group)} onClick={() => setParams({ group: "", type: "" })}>
+            All {count(base.length)}
           </button>
-          {!collapsed[g.key] ? (
-            g.docs.length === 0 ? (
-              <p className="px-4 pb-3 text-xs text-gray-400">None{typeFilter || search || propertyFilter || entityFilter ? " matching" : ""}.</p>
-            ) : (
-              <ul className="divide-y divide-gray-100 border-t border-gray-100">
-                {g.docs.map((d) => (
-                  <DocumentRowView
-                    key={d.id}
-                    doc={d}
-                    target={targetByKey.get(`${d.entity_type}:${d.entity_id}`) ?? null}
-                    propertyIds={propsFor(d)}
-                    properties={properties}
-                    filterPropertyId={propertyFilter && propertyFilter !== UNFILED_FILTER ? propertyFilter : null}
-                    onChanged={() => router.refresh()}
-                  />
+          {DOC_GROUPS.map((g) => (
+            <button key={g} className={chip(group === g)} onClick={() => setParams({ group: g, type: "" })}>
+              {DOC_GROUP_LABELS[g]} {count(groupCounts[g])}
+            </button>
+          ))}
+        </div>
+        {group ? (
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <button className={chip(!type)} onClick={() => setParams({ type: "" })}>
+              All {DOC_GROUP_LABELS[group].toLowerCase()}
+            </button>
+            {typesInGroup.map((t) => (
+              <button key={t} className={chip(type === t)} onClick={() => setParams({ type: t })}>
+                {DOC_TYPE_LABELS[t]} {count(typeCounts[t])}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex gap-5">
+        {/* Desktop: slim rail. */}
+        <nav className="hidden w-48 shrink-0 space-y-0.5 md:block" aria-label="Document types">
+          <button className={railItem(!group)} onClick={() => setParams({ group: "", type: "" })}>
+            <span>All</span>
+            {count(base.length)}
+          </button>
+          {DOC_GROUPS.map((g) => (
+            <div key={g}>
+              <button className={railItem(group === g && !type)} onClick={() => setParams({ group: g, type: "" })}>
+                <span className="truncate">{DOC_GROUP_LABELS[g]}</span>
+                {count(groupCounts[g])}
+              </button>
+              {group === g ? (
+                <div className="ml-3 mt-0.5 space-y-0.5 border-l border-gray-200 pl-2">
+                  {DOC_TYPES_BY_GROUP[g].map((t) => (
+                    <button key={t} className={railItem(type === t) + " text-xs"} onClick={() => setParams({ type: t })}>
+                      <span className="truncate">{DOC_TYPE_LABELS[t]}</span>
+                      {count(typeCounts[t])}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </nav>
+
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+            <span>
+              {filtered.length} shown
+              {type ? ` in ${DOC_TYPE_LABELS[type]}` : group ? ` in ${DOC_GROUP_LABELS[group]}` : ""}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="mr-1">Group by</span>
+              <span className="inline-flex overflow-hidden rounded-lg border border-gray-300">
+                {(["none", "type", "property"] as GroupBy[]).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setParams({ groupBy: g === "none" ? "" : g })}
+                    className={
+                      "px-2.5 py-1 font-medium " +
+                      (groupBy === g ? "bg-pine-800 text-white" : "bg-white text-gray-700 hover:bg-gray-50")
+                    }
+                  >
+                    {g === "none" ? "None" : g === "type" ? "Type" : "Property"}
+                  </button>
                 ))}
-              </ul>
-            )
-          ) : null}
-        </section>
-      ))}
+              </span>
+            </span>
+          </div>
+
+          {docs.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
+              <p className="text-sm font-medium text-gray-800">No documents yet</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Upload a deed, survey, or FSA-156EZ here, or from any property, lease, or sale page.
+              </p>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
+              <p className="text-sm text-gray-700">{emptyCopy()}</p>
+            </div>
+          ) : (
+            sections.map((s) => (
+              <section key={s.key} className="space-y-2">
+                {s.label ? (
+                  <h2 className="flex items-center gap-2 pt-1 text-sm font-semibold text-gray-900">
+                    {s.label}
+                    {count(s.docs.length)}
+                  </h2>
+                ) : null}
+                <ul className="space-y-2">
+                  {s.docs.map((d) => {
+                    const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
+                    return (
+                      <DocumentCard
+                        key={`${s.key}:${d.id}`}
+                        doc={d}
+                        propertyNames={propsFor(d).map((pid) => propertyName.get(pid) ?? "Property")}
+                        attachedLabel={target && target.entityType !== "property" ? target.label : null}
+                        onRenamed={() => router.refresh()}
+                      />
+                    );
+                  })}
+                </ul>
+              </section>
+            ))
+          )}
+        </div>
+      </div>
 
       {uploadOpen ? (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
@@ -297,209 +437,10 @@ export default function DocumentsClient({
                 </svg>
               </button>
             </div>
-            <IntakeFlow
-              orgId={orgId}
-              onSaved={() => router.refresh()}
-              onClose={() => setUploadOpen(false)}
-            />
+            <IntakeFlow orgId={orgId} onSaved={() => router.refresh()} onClose={() => setUploadOpen(false)} />
           </div>
         </div>
       ) : null}
     </div>
-  );
-}
-
-function DocumentRowView({
-  doc,
-  target,
-  propertyIds,
-  properties,
-  filterPropertyId,
-  onChanged,
-}: {
-  doc: DocumentRow;
-  target: AttachTarget | null;
-  propertyIds: string[];
-  properties: Array<{ id: string; name: string; county: string | null; state: string | null }>;
-  // When the list is filtered to one property, deleting a document
-  // linked to others offers "remove from this property only".
-  filterPropertyId: string | null;
-  onChanged: () => void;
-}) {
-  const supabase = createClient();
-  const docType = (doc.doc_type ?? "other") as DocType;
-  const highlights = extractedHighlights(docType, (doc.extracted ?? null) as Record<string, unknown> | null);
-  const [changingType, setChangingType] = useState(false);
-  const [editingProps, setEditingProps] = useState(false);
-  const [draftProps, setDraftProps] = useState<string[]>(propertyIds);
-  const [propError, setPropError] = useState<string | null>(null);
-  const nameOf = (id: string) => properties.find((p) => p.id === id)?.name ?? "Property";
-
-  async function setType(t: DocType) {
-    await supabase.from("documents").update({ doc_type: t }).eq("id", doc.id);
-    setChangingType(false);
-    onChanged();
-  }
-
-  // Delete semantics mirror the property page: linked to several
-  // properties and viewed through one of them -> remove from this
-  // property only, or delete the file everywhere; otherwise confirm
-  // and delete everywhere (file and row).
-  async function remove() {
-    const others = filterPropertyId ? propertyIds.filter((p) => p !== filterPropertyId) : [];
-    if (filterPropertyId && propertyIds.includes(filterPropertyId) && others.length > 0) {
-      const choice = window.prompt(
-        `${doc.file_name} is also attached to ${others.length} other propert${others.length === 1 ? "y" : "ies"}.\n` +
-          `Type REMOVE to take it off ${nameOf(filterPropertyId)} only, or DELETE to delete the file for all ${propertyIds.length} properties.`,
-        "REMOVE"
-      );
-      if (!choice) return;
-      const c = choice.trim().toUpperCase();
-      if (c === "DELETE") {
-        const err = await deleteDocumentEverywhere(supabase, doc);
-        if (err) setPropError("Could not delete. " + err);
-      } else if (c === "REMOVE") {
-        const err = await removeDocumentFromProperty(supabase, doc, filterPropertyId, propertyIds);
-        if (err) setPropError("Could not remove. " + err);
-      } else {
-        return;
-      }
-      onChanged();
-      return;
-    }
-    const where =
-      propertyIds.length > 1 ? ` It is attached to ${propertyIds.length} properties; this deletes it everywhere.` : "";
-    if (!window.confirm(`Delete ${doc.file_name}?${where} This cannot be undone.`)) return;
-    const err = await deleteDocumentEverywhere(supabase, doc);
-    if (err) {
-      setPropError("Could not delete. " + err);
-      return;
-    }
-    onChanged();
-  }
-
-  async function saveProps() {
-    setPropError(null);
-    if (draftProps.length === 0 && doc.entity_type === "property") {
-      setPropError("Keep at least one property, or delete the document.");
-      return;
-    }
-    const err = await setDocumentProperties(supabase, doc, draftProps);
-    if (err) {
-      setPropError(err);
-      return;
-    }
-    setEditingProps(false);
-    onChanged();
-  }
-
-  return (
-    <li className="space-y-1.5 px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex flex-wrap items-center gap-2">
-            {changingType ? (
-              <DocTypeSelect value={docType} onChange={setType} />
-            ) : (
-              <button onClick={() => setChangingType(true)} title="Change type">
-                <DocTypeChip docType={docType} />
-              </button>
-            )}
-            {doc.ai_suggested_type && docType === "other" && doc.ai_suggested_type !== "other" ? (
-              <button
-                onClick={() => setType(doc.ai_suggested_type as DocType)}
-                title="Accept the AI suggestion"
-              >
-                <DocTypeChip docType={doc.ai_suggested_type} suggested />
-              </button>
-            ) : null}
-            <button
-              onClick={() => openDocument(supabase, doc.storage_path)}
-              className="truncate text-left text-sm font-medium text-kelly-700 hover:underline"
-            >
-              {doc.title || doc.file_name}
-            </button>
-          </div>
-          {highlights.length > 0 ? (
-            <p className="text-xs text-gray-600">{highlights.join(" · ")}</p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
-            {propertyIds.map((pid) => (
-              <Link
-                key={pid}
-                href={`/properties/${pid}`}
-                className="rounded-full bg-kelly-50 px-2 py-0.5 font-medium text-pine-900 hover:bg-kelly-100"
-              >
-                {nameOf(pid)}
-              </Link>
-            ))}
-            {target && target.entityType !== "property" ? (
-              <Link href={target.href} className="hover:underline">
-                {target.label}
-              </Link>
-            ) : null}
-            {doc.entity_type === "organization" && propertyIds.length === 0 ? (
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-900">Unfiled</span>
-            ) : !target && propertyIds.length === 0 ? (
-              <span>Attached record not found</span>
-            ) : null}
-            <button
-              onClick={() => {
-                setDraftProps(propertyIds);
-                setEditingProps((v) => !v);
-              }}
-              className="font-medium text-kelly-700 hover:underline"
-            >
-              {editingProps ? "Close" : "Edit properties"}
-            </button>
-            <span className="text-gray-300">|</span>
-            <span>{new Date(doc.created_at).toLocaleDateString()}</span>
-          </div>
-          {editingProps ? (
-            <div className="mt-1 max-w-md space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 p-2">
-              <PropertyMultiSelect
-                properties={properties}
-                selected={draftProps}
-                onChange={setDraftProps}
-                compact
-              />
-              {propError ? <p className="text-xs text-red-600">{propError}</p> : null}
-              <div className="flex gap-2">
-                <button
-                  onClick={saveProps}
-                  className="rounded bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
-                >
-                  Save properties
-                </button>
-                <button
-                  onClick={() => setEditingProps(false)}
-                  className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-white"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <button
-            onClick={() => openDocument(supabase, doc.storage_path)}
-            className="font-medium text-gray-700 hover:underline"
-          >
-            Open
-          </button>
-          {canPlotBoundary(docType) ? (
-            <Link href={`/documents/${doc.id}/plot`} className="font-medium text-kelly-700 hover:underline">
-              Plot boundary
-            </Link>
-          ) : null}
-          <button onClick={remove} className="font-medium text-red-600 hover:underline">
-            Delete
-          </button>
-        </div>
-      </div>
-      {propError && !editingProps ? <p className="text-xs text-red-600">{propError}</p> : null}
-      <ScanDocumentButton doc={doc} onChanged={onChanged} compact />
-    </li>
   );
 }

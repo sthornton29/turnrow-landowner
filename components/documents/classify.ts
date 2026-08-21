@@ -227,6 +227,8 @@ export async function uploadDocument(
     // Every property the document applies to (migration 0023). When the
     // primary entity is a property it is included automatically.
     propertyIds?: string[];
+    // Why the AI attached a property (shown on the document page).
+    evidence?: Record<string, string>;
     // Reviewed extracted fields from the intake confirm screen (saved as
     // already reviewed, with scan_kind for the row's Extracted block).
     extracted?: Record<string, unknown> | null;
@@ -254,12 +256,14 @@ export async function uploadDocument(
       size_bytes: args.file.size,
       doc_type: args.docType,
       title: args.title,
+      title_reviewed: true,
       ai_suggested_type: args.aiSuggestedType,
       ...(args.extracted
         ? {
             extracted: args.extracted,
             extracted_at: new Date().toISOString(),
             extraction_reviewed: true,
+            extraction_history: [{ at: new Date().toISOString(), kind: "intake" }],
           }
         : {}),
     })
@@ -275,6 +279,7 @@ export async function uploadDocument(
         organization_id: args.orgId,
         document_id: id,
         property_id,
+        evidence: args.evidence?.[property_id] ?? null,
       }))
     );
     if (linkErr) return { error: `Saved ${args.file.name} but could not link properties: ${linkErr.message}` };
@@ -345,13 +350,98 @@ export async function removeDocumentFromProperty(
   return setDocumentProperties(supabase, doc, remaining);
 }
 
+// Delete the row, its current file, and every superseded version's file
+// (document_versions, migration 0028; the rows cascade with the document).
 export async function deleteDocumentEverywhere(
   supabase: SupabaseClient,
   doc: Pick<DocumentRow, "id" | "storage_path">
 ): Promise<string | null> {
-  await supabase.storage.from("documents").remove([doc.storage_path]);
+  const { data: versions } = await supabase
+    .from("document_versions")
+    .select("storage_path")
+    .eq("document_id", doc.id);
+  const paths = [doc.storage_path, ...((versions ?? []).map((v) => v.storage_path as string))];
+  await supabase.storage.from("documents").remove(paths);
   const { error } = await supabase.from("documents").delete().eq("id", doc.id);
   return error ? error.message : null;
+}
+
+// Inline rename (list cards, the document page, the backfill review).
+// A saved title counts as reviewed.
+export async function renameDocument(
+  supabase: SupabaseClient,
+  documentId: string,
+  title: string
+): Promise<string | null> {
+  const t = title.trim();
+  if (!t) return "A title is needed.";
+  const { error } = await supabase
+    .from("documents")
+    .update({ title: t, title_reviewed: true })
+    .eq("id", documentId);
+  return error ? error.message : null;
+}
+
+// Replace file: upload the new object, park the old one as a version
+// (kept and downloadable), and point the row at the new file. The
+// record, links, extracted fields, and notes all stay.
+export async function replaceDocumentFile(
+  supabase: SupabaseClient,
+  doc: Pick<
+    DocumentRow,
+    "id" | "organization_id" | "entity_type" | "storage_path" | "file_name" | "content_type" | "size_bytes" | "uploaded_by" | "created_at"
+  >,
+  file: File
+): Promise<string | null> {
+  const path = `${doc.organization_id}/${doc.entity_type}/${crypto.randomUUID()}-${file.name}`;
+  const upErr = await uploadToStorage(supabase, path, file);
+  if (upErr) return uploadErrorCopy(file.name, upErr);
+  const { data: prior } = await supabase
+    .from("document_versions")
+    .select("id")
+    .eq("document_id", doc.id);
+  const { error: verErr } = await supabase.from("document_versions").insert({
+    organization_id: doc.organization_id,
+    document_id: doc.id,
+    storage_path: doc.storage_path,
+    file_name: doc.file_name,
+    content_type: doc.content_type,
+    size_bytes: doc.size_bytes,
+    uploaded_by: doc.uploaded_by,
+    // The first replacement parks the original upload date; later ones
+    // carry the date the version being replaced was put in place.
+    uploaded_at: (prior ?? []).length === 0 ? doc.created_at : new Date().toISOString(),
+  });
+  if (verErr) return verErr.message;
+  const { error } = await supabase
+    .from("documents")
+    .update({
+      storage_path: path,
+      file_name: file.name,
+      content_type: file.type || null,
+      size_bytes: file.size,
+    })
+    .eq("id", doc.id);
+  return error ? error.message : null;
+}
+
+// Append a dated entry to extraction_history (dates only, for the page
+// footer). Best effort: a failure here never blocks the save.
+export async function recordExtraction(
+  supabase: SupabaseClient,
+  documentId: string,
+  kind: string
+): Promise<void> {
+  const { data } = await supabase
+    .from("documents")
+    .select("extraction_history")
+    .eq("id", documentId)
+    .single();
+  const history = Array.isArray(data?.extraction_history) ? (data!.extraction_history as unknown[]) : [];
+  await supabase
+    .from("documents")
+    .update({ extraction_history: [...history, { at: new Date().toISOString(), kind }] })
+    .eq("id", documentId);
 }
 
 export async function openDocument(

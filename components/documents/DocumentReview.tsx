@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { EXTRACTED_FIELDS, type ScanKind } from "@/lib/documents";
 import { normalizeFsaExtraction } from "@/lib/gov/fsaImport";
+import { recordExtraction } from "./classify";
 import ExtractedFieldsEditor, {
   finalizeValues,
   initialValuesFor,
@@ -62,6 +63,7 @@ export default function DocumentReview({
       setError("Could not save. " + err.message);
       return;
     }
+    await recordExtraction(supabase, documentId, scanKind);
     onConfirmed?.(scanKind, out);
     onSaved(out);
   }

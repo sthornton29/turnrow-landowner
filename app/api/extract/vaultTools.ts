@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { DOC_TYPES } from "@/lib/documents";
+import { TITLE_PATTERN_HINT } from "@/lib/documentTitle";
 
 // Forced-tool schemas for the document vault: classification, per-type
 // extraction (keys match lib/documents.ts EXTRACTED_FIELDS exactly so
@@ -32,7 +33,7 @@ export const CLASSIFY_TOOL: Anthropic.Tool = {
     properties: {
       doc_type: { type: "string", enum: [...DOC_TYPES], description: "The best-fitting type" },
       confidence: { type: "string", enum: ["high", "medium", "low"] },
-      title: nullable("string", "A short human title for the document, e.g. 'Warranty deed, Smith to Jones, 2014'"),
+      title: nullable("string", "A short human title following the app's pattern. " + TITLE_PATTERN_HINT),
       reason: { type: "string", description: "One sentence on why" },
       property_hints: {
         type: "object",
@@ -347,7 +348,7 @@ export const INTAKE_TOOL: Anthropic.Tool = {
     properties: {
       doc_type: { type: "string", enum: [...DOC_TYPES], description: "The best-fitting type; 'other' when none fits" },
       confidence: { type: "string", enum: ["high", "medium", "low"] },
-      title: nullable("string", "A short human title, e.g. 'Warranty deed, Smith to Jones, 2014'"),
+      title: nullable("string", "A short human title following the app's pattern. " + TITLE_PATTERN_HINT),
       reason: { type: "string", description: "One sentence on why this type" },
       specialized_kind: {
         type: ["string", "null"],
@@ -512,7 +513,7 @@ export const VAULT_TOOLS: Record<VaultKind, Anthropic.Tool> = {
 
 export const VAULT_PROMPTS: Record<VaultKind, string> = {
   intake:
-    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and suggest a short title. 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. 6) If the legal description carries a section, township, and range, fill plss_reference with the digits and direction letters EXACTLY as printed (a misread N/S or E/W lands the tract in the wrong county); for metes and bounds fill mb_anchor with the stated county and any section tie. List uncertain field names in unsure_fields.",
+    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and propose a title in the app's pattern (see the title field). 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. 6) If the legal description carries a section, township, and range, fill plss_reference with the digits and direction letters EXACTLY as printed (a misread N/S or E/W lands the tract in the wrong county); for metes and bounds fill mb_anchor with the stated county and any section tie. List uncertain field names in unsure_fields.",
   classify:
     "Classify this document for a rural landowner's records. Look at the heading, the first page, and any recording stamps. Pick exactly one type; 'other' when nothing fits. Suggest a short title.",
   deed:

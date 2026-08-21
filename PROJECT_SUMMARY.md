@@ -1,6 +1,11 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-20, night (AI-first document intake replacing
+Last updated: 2026-08-21 (documents overhaul: pattern titles with
+inline rename and a one-time title review, a document page per file
+with in-place editing, rescan, replace file with kept versions, and
+follow-on actions, a calm one-list Documents page with a group rail,
+and the Farm Data summary band by entity and by tenant with drill-in,
+migration 0028; 2026-08-20 night: AI-first document intake replacing
 the upload pickers, FSA farm numbers editable on the property page with
 156EZ farms linking to properties by number and splitting pro rata by
 ag field acres, model request size caps; earlier that evening: documents attach to several
@@ -14,6 +19,15 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 "?" drawer, how-to chat, and Contact support)
 
 ## DEPLOY CHECKLIST (this release)
+
+0. Run 0028_document_pages.sql in Supabase BEFORE this deploy goes
+   live (2026-08-21, NOT YET RUN at the time of writing): it adds
+   documents.notes / title_reviewed / extraction_history / updated_at,
+   document_properties.evidence, the document_versions table (org
+   RLS), and sets every empty title to the cleaned file name. The
+   document page (/documents/[id]) and /documents/titles read those
+   columns and fail without it. After the deploy, open
+   /documents/titles once to review the backfilled titles.
 
 1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
    0022_assistant.sql, 0023_document_properties.sql,
@@ -930,50 +944,104 @@ Functions and views:
   (components/gov/AdminProgramParams.tsx editing covered_commodities,
   program_year_config, and arc_plc_price_data rows, platform admins
   only), and Sign out. /settings/members and /admin/gis redirect there.
-  - /documents (DOCUMENT VAULT): every document in the org grouped by
-    the taxonomy groups (collapsible, with counts), filters by
-    property (including documents attached to the property's parcels,
-    fields, stands, and other children), entity (via
-    properties.entity_id), and type, and a search box over name, title,
-    search_text, the attached-to label, and the extracted highlights.
-    Each row: a group-colored DocTypeChip (tap to change the type), the
-    extracted highlights (lib/documents.ts extractedHighlights:
-    grantor, recording ref, farm number, policy amount...), a link to
-    the attached entity's page, Open (signed URL), Scan, and Plot
-    boundary when canPlotBoundary(doc_type). UPLOAD from here: file
-    picker, attach-to picker (entity type then row), type select; on
-    file choose /api/extract kind=classify suggests a type shown as an
-    amber "AI: Warranty deed?" chip the user ACCEPTS or overrides; the
-    row saves as 'other' + ai_suggested_type until accepted
-    (classification never auto-applies). EntityDocuments (every entity
-    page) does the same inline: chips, per-row type select, suggestion
-    chip, Scan button, Plot boundary link. /documents/retype is the
-    bulk backfill: untyped rows with a select prefilled from
-    ai_suggested_type, "Classify all" running the classifier
-    sequentially with progress (suggestions persist), Apply updates
-    only the rows given a real type. SCAN ("Scan this document",
-    components/documents/ScanDocumentButton + DocumentReview): the
-    file is fetched by signed URL and posted to /api/extract with
-    kind = scanKindFor(doc_type) (deed for deed_* and easement_deed;
-    survey for survey_plat and legal_description; title_insurance for
-    title_insurance and title_opinion; fsa_156ez; determination for
-    wetland/HEL; generic for the rest), each a forced tool with
-    unsure_fields; the amber review form is driven by EXTRACTED_FIELDS
-    (deeds: grantor, grantee, execution and recording dates, recording
-    ref, consideration, county, state, parcel refs, the legal
-    description VERBATIM; surveys: surveyor, date, stated acres,
-    recording ref, legal description; title insurance: insurer, policy
-    number, amount, date, the exceptions TABLE; FSA-156EZ: farm number,
-    county, state, tract numbers, farmland / cropland / DCP cropland
-    acres, the base acres table (commodity, base acres, PLC yield);
-    determinations: tract, codes, date, notes; generic: title,
-    parties, date, amount, reference, summary), tables as editable
-    grids; Save writes documents.extracted + extracted_at +
-    extraction_reviewed; existing values show in a collapsible
-    Extracted block with Edit and Rescan. Confirming a 156EZ scan asks
-    (window.confirm) to create or update the FSA farm and base acres
-    via lib/gov/fsaImport.ts and reports what was written and any
-    unmatched commodities with a link to Government Payments.
+  - /documents (DOCUMENT VAULT, redesigned 2026-08-21: ONE organizing
+    system at a time): a single recent-first list of DocumentCards
+    (components/documents/DocumentCard.tsx: group icon from
+    DocTypeIcon.tsx, title, DocTypeChip, first two property chips
+    plus "+N", the non-property attachment label, an amber Unfiled
+    chip, date); the WHOLE card is one link to /documents/[id] and the
+    only other control is a pencil (outside the link) for inline
+    rename (Enter saves via renameDocument, Escape cancels). Search at
+    the top (title, file name, search_text, attached-to label,
+    property names, extracted highlights) with one compact select
+    beside it (Unfiled, then Properties and Entities optgroups; value
+    p:<id> / e:<id> / unfiled). TYPE NAVIGATION replaces the old
+    always-on group headers: a slim left rail on desktop (All plus the
+    seven taxonomy groups with counts; the selected group expands its
+    types with counts) and horizontally scrolling chip rows on mobile
+    (groups, then the selected group's types). Counts reflect the
+    search and property filter but not the type filter. GROUP BY
+    segmented control None | Type | Property (default None; Property
+    lists a document under every property it links to, plus "Not on a
+    property" and Unfiled); headers render only when chosen. Filters
+    live in the URL (q, filter, group, type, groupBy; router.replace,
+    Suspense-wrapped) so Back from a document page restores the view.
+    Upload is the single primary button (IntakeFlow modal); amber
+    links beside it only when non-zero: "Review N titles"
+    (/documents/titles, title_reviewed = false) and "Type N untyped"
+    (/documents/retype). Per-filter empty states ("No warranty deed
+    documents yet. Upload one and Turnrow will read it.", "Nothing
+    filed to River Place yet.", "Nothing matches 'x'."). Rows carry NO
+    extracted-field clutter and no Open / Scan / Plot / Delete / type
+    change / edit properties; all of that lives on the document page.
+  - DOCUMENT TITLES (2026-08-21): documents.title is what every list,
+    chip, search result, and entity-page section shows
+    (lib/documentTitle.ts displayTitle; the cleaned file name is the
+    display floor). proposeTitle(docType, extracted, fileName,
+    { uploadedAt, propertyName }) is the ONE pattern generator, unit
+    tested: "Warranty Deed - <grantor> to <grantee> (<year>)", "Survey
+    Plat - <property or surveyor>, <acres> acres (<year>)", "FSA-156EZ
+    - Farm <n> (<year>)" (several: "Farms 1, 2"), "Title Insurance -
+    <property or insurer> ($<amount>, <year>)", determinations "<Type>
+    - Tract <n> (<year>)", generic "<Type> - <parties> (<year>)";
+    missing pieces drop cleanly and nothing extracted gives "<Type> -
+    <cleaned file name>". The intake tool's title field carries the
+    same pattern (TITLE_PATTERN_HINT in vaultTools.ts) so the AI's
+    proposal matches; the confirm screen's Title stays editable; Save
+    uses the user's title, else the AI's, else proposeTitle. New
+    uploads save title_reviewed = true. Migration 0028 set every
+    empty title to the cleaned file name; /documents/titles
+    (TitlesReviewClient.tsx) is the ONE-TIME REVIEW of rows with
+    title_reviewed = false: DocTypeChip, current title, an input
+    prefilled with proposeTitle (first linked property's name as the
+    property), file name small; Enter saves (renameDocument) and
+    focuses the next row, Escape restores the proposal, "Use proposed
+    for all", "Apply N" (sequential with progress), per-row Keep
+    current; "All titles reviewed" when empty.
+  - /documents/[id] (THE DOCUMENT PAGE, 2026-08-21, the summary
+    template family: app/(app)/documents/[id]/page.tsx server load of
+    the row, document_properties with evidence, document_versions,
+    properties, the uploader profile, an fsa_farms row by
+    source_document_id, and the primary non-property attachment's
+    label and href; DocumentPageClient.tsx). SummaryHeader with
+    breadcrumb Documents / title, type badge, key figure = the first
+    extractedHighlight, and FOLLOW-ON ACTIONS as buttons: Plot
+    boundary (canPlotBoundary), View FSA farm (156EZ), View easement
+    (linked_easement_id), View boundary (/map?focus=<produced
+    boundary>). Layout: components/documents/DocumentPreview.tsx left
+    (sticky on desktop, above on mobile): PDFs rendered page by page
+    with pdfjs-dist 4 (dynamic import, worker via new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url), Prev /
+    Next and "n of m"), images inline, other types a file card; a
+    render failure falls back to an Open link. Info panel, every
+    field editable IN PLACE: title (pencil, Enter / Escape,
+    renameDocument); doc_type (DocTypeSelect; after saving a change
+    the page offers "Rescan as <type>?", which POSTs /api/extract by
+    storage path with the new scanKind and opens DocumentReview);
+    attached properties as chips with their evidence line
+    (document_properties.evidence, written by the intake from the
+    verified why lines; setDocumentProperties only inserts and
+    deletes so evidence survives edits) and Edit via
+    PropertyMultiSelect, plus the primary non-property record as a
+    link; extracted fields (ScanDocumentButton: Extracted / Edit /
+    Rescan through the standard amber review; every reviewed save
+    appends { at, kind } to documents.extraction_history via
+    recordExtraction); notes (documents.notes, Save). Utility row:
+    Download (signed URL), Replace file (replaceDocumentFile in
+    classify.ts: uploads the new object, parks the old file as a
+    document_versions row, re-points storage_path / file_name /
+    content_type / size_bytes; the record, links, fields, and notes
+    stay; "Previous versions" lists them with Download), Delete
+    (confirm; deleteDocumentEverywhere removes the current file and
+    every version's file, then the row; links cascade). Footer:
+    uploaded by (profiles.full_name or email) and when, original file
+    name, size, extraction dates. EntityDocuments (every entity page)
+    and DocumentLinks (read-only lists such as a stand's sale
+    contracts) now LINK here (title, chip, property chips, date) and
+    no longer open the raw file or carry per-row controls; asset
+    photo galleries keep Add photos and photo delete, and the plot
+    page's breadcrumb links back here. /documents/retype rows link
+    here too.
   - /documents/[id]/plot (PLOT BOUNDARY FROM THIS DOCUMENT, the
     flagship, on deeds, plats, and legal descriptions): a three-step
     mobile-first stepper (app/(app)/documents/[id]/plot/PlotClient.tsx,
@@ -1624,11 +1692,40 @@ Functions and views:
     farm, and acres; a dropdown maps it to a local field, a whole
     property, or Ignore. Suggested matches show a one-click Confirm
     match; "Check for new shared fields" re-syncs.
-  - /farm-activity: filterable (year, connection, property) table grouped
-    by property: field, crop with varieties, planted acres, planting
-    date, Growing/Harvested chip, yield per acre (or "Not shared" when
-    the farmer keeps yields private). Totals line for plantings and
-    acres.
+  - /farm-activity (FARM DATA, summary band added 2026-08-21): filters
+    (year, entity incl. "No entity" = none, connection, property) in
+    the URL, a connection-health strip, and three levels. SUMMARY
+    (no entity / connection / property filter): "By entity" and "By
+    tenant" card grids from lib/farmRollup.ts (pure, unit tested in
+    farmRollup.test.ts: rollups(input) -> byEntity with a "No entity"
+    bucket for properties without entity_id and byTenant named
+    operation_name || label with unmappedAcres; each Rollup carries
+    plantedAcres, harvestedAcres, plantings, cropMix sorted desc,
+    yieldByCrop (acres-weighted ACTUAL production / harvested acres
+    when any row has production, else PROJECTED from
+    farm_projected_yields weighted by planted acres, else null),
+    prices for crops in the mix labeled by tenant, sharedYields /
+    sharedPrices, propertyCount, connectionIds; propertyRollups(input,
+    { entityId | connectionId }) and scopedRollup for the drill-in).
+    A card: name, acres in crops, crop-mix stacked bar (cropColor)
+    plus text, harvest progress bar "x of y acres harvested", yield
+    chips (actual / projected) or quiet "Yields not shared", price
+    chips with PROJECTED / FINAL badge or "Prices not shared"; the
+    whole card links to ?entity=<id> or ?connection=<id>. With at
+    most one entity bucket and one connection the two sections
+    collapse to ONE card ("Farmed by <tenant>" subtitle). DRILL-IN
+    level 1 (entity or connection filter): breadcrumb Farm Data /
+    name, the scoped card, then Properties rows (acres, crop mix,
+    harvest, yield and price chips) each linking with &property=;
+    level 2 (property too): three-level breadcrumb, the property's
+    card, the field table for that property. The existing field-level
+    table (grouped by property: field, crop with varieties, planted
+    acres, planting date, Growing / Harvested chip, yield per acre or
+    "Not shared") stays beneath every level, scoped by the same
+    filters, and the totals line matches the cards by construction
+    (same rows summed). Tenant prices card only at the summary level
+    with more than one connection. Unmapped plantings count on the
+    tenant card only. Scope-off values never render as zero.
   - Map: a "By entity" toggle (appears when more than one entity exists)
     recolors property outlines by holding entity with a small legend
     (subtle distinct colors from lib/entities.ts ENTITY_COLORS, chosen
@@ -1821,3 +1918,17 @@ Functions and views:
   workbook parsing, program config, PLC/ARC-CO engines, projection,
   income government line, SQL guard, tool schemas, and help routing.
   Described above.
+
+- Post-Phase 6m (DONE, 2026-08-21, migration 0028): DOCUMENTS
+  OVERHAUL (pattern titles from one tested generator shared by the
+  AI prompt, the intake, and a one-time title review; inline rename;
+  a document page per file with in-place editing, rescan with a new
+  type, evidence-preserving property edits, notes, replace file with
+  kept versions, delete, follow-on actions, and a pdf.js page
+  preview; the Documents page rebuilt as one calm list with search, a
+  group rail or chip rows, and an optional Group by) and the FARM
+  DATA SUMMARY BAND (rollups by entity and by tenant with crop mix,
+  harvest progress, weighted yields, and price chips; drill-in to
+  properties and fields with breadcrumbs and URL-synced filters).
+  Unit tests for the title generator and the rollup engine. Described
+  above.

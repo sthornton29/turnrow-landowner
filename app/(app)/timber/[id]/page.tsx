@@ -67,7 +67,7 @@ export default async function TimberStandSummaryPage({
   // too: a stand's paperwork is findable from the stand.
   const { data: saleDocs } = await supabase
     .from("documents")
-    .select("id, entity_id, file_name, storage_path")
+    .select("id, entity_id, file_name, title, doc_type, storage_path")
     .eq("entity_type", "timber_sale");
   const saleIds = new Set(
     (saleLinks ?? []).filter((l) => l.timber_stand_id === id).map((l) => l.timber_sale_id)

@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { DocType } from "@/lib/documents";
+import { displayTitle } from "@/lib/documentTitle";
 import type { DocumentRow } from "@/types/db";
 import DocTypeChip from "@/components/documents/DocTypeChip";
-import { DocTypeSelect } from "@/components/documents/EntityDocuments";
-import { classifyFile, openDocument } from "@/components/documents/classify";
+import { DocTypeSelect } from "@/components/documents/DocTypeSelect";
+import { classifyFile } from "@/components/documents/classify";
 
 const ENTITY_LABEL: Record<string, string> = {
   property: "Property",
@@ -136,12 +138,12 @@ export default function RetypeClient({ docs }: { docs: DocumentRow[] }) {
           {docs.map((d) => (
             <li key={d.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-4 py-2.5">
               <div className="min-w-0">
-                <button
-                  onClick={() => openDocument(supabase, d.storage_path)}
+                <Link
+                  href={`/documents/${d.id}`}
                   className="truncate text-left text-sm font-medium text-kelly-700 hover:underline"
                 >
-                  {d.title || d.file_name}
-                </button>
+                  {displayTitle(d)}
+                </Link>
                 <p className="text-xs text-gray-500">
                   {ENTITY_LABEL[d.entity_type] ?? d.entity_type} · {new Date(d.created_at).toLocaleDateString()}
                   {suggested[d.id] ? (
