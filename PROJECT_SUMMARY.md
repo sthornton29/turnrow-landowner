@@ -1,11 +1,19 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-21 (documents overhaul: pattern titles with
-inline rename and a one-time title review, a document page per file
-with in-place editing, rescan, replace file with kept versions, and
-follow-on actions, a calm one-list Documents page with a group rail,
-and the Farm Data summary band by entity and by tenant with drill-in,
-migration 0028; 2026-08-20 night: AI-first document intake replacing
+Last updated: 2026-08-21, evening (description matching second pass:
+every tract read from the text as well as the AI, a land index for
+offline section lookup, parcel fit against stated acres, persisted
+evidence with Retry and why, learned property aliases, migration
+0029; one canonical parcel number form so tax statements match their
+parcels; every extraction reads by storage path so no upload can hit
+the 4.5 MB body limit; plot target defaults to the document's own
+property with far-target and stated-acres warnings. Earlier the same
+day: documents overhaul (pattern titles with inline rename and a
+one-time title review, a document page per file with in-place
+editing, rescan, replace file with kept versions, and follow-on
+actions, a calm one-list Documents page with a group rail) and the
+Farm Data summary band by entity and by tenant with drill-in,
+migration 0028. 2026-08-20 night: AI-first document intake replacing
 the upload pickers, FSA farm numbers editable on the property page with
 156EZ farms linking to properties by number and splitting pro rata by
 ag field acres, model request size caps; earlier that evening: documents attach to several
@@ -20,23 +28,19 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
-00. Run 0029_land_index_aliases.sql in Supabase BEFORE this deploy goes
-   live (2026-08-21, later the same day; NOT YET RUN at the time of
-   writing): land_sections (which BLM sections each property and parcel
-   touches, built by POST /api/land-index), property_aliases (the
-   historical tract names deeds use), and the boundary_bbox RPC. The
-   intake flow calls /api/land-index on open and queries land_sections
-   and property_aliases; without the migration the queries fail quietly
-   and matching falls back to the live BLM path.
-
-0. Run 0028_document_pages.sql in Supabase BEFORE this deploy goes
-   live (2026-08-21, NOT YET RUN at the time of writing): it adds
-   documents.notes / title_reviewed / extraction_history / updated_at,
-   document_properties.evidence, the document_versions table (org
-   RLS), and sets every empty title to the cleaned file name. The
-   document page (/documents/[id]) and /documents/titles read those
-   columns and fail without it. After the deploy, open
-   /documents/titles once to review the backfilled titles.
+0. Migrations for this release, in order, BEFORE the deploy goes
+   live: 0028_document_pages.sql (RUN 2026-08-21: documents.notes /
+   title_reviewed / extraction_history / updated_at,
+   document_properties.evidence, document_versions with org RLS, and
+   every empty title set to the cleaned file name; /documents/[id] and
+   /documents/titles read these) and 0029_land_index_aliases.sql (NOT
+   YET RUN at the time of writing: land_sections, built by POST
+   /api/land-index and read by the intake's spatial tier;
+   property_aliases, the historical tract names deeds use; the
+   boundary_bbox RPC. Without it those queries fail quietly and
+   matching falls back to the live BLM path). After the deploy, open
+   /documents/titles once to review the backfilled titles, and upload
+   one document so the land index builds.
 
 1. Run migrations 0020_document_vault.sql, 0021_gov_payments.sql,
    0022_assistant.sql, 0023_document_properties.sql,
@@ -2024,3 +2028,18 @@ Functions and views:
   properties and fields with breadcrumbs and URL-synced filters).
   Unit tests for the title generator and the rollup engine. Described
   above.
+- Post-Phase 6n (DONE, 2026-08-21, migration 0029): DESCRIPTION
+  MATCHING SECOND PASS (every PLSS reference merged from the AI and a
+  deterministic read of the verbatim description, tracts unioned, a
+  land index of the owner's sections for offline lookup, parcel fit
+  against stated acres with the parcel offered as the record, a
+  whole-section preselect policy, evidence persisted on the document
+  and shown on its page, Retry with a reason when nothing computed,
+  learned property aliases fed to the reader and managed on the
+  property page), ONE CANONICAL PARCEL NUMBER FORM shared by the tax
+  and document matchers, EVERY EXTRACTION BY STORAGE PATH (no client
+  posts a file body), and PLOT TARGET DEFAULTS (the document's own
+  property, far-target and stated-acres warnings). Unit tests for the
+  reference parser, parcel fit and preselect policy, aliases, and the
+  parcel canonical form; the DLM deed verified by hand end to end.
+  Described above.
