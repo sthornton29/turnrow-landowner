@@ -281,6 +281,18 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  PARCEL NUMBER CANONICAL FORM (2026-08-21, lib/parcelNumber.ts, unit
+  tested): one equivalence shared by the tax statement matcher
+  (lib/tax.ts normalizeParcelNumber), the document matcher
+  (parcelKey), lease land, and the county import. Segments split on
+  any punctuation or space; TRAILING ZERO-ONLY SEGMENTS are dropped
+  (".000" and the "-0" sub-parcel suffix Alabama tax statements print
+  carry no identity), so "07-09-31-0-000-003.000-0" on a 2025 statement
+  equals the stored "07 09 31 0 000 003.000"; a non-zero suffix
+  (003.001) stays distinct. parcelKey keeps leading zeros so a
+  run-together printing still matches; canonicalParcel drops them for
+  unpadded shorthand. Unmatched statements relink from the Taxes
+  page's "Match to parcel" select.
   DESCRIPTION MATCHING, SECOND PASS (2026-08-21, migration 0029; the
   fix for a Lawrence County deed that the intake failed to place):
   lib/spatialEvidence.ts is the ONE spatial tier, shared by /api/extract

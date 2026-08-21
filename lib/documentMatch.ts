@@ -86,9 +86,11 @@ const SCORE = {
 
 // Separator-insensitive parcel key: "12-03-07-0-000-004.000" and
 // "120307 0 000 004.000" compare equal.
-export function parcelKey(raw: string | null | undefined): string {
-  return (raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
+// Canonical parcel key shared with the tax matcher (lib/parcelNumber.ts):
+// "07-09-31-0-000-003.000-0" on a statement equals the stored
+// "07 09 31 0 000 003.000".
+import { parcelKey } from "@/lib/parcelNumber";
+export { parcelKey };
 
 function norm(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase();

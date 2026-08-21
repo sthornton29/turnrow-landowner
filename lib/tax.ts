@@ -1,6 +1,8 @@
 // Property tax domain logic: parcel number normalization and matching,
 // due/delinquent date defaults, and computed statement status.
 
+import { canonicalParcel } from "@/lib/parcelNumber";
+
 export interface TaxStatementRow {
   id: string;
   parcel_id: string | null;
@@ -40,15 +42,12 @@ export interface CountyDefault {
 // Normalize a parcel number for comparison: uppercase, strip everything
 // that isn't a letter or digit, and drop leading zeros from digit runs so
 // "22-05-0034.001" matches "22 5 34 1" style variants.
+// Canonical parcel number (lib/parcelNumber.ts): punctuation-agnostic,
+// leading zeros dropped, and the trailing sub-parcel zero that tax
+// statements print ("003.000-0") ignored, so a statement matches the
+// parcel as the county GIS stored it.
 export function normalizeParcelNumber(raw: string | null | undefined): string {
-  if (!raw) return "";
-  return raw
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "-")
-    .split("-")
-    .filter(Boolean)
-    .map((part) => (/^\d+$/.test(part) ? String(Number(part)) : part))
-    .join("-");
+  return canonicalParcel(raw);
 }
 
 export function matchParcel<T extends { id: string; parcel_number: string }>(
