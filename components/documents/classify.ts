@@ -28,6 +28,8 @@ export interface ClassifyContextProperty {
   parcel_numbers: string[];
   fsa_numbers: string[];
   acres: number | null;
+  // Historical names deeds use for the tract (property_aliases).
+  aliases?: string[];
 }
 
 // Asks /api/extract kind=classify for a type suggestion plus property
@@ -79,6 +81,11 @@ export interface IntakeResult {
   fields: Record<string, unknown>;
   unsure_fields: string[];
   spatial?: SpatialEvidence | null;
+  // The raw references the reader returned, kept so the spatial tier
+  // can be re-run (Retry) without another model call.
+  plss_reference?: Record<string, unknown> | null;
+  plss_references?: Array<Record<string, unknown>> | null;
+  mb_anchor?: Record<string, unknown> | null;
   pages_scanned?: number;
   total_pages?: number;
   chunks?: number;
@@ -135,6 +142,9 @@ export async function intakeFile(
         matched_entity: x.matched_entity ?? null,
         fields: (x.fields && typeof x.fields === "object" ? x.fields : {}) as Record<string, unknown>,
         spatial: ((x as { spatial?: SpatialEvidence | null }).spatial ?? null),
+        plss_reference: (x.plss_reference as Record<string, unknown> | null | undefined) ?? null,
+        plss_references: Array.isArray(x.plss_references) ? (x.plss_references as Array<Record<string, unknown>>) : null,
+        mb_anchor: (x.mb_anchor as Record<string, unknown> | null | undefined) ?? null,
         unsure_fields: Array.isArray(x.unsure_fields) ? x.unsure_fields.map(String) : [],
         pages_scanned: typeof x.pages_scanned === "number" ? x.pages_scanned : undefined,
         total_pages: typeof x.total_pages === "number" ? x.total_pages : undefined,

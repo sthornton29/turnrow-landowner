@@ -26,6 +26,8 @@ export interface MatchableProperty {
   state: string | null;
   fsa_numbers: string[] | null;
   acres: number | null;
+  // Historical tract names deeds use ("View Celeste"), migration 0029.
+  aliases?: string[] | null;
 }
 
 export interface MatchableParcel {
@@ -39,6 +41,9 @@ export interface PropertySuggestion {
   propertyId: string;
   score: number;
   reasons: string[];
+  // The parcel the description fits (whole-section tract whose acreage
+  // matches a parcel inside it), offered as the specific record.
+  parcelId?: string | null;
 }
 
 export interface AiPropertyMatch {
@@ -291,7 +296,23 @@ export interface SpatialEvidence {
   polygon?: unknown;
   computed?: boolean;
   notes?: string[];
+  // Why nothing computed (shown on the confirm screen with Retry):
+  // no_reference | county_mismatch | lookup_failed | overlap_failed.
+  reason?: string | null;
+  // True when at least one tract was plotted as a whole section because
+  // its text was not a quarter chain (creek, road, "portion of").
+  whole_section?: boolean;
+  // "containing N acres" from the description, when stated.
+  stated_acres?: number | null;
+  // Every reference that was resolved (AI and text), for the record.
+  references?: Array<Record<string, unknown>>;
+  tract_count?: number;
 }
+
+// How close a parcel's acreage must sit to the stated acreage to count
+// as the tract itself (a 118-acre parcel against "120 acres").
+export const PARCEL_FIT_TOLERANCE = 0.15;
+const PARCEL_FIT_SCORE = 85;
 
 // Spatial scoring: a described tract overlapping a property is the
 // strongest evidence there is, but only once the intersection really
@@ -307,6 +328,37 @@ export function spatialSuggestions(
 ): PropertySuggestion[] {
   if (!spatial || !spatial.computed || !Array.isArray(spatial.matches)) return [];
   const label = spatial.reference_label ? `describes land in ${spatial.reference_label}` : "the described land";
+
+  // Parcel fit: a whole-section tract whose stated acreage matches one
+  // parcel sitting inside the section is that parcel. Strongest signal
+  // of all, and it names the specific record.
+  const stated = spatial.stated_acres ?? null;
+  if (spatial.whole_section && stated && stated > 0) {
+    const fits = spatial.matches
+      .filter((m) => m.entity_type === "parcel" && (m.pct_of_boundary ?? 0) >= 90)
+      .map((m) => {
+        const pc = parcels.find((x) => x.id === m.id);
+        const acres = Number(m.overlap_acres) || 0;
+        return { m, pc, acres, err: Math.abs(acres - stated) / stated };
+      })
+      .filter((f) => f.pc && f.err <= PARCEL_FIT_TOLERANCE && properties.some((p) => p.id === f.pc!.property_id))
+      .sort((a, b) => a.err - b.err);
+    if (fits.length === 1 || (fits.length > 1 && fits[1].err - fits[0].err > 0.05)) {
+      const f = fits[0];
+      const prop = properties.find((p) => p.id === f.pc!.property_id)!;
+      return [
+        {
+          propertyId: prop.id,
+          parcelId: f.pc!.id,
+          score: PARCEL_FIT_SCORE,
+          reasons: [
+            `parcel ${f.pc!.parcel_number} (${Math.round(f.acres * 10) / 10} acres) on ${prop.name} fits the ${stated} acres described in ${spatial.reference_label ?? "the section"}`,
+          ],
+        },
+      ];
+    }
+  }
+
   const byProperty = new Map<string, { pct: number; name: string }>();
   for (const m of spatial.matches) {
     let propertyId: string | null = null;
@@ -332,10 +384,19 @@ export function spatialSuggestions(
     out.push({
       propertyId,
       score,
-      reasons: [`${label}, overlapping ${name} (${Math.round(pct)}% of described area)`],
+      reasons: [
+        `${label}, overlapping ${name} (${Math.round(pct)}% of described area${spatial.whole_section ? ", whole section" : ""})`,
+      ],
     });
   }
-  return out.sort((a, b) => b.score - a.score);
+  out.sort((a, b) => b.score - a.score);
+  // A whole section is a search window, not the tract: when several
+  // properties sit in it, only the largest share is strong; the rest are
+  // shown as partial so they are listed but not pre-checked.
+  if (spatial.whole_section && out.length > 1) {
+    for (let i = 1; i < out.length; i++) out[i].score = Math.min(out[i].score, SPATIAL_PARTIAL);
+  }
+  return out;
 }
 
 const NAME_SIMILARITY = 0.75;
@@ -428,7 +489,9 @@ export function verifyMatches(
     }
     if (signal === "name") {
       const text = [value, ...pageNames, hints?.legal_description_snippet ?? ""].join(" \n ");
+      const alias = (p.aliases ?? []).find((a) => nameMentioned(a, text));
       if (nameMentioned(p.name, text)) add(p, CONFIDENT_SCORE + 5, `"${p.name}" is named in the document`);
+      else if (alias) add(p, CONFIDENT_SCORE + 5, `"${alias}" (a name you recorded for ${p.name}) is in the document`);
       else downgraded.push({ name: p.name, signal, reason: `"${p.name}" does not appear on the page` });
       continue;
     }
@@ -477,6 +540,15 @@ export function verifyMatches(
     const p = properties.find((x) => x.id === h.propertyId);
     if (!p) continue;
     add(p, h.score, h.reasons[0]);
+    if (h.parcelId) verified.get(p.id)!.parcelId = h.parcelId;
+  }
+  // Aliases on the page with no AI claim still count (the reader may
+  // not have known the name; the owner taught it later).
+  const pageText = [...pageNames, hints?.legal_description_snippet ?? ""].join(" \n ");
+  for (const p of properties) {
+    if (verified.has(p.id)) continue;
+    const alias = (p.aliases ?? []).find((a) => nameMentioned(a, pageText));
+    if (alias) add(p, CONFIDENT_SCORE + 5, `"${alias}" (a name you recorded for ${p.name}) is in the document`);
   }
 
   // Conflict: a parcel/FSA number names property A, the described land
@@ -490,11 +562,16 @@ export function verifyMatches(
   }
 
   const out = [...verified.values()].sort((a, b) => b.score - a.score || a.propertyId.localeCompare(b.propertyId));
+  // Pre-check: with a quarter-chain tract, every property it overlaps
+  // (>= 5%) plus other confident signals; with a whole-section window,
+  // only the strong hit (largest share or the parcel fit), since the
+  // neighbors in the same section are usually not the tract.
+  const strongSpatial = spatialHits.filter((h) => h.score >= SPATIAL_STRONG).map((h) => h.propertyId);
+  const spatialPre = spatial?.whole_section ? strongSpatial : spatialHits.map((h) => h.propertyId);
   const preselect = conflict
     ? []
     : spatialHits.length > 0
-      ? // Every overlapping property (>= 5%) plus any other confident signal.
-        [...new Set([...spatialHits.map((h) => h.propertyId), ...out.filter((v) => v.score >= CONFIDENT_SCORE).map((v) => v.propertyId)])]
+      ? [...new Set([...spatialPre, ...out.filter((v) => v.score >= CONFIDENT_SCORE && !spatialIds.has(v.propertyId)).map((v) => v.propertyId)])]
       : out.filter((v) => v.score >= CONFIDENT_SCORE).map((v) => v.propertyId);
   return { verified: out, downgraded, entity, preselect, conflict };
 }

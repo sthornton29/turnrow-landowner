@@ -250,8 +250,16 @@ async function findSection(
   };
 }
 
-export async function resolvePlssReference(ref: PlssReferenceInput): Promise<SpatialResolveResult> {
-  const deadline = Date.now() + TOTAL_BUDGET_MS;
+export async function resolvePlssReference(
+  ref: PlssReferenceInput,
+  opts: {
+    // The land index already places this section on the caller's own
+    // land (migration 0029), so the live county lookup is skipped.
+    knownSection?: boolean;
+    budgetMs?: number;
+  } = {}
+): Promise<SpatialResolveResult> {
+  const deadline = Date.now() + (opts.budgetMs ?? TOTAL_BUDGET_MS);
   const empty: SpatialResolution = {
     meridian: null,
     meridianName: null,
@@ -305,7 +313,11 @@ export async function resolvePlssReference(ref: PlssReferenceInput): Promise<Spa
   const [lon, lat] = centroidOf(section);
   let resolvedCounty: string | null = null;
   let matches: boolean | null = null;
-  try {
+  if (opts.knownSection) {
+    resolvedCounty = deedCounty;
+    matches = true;
+    notes.push("Section is in your land index; county check by index.");
+  } else try {
     const hit = await withTimeout(lookupCounty(lon, lat), Math.max(2000, deadline - Date.now()), null);
     resolvedCounty = hit?.county ?? null;
     if (resolvedCounty && deedCounty) {

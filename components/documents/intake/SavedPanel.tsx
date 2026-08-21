@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { canPlotBoundary, type DocType, type ScanKind } from "@/lib/documents";
 import { createOrUpdateFarmsFromExtraction, normalizeFsaExtraction } from "@/lib/gov/fsaImport";
 import { openDocument } from "../classify";
+import { nameMentioned } from "@/lib/documentMatch";
 
 // Step 3 confirmation: what was saved, and the type-specific next
 // actions (plot a boundary, create FSA farms), always opt-in.
@@ -18,6 +19,8 @@ export default function SavedPanel({
   storagePath,
   propertyId,
   title,
+  placeNames = [],
+  savedProperties = [],
   onUploadAnother,
   onDone,
 }: {
@@ -29,12 +32,38 @@ export default function SavedPanel({
   storagePath: string;
   propertyId: string | null;
   title: string;
+  // Learn names: place names the reader saw that match none of the
+  // saved properties' names or aliases become one-tap aliases.
+  placeNames?: string[];
+  savedProperties?: Array<{ id: string; name: string; aliases: string[] }>;
   onUploadAnother: () => void;
   onDone: () => void;
 }) {
   const supabase = createClient();
   const [farmResult, setFarmResult] = useState<string | null>(null);
   const [farmBusy, setFarmBusy] = useState(false);
+  const [learned, setLearned] = useState<Record<string, string>>({});
+  const [learnTarget, setLearnTarget] = useState<Record<string, string>>({});
+  const [learnError, setLearnError] = useState<string | null>(null);
+
+  const learnable = savedProperties.length === 0 ? [] : learnableNames(placeNames, savedProperties);
+
+  async function remember(alias: string) {
+    const pid = savedProperties.length === 1 ? savedProperties[0].id : learnTarget[alias];
+    if (!pid) return;
+    setLearnError(null);
+    const { error } = await supabase.from("property_aliases").insert({
+      organization_id: orgId,
+      property_id: pid,
+      alias,
+      source_document_id: documentId,
+    });
+    if (error && !error.message.includes("duplicate")) {
+      setLearnError(error.message);
+      return;
+    }
+    setLearned((m) => ({ ...m, [alias]: savedProperties.find((p) => p.id === pid)?.name ?? "" }));
+  }
 
   const farms = scanKind === "fsa_156ez" && extracted ? normalizeFsaExtraction(extracted) : [];
   const farmNumbers = farms.map((f) => String(f.farm_number ?? "").trim()).filter(Boolean);
@@ -140,8 +169,69 @@ export default function SavedPanel({
           </p>
         ) : null}
       </div>
+      {learnable.length > 0 ? (
+        <div className="space-y-1.5 rounded-xl border border-gray-200 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Remember these names</p>
+          <p className="text-xs text-gray-600">
+            The document uses names your records do not. Remembering one helps the reader file the next document.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {learnable.map((alias) =>
+              learned[alias] ? (
+                <span key={alias} className="rounded-full bg-kelly-50 px-2.5 py-1 text-xs font-medium text-pine-900">
+                  &quot;{alias}&quot; means {learned[alias]}
+                </span>
+              ) : (
+                <span key={alias} className="inline-flex items-center gap-1">
+                  {savedProperties.length > 1 ? (
+                    <select
+                      value={learnTarget[alias] ?? ""}
+                      onChange={(e) => setLearnTarget((m) => ({ ...m, [alias]: e.target.value }))}
+                      className="rounded border border-gray-300 px-1.5 py-1 text-xs"
+                    >
+                      <option value="">Which property?</option>
+                      {savedProperties.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => remember(alias)}
+                    disabled={savedProperties.length > 1 && !learnTarget[alias]}
+                    className="rounded-full border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Remember &quot;{alias}&quot;{savedProperties.length === 1 ? ` means ${savedProperties[0].name}` : ""}
+                  </button>
+                </span>
+              )
+            )}
+          </div>
+          {learnError ? <p className="text-xs text-red-600">{learnError}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+// Generic words that are never a tract name.
+const GENERIC = /\b(creek|branch|river|road|rd|highway|hwy|street|county|alabama|mississippi|tennessee|georgia|church|cemetery|lake|pond)\b/i;
+
+function learnableNames(
+  placeNames: string[],
+  saved: Array<{ name: string; aliases: string[] }>
+): string[] {
+  const known = saved.flatMap((p) => [p.name, ...p.aliases]);
+  const out: string[] = [];
+  for (const raw of placeNames) {
+    const n = raw.trim();
+    if (n.length < 3 || n.length > 60 || GENERIC.test(n)) continue;
+    if (known.some((k) => nameMentioned(k, n) || nameMentioned(n, k))) continue;
+    if (out.some((o) => o.toLowerCase() === n.toLowerCase())) continue;
+    out.push(n);
+    if (out.length >= 5) break;
+  }
+  return out;
 }
 
 // "linked to River Place, Home Place" or a nudge to add FSA numbers.

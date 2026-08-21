@@ -4,7 +4,7 @@ route: /documents
 group: Documents
 order: 1
 updated: 2026-08-21
-keywords: documents, vault, upload, drop, deed, warranty, quitclaim, title insurance, survey, plat, legal description, easement deed, mortgage, fsa 156, crp, nrcs, wetland determination, hel, appraisal, timber cruise, management plan, insurance policy, hunting agreement, current use, classify, type, scan, extract, search, retype, rename, title, review titles, replace file, versions, notes, photos, delete, unfiled, manual, document page
+keywords: documents, vault, land index, aliases, also called, evidence, retry, upload, drop, deed, warranty, quitclaim, title insurance, survey, plat, legal description, easement deed, mortgage, fsa 156, crp, nrcs, wetland determination, hel, appraisal, timber cruise, management plan, insurance policy, hunting agreement, current use, classify, type, scan, extract, search, retype, rename, title, review titles, replace file, versions, notes, photos, delete, unfiled, manual, document page
 ---
 ## The vault
 
@@ -73,7 +73,15 @@ See "Why did my plot land in the wrong place?" under Plotting a boundary from a 
 
 ## How the description match works
 
-When a deed or plat carries a section, township, and range, the upload reads those fields exactly as printed, pins the principal meridian from the county the deed names, looks up the section from the BLM PLSS service, and checks that the section really sits in that county. If it does, the described tract is laid over your boundaries and the confirm screen shows "Evidence from the description": which property it overlaps and how much of the described land falls inside it. That overlap is the strongest match there is, so those properties come pre-checked.
+When a deed or plat carries a section, township, and range, the upload reads every such reference, both from what the reader returned and straight from the verbatim description (so a tract is never missed and a direction letter is never swapped), pins the principal meridian from the county the deed names, finds each section (instantly from your land index when the section is on land you own, otherwise from the BLM PLSS service), and checks it against that county. The described tracts are laid over your boundaries and the confirm screen shows "Evidence from the description": which properties and parcels they overlap and by how much.
+
+**When the description is a portion of a section** ("south and west of Sandy Branch", "the part lying north of the road") rather than quarters, the whole section is used as a search window. If the deed states an acreage ("containing 120 acres") and one parcel inside that section is within 15 percent of it, that parcel is named as the tract itself and offered as the specific record; otherwise only the property with the largest share of the section is pre-checked, and the neighbors in the same section are listed without a check mark.
+
+**When nothing computed**, the screen says why (no section, township, and range were read; the section lookup did not finish; the county check failed) and offers Retry, which re-runs the check without reading the document again. The same evidence is saved with the document and shown on its page, where "Check the description again" re-runs it any time.
+
+**Your land index.** The first upload after a boundary changes quietly records which survey sections each of your properties and parcels touches. Matching then works by lookup, with no live call to wait on.
+
+**Names your family uses.** Deeds call tracts by old names ("View Celeste", "the Martin homeplace") that your property records do not. After an upload, the saved panel offers to remember such a name for the property you attached; from then on the reader is told the name and matches on it. Aliases are listed on the property page under "Also called" and can be removed there.
 
 Two things to know:
 

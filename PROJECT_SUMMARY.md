@@ -20,6 +20,15 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
+00. Run 0029_land_index_aliases.sql in Supabase BEFORE this deploy goes
+   live (2026-08-21, later the same day; NOT YET RUN at the time of
+   writing): land_sections (which BLM sections each property and parcel
+   touches, built by POST /api/land-index), property_aliases (the
+   historical tract names deeds use), and the boundary_bbox RPC. The
+   intake flow calls /api/land-index on open and queries land_sections
+   and property_aliases; without the migration the queries fail quietly
+   and matching falls back to the live BLM path.
+
 0. Run 0028_document_pages.sql in Supabase BEFORE this deploy goes
    live (2026-08-21, NOT YET RUN at the time of writing): it adds
    documents.notes / title_reviewed / extraction_history / updated_at,
@@ -272,6 +281,51 @@ Tables:
   <organization_id>/<entity_type>/..., with storage RLS keyed on the first
   path segment. Asset PHOTOS are simply documents with image content
   types; the UI shows images as a gallery and other files as a list.
+  DESCRIPTION MATCHING, SECOND PASS (2026-08-21, migration 0029; the
+  fix for a Lawrence County deed that the intake failed to place):
+  lib/spatialEvidence.ts is the ONE spatial tier, shared by /api/extract
+  (inside the intake pass) and POST /api/spatial-match (the confirm
+  screen's Retry and the document page's "Check the description again";
+  no model call). collectReferences merges EVERY reference: the AI's
+  plss_reference and the new plss_references array, the mb_anchor, and
+  a deterministic regex pass over the verbatim legal description
+  (lib/legalRefs.ts extractPlssReferences, statedAcresOf,
+  countyStateOf; unit tested, including "Sections 29 and 32, T4S R7W"),
+  deduped by section/T/R, up to 6 tracts, county and state defaulted
+  from the description text or the hints. Each tract resolves through
+  resolvePlssReference (12 s each); a section already in the caller's
+  LAND INDEX skips the live county lookup (knownSection). The tracts
+  are unioned into one MultiPolygon for match_boundaries. The evidence
+  carries reason (no_reference | county_mismatch | lookup_failed |
+  overlap_failed | null), whole_section, stated_acres, references,
+  tract_count, and is PERSISTED in documents.extracted (spatial,
+  plss_references, stated_acres) so the document page shows it.
+  PARCEL FIT (lib/documentMatch.ts spatialSuggestions, tested in
+  documentMatchFit.test.ts): a whole-section tract with a stated
+  acreage whose one parcel inside the section (>= 90% within) sits
+  within PARCEL_FIT_TOLERANCE 15% of it is THAT parcel: score 85,
+  reason "parcel 07 09 31 0 000 003.000 (118.1 acres) on Shop Area fits
+  the 120 acres described in Sec 31, T4S R7W, Huntsville PM", parcelId
+  on the suggestion, offered as the specific record. Otherwise a whole
+  section is a search window: only the largest share is strong (80)
+  and pre-checked; the neighbors in the section are listed at 60
+  unchecked. Quarter-chain tracts keep pre-checking every overlap.
+  LAND INDEX (POST /api/land-index, called fire-and-forget when the
+  intake opens): for every property whose boundary or parcels changed
+  since it was indexed, fetch the BLM sections in its bbox
+  (boundary_bbox RPC, section layer by envelope), cache them in
+  plss_cache (service role), intersect each with match_boundaries on
+  the session client, and store land_sections rows (entity_type
+  property | parcel, section_key, T/R/section/meridian, overlap acres,
+  pct of section, pct of boundary). Idempotent; 100 s budget; failures
+  reported per property. PROPERTY ALIASES (property_aliases): fed to
+  the AI context ("also called ..."), matched by verifyMatches on a
+  name claim or with no claim at all (an alias on the page scores 55),
+  learned one tap at a time from the SavedPanel ("Remember 'View
+  Celeste' means Shop Area", from property_hints.place_names, generic
+  words skipped) and managed on the property page ("Also called").
+  Verified by hand on the DLM deed: the text-only path places it on
+  Shop Area, parcel 07-09-31-0-000-003.000, in 1.5 s.
   SPATIAL PROPERTY MATCHING (migration 0027): the intake tool also
   returns a structured plss_reference (county, state, meridian hint,
   township number + N/S, range number + E/W, section, aliquot text,

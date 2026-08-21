@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DocumentEntityType } from "@/types/db";
 import { ATTACH_TYPES, type AttachOption, type Draft } from "./types";
 
@@ -14,15 +14,29 @@ export default function AttachPicker({
   onChange,
   options,
   load,
+  preselectedLabel = null,
 }: {
   draft: Draft;
   onChange: (d: Draft) => void;
   options: AttachOption[] | null; // null = not loaded yet
   load: () => void;
+  // Label for a record proposed before the options loaded (the parcel
+  // the description fits), so the select never shows blank.
+  preselectedLabel?: string | null;
 }) {
   const [on, setOn] = useState(draft.extra !== null);
   const [type, setType] = useState<DocumentEntityType>(draft.extra?.entityType ?? "parcel");
+  // A proposal arriving after mount (the AI pass) switches the picker on.
+  useEffect(() => {
+    if (draft.extra) {
+      setOn(true);
+      setType(draft.extra.entityType);
+      load();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.extra?.id, draft.extra?.entityType]);
   const list = (options ?? []).filter((o) => o.entityType === type);
+  const missing = draft.extra && !list.some((o) => o.id === draft.extra!.id);
   return (
     <div className="space-y-1.5">
       <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
@@ -58,6 +72,9 @@ export default function AttachPicker({
             className={inputClass}
           >
             <option value="">{options === null ? "Loading..." : "Choose"}</option>
+            {missing && draft.extra ? (
+              <option value={draft.extra.id}>{preselectedLabel ?? "Proposed record"}</option>
+            ) : null}
             {list.map((o) => (
               <option key={o.id} value={o.id}>{o.label}</option>
             ))}

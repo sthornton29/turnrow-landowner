@@ -12,6 +12,7 @@ import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import type { AssetType } from "@/types/db";
 import RowEditor from "@/components/lists/RowEditor";
 import FsaNumbersCard from "@/components/properties/FsaNumbersCard";
+import PropertyAliases from "@/components/properties/PropertyAliases";
 import { MapThumb } from "@/components/summary/Summary";
 import EntityPicker from "@/components/entities/EntityPicker";
 import MoveChildren from "@/components/properties/MoveChildren";
@@ -36,6 +37,11 @@ export default async function PropertyDetailPage({
     .eq("id", id)
     .single();
   if (!property) notFound();
+  const aliasRows = await supabase
+    .from("property_aliases")
+    .select("id, alias")
+    .eq("property_id", id)
+    .order("alias");
 
   const [
     { data: parcels },
@@ -185,6 +191,13 @@ export default async function PropertyDetailPage({
         </div>
         <div className="mt-2">
           <RowEditor entityType="property" row={property} />
+        </div>
+        <div className="mt-2">
+          <PropertyAliases
+            orgId={profile.organization_id!}
+            propertyId={property.id}
+            aliases={((aliasRows.data ?? []) as Array<{ id: string; alias: string }>)}
+          />
         </div>
       </div>
 

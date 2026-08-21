@@ -1,7 +1,7 @@
 "use client";
 
 import { DOC_TYPE_LABELS, scanKindFor } from "@/lib/documents";
-import type { PropertySuggestion, SpatialEvidence } from "@/lib/documentMatch";
+import type { MatchableParcel, PropertySuggestion, SpatialEvidence } from "@/lib/documentMatch";
 import { staticMapUrl } from "@/lib/staticMap";
 import { formatAcres } from "@/lib/format";
 import type { Geometry } from "geojson";
@@ -35,6 +35,9 @@ export default function ConfirmScreen({
   onKeepBoth,
   attachOptions,
   loadAttachOptions,
+  parcels = [],
+  onRetrySpatial,
+  retrying = false,
 }: {
   result: IntakeResult;
   draft: Draft;
@@ -53,8 +56,13 @@ export default function ConfirmScreen({
   onKeepBoth: () => void;
   attachOptions: AttachOption[] | null;
   loadAttachOptions: () => void;
+  parcels?: MatchableParcel[];
+  // Re-run the spatial tier (no model call) after a lookup failure.
+  onRetrySpatial?: () => void;
+  retrying?: boolean;
 }) {
   const scanKind = scanKindFor(draft.docType);
+  const fitParcel = draft.extra?.entityType === "parcel" ? parcels.find((p) => p.id === draft.extra!.id) : undefined;
   const unsure = new Set(result.unsure_fields);
   const conf = result.confidence ?? "low";
   const confCopy =
@@ -109,7 +117,15 @@ export default function ConfirmScreen({
         </div>
       </div>
 
-      <SpatialEvidenceBlock spatial={spatial} properties={properties} conflict={conflict} />
+      <SpatialEvidenceBlock
+        spatial={spatial}
+        properties={properties}
+        conflict={conflict}
+        suggestions={suggestions}
+        parcels={parcels}
+        onRetry={onRetrySpatial}
+        retrying={retrying}
+      />
 
       <div>
         <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -150,7 +166,13 @@ export default function ConfirmScreen({
       {context ? (
         <p className="text-xs text-gray-500">Attached to {context.label}{context.entityType !== "property" ? " (this page)" : ""}.</p>
       ) : (
-        <AttachPicker draft={draft} onChange={onChange} options={attachOptions} load={loadAttachOptions} />
+        <AttachPicker
+          draft={draft}
+          onChange={onChange}
+          options={attachOptions}
+          load={loadAttachOptions}
+          preselectedLabel={fitParcel ? `Parcel ${fitParcel.parcel_number}` : null}
+        />
       )}
 
       {scanKind ? (
@@ -180,14 +202,24 @@ export default function ConfirmScreen({
 // "Evidence from the description": the resolved reference, the county
 // check, and each overlap with the caller's land, plus a small map chip
 // of the described tract when the URL fits the Static Images API.
-function SpatialEvidenceBlock({
+export function SpatialEvidenceBlock({
   spatial,
   properties,
   conflict,
+  suggestions = [],
+  parcels = [],
+  onRetry,
+  retrying = false,
+  compact = false,
 }: {
   spatial: SpatialEvidence | null;
   properties: SelectableProperty[];
   conflict: boolean;
+  suggestions?: PropertySuggestion[];
+  parcels?: MatchableParcel[];
+  onRetry?: () => void;
+  retrying?: boolean;
+  compact?: boolean;
 }) {
   if (!spatial) return null;
   const computed = spatial.computed === true && Array.isArray(spatial.matches);
@@ -195,15 +227,50 @@ function SpatialEvidenceBlock({
     ? (spatial.matches ?? []).filter((m) => m.pct_of_described >= 5)
     : [];
   const county = spatial.county_check ?? null;
-  const countyFailed = county?.matches === false;
-  if (!computed && !countyFailed) return null;
-  const mapUrl = computed && spatial.polygon
+  const countyFailed = county?.matches === false || spatial.reason === "county_mismatch";
+  const retryBtn =
+    onRetry ? (
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={retrying}
+        className="ml-2 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+      >
+        {retrying ? "Checking..." : "Retry"}
+      </button>
+    ) : null;
+  // Not computed: say why, quietly, and offer Retry when it can help.
+  if (!computed && !countyFailed) {
+    const firstNote = spatial.notes?.[0] ?? "";
+    const why =
+      spatial.reason === "no_reference"
+        ? "No section, township, and range were read from the description."
+        : spatial.reason === "lookup_failed"
+          ? `The section lookup did not finish${firstNote ? ` (${firstNote})` : ""}.`
+          : spatial.reason === "overlap_failed"
+            ? firstNote || "The overlap check did not finish."
+            : firstNote || "The description was not checked against your boundaries.";
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <p className="text-sm font-medium text-gray-700">Evidence from the description</p>
+        <p className="mt-0.5 text-xs text-gray-600">
+          {why}
+          {spatial.reason !== "no_reference" ? retryBtn : null}
+        </p>
+      </div>
+    );
+  }
+  const mapUrl = computed && spatial.polygon && !compact
     ? staticMapUrl(spatial.polygon as Geometry, { width: 320, height: 200 })
     : null;
   const propName = (m: { entity_type: string; id: string; name: string }) =>
     m.entity_type === "property"
       ? (properties.find((p) => p.id === m.id)?.name ?? m.name)
       : `parcel ${m.name}`;
+  const fit = suggestions.find((s) => s.parcelId);
+  const fitParcel = fit ? parcels.find((p) => p.id === fit.parcelId) : undefined;
+  const fitMatch = fit ? (spatial.matches ?? []).find((m) => m.id === fit.parcelId) : undefined;
+  const fitProperty = fit ? properties.find((p) => p.id === fit.propertyId) : undefined;
   return (
     <div
       className={
@@ -215,10 +282,24 @@ function SpatialEvidenceBlock({
       {spatial.reference_label ? (
         <p className="mt-0.5 text-xs text-gray-700">
           Describes land in {spatial.reference_label}
+          {spatial.whole_section ? " (whole section used as the search window)" : ""}
           {spatial.described_acres != null ? ` (${formatAcres(spatial.described_acres)} acres described)` : ""}
           {spatial.resolution?.source === "county" ? `; meridian from ${county?.deed ?? "the deed's"} County` : ""}
           {county?.matches === true && county.resolved ? `; county check passed (${county.resolved})` : ""}
+          {(spatial.tract_count ?? 0) > 1 ? `; ${spatial.tract_count} tracts resolved` : ""}
         </p>
+      ) : null}
+      {spatial.stated_acres != null ? (
+        <p className="mt-0.5 text-xs text-gray-700">Deed states {formatAcres(spatial.stated_acres)} acres.</p>
+      ) : null}
+      {fit && fitParcel ? (
+        <p className="mt-1 text-xs font-semibold text-pine-900">
+          Fits parcel {fitParcel.parcel_number}
+          {fitMatch ? ` (${formatAcres(fitMatch.overlap_acres)} acres)` : ""}
+          {fitProperty ? ` on ${fitProperty.name}` : ""}
+        </p>
+      ) : spatial.whole_section && matches.length > 1 ? (
+        <p className="mt-0.5 text-xs text-gray-600">Several of your boundaries sit in this section; only the largest share is pre-checked.</p>
       ) : null}
       {countyFailed ? (
         <p className="mt-1 text-xs font-medium text-red-800">

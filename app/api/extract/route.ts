@@ -10,7 +10,7 @@ import {
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
 import { MODEL_PDF_MAX_BYTES, firstPages, pageCount, splitPdf } from "./pdfChunks";
 import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
-import { resolvePlssReference, type PlssReferenceInput } from "@/lib/plssResolve";
+import { spatialEvidenceFor } from "@/lib/spatialEvidence";
 import {
   VAULT_KINDS,
   VAULT_PROMPTS,
@@ -449,64 +449,6 @@ const PAYMENT_TOOL: Anthropic.Tool = {
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 
-// The intake's spatial evidence: a described polygon and which of the
-// caller's properties/parcels it overlaps (match_boundaries RPC, RLS).
-async function spatialEvidenceFor(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  extraction: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  const ref = (extraction.plss_reference ?? null) as PlssReferenceInput | null;
-  const mb = (extraction.mb_anchor ?? null) as
-    | { county: string | null; state: string | null; section: number | null; township: string | null; range: string | null }
-    | null;
-  let input: PlssReferenceInput | null = ref && ref.section ? ref : null;
-  if (!input && mb && mb.section && mb.township && mb.range) {
-    const t = /^(\d+)\s*([NS])/i.exec(String(mb.township));
-    const r = /^(\d+)\s*([EW])/i.exec(String(mb.range));
-    if (t && r) {
-      input = {
-        county: mb.county,
-        state: mb.state,
-        township_num: Number(t[1]),
-        township_dir: t[2].toUpperCase(),
-        range_num: Number(r[1]),
-        range_dir: r[2].toUpperCase(),
-        section: mb.section,
-        aliquot_text: null,
-        exceptions: [],
-      };
-    }
-  }
-  if (!input) return { notes: [] };
-  // Default the state from the hints when the description omits it.
-  if (!input.state) {
-    const hints = (extraction.property_hints ?? {}) as { states?: string[] };
-    input = { ...input, state: hints.states?.[0] ?? null };
-  }
-  const resolved = await resolvePlssReference(input);
-  const base: Record<string, unknown> = {
-    reference_label: resolved.referenceLabel,
-    resolution: resolved.resolution,
-    county_check: resolved.countyCheck,
-    described_acres: resolved.describedAcres,
-    notes: resolved.notes,
-  };
-  if (!resolved.polygon) return base;
-  const { data, error } = await supabase.rpc("match_boundaries", { p_geojson: resolved.polygon });
-  if (error) {
-    return { ...base, notes: [...resolved.notes, "Overlap check unavailable: " + error.message] };
-  }
-  const matches = ((data as Array<Record<string, unknown>> | null) ?? []).map((m) => ({
-    entity_type: String(m.entity_type),
-    id: String(m.id),
-    name: String(m.name ?? ""),
-    overlap_acres: Number(m.overlap_acres) || 0,
-    pct_of_described: Number(m.pct_of_described) || 0,
-    pct_of_boundary: m.pct_of_boundary === null ? null : Number(m.pct_of_boundary) || 0,
-  }));
-  return { ...base, matches, polygon: resolved.polygon, computed: true };
-}
-
 export async function POST(request: Request) {
   // Only signed-in users may hit this (it spends API credits).
   const supabase = await createClient();
@@ -781,6 +723,7 @@ export async function POST(request: Request) {
               typeof o.acres === "number" ? `${Math.round(o.acres * 10) / 10} acres` : null,
               strs(o.parcel_numbers).length ? `parcels ${strs(o.parcel_numbers).join(", ")}` : null,
               strs(o.fsa_numbers).length ? `FSA farms ${strs(o.fsa_numbers).join(", ")}` : null,
+              strs(o.aliases).length ? `also called ${strs(o.aliases).join("; ")}` : null,
             ].filter(Boolean);
             return [`- "${name}"${parts.length ? `: ${parts.join("; ")}` : ""}`];
           });

@@ -339,6 +339,26 @@ export const SPECIALIZED_KINDS = [
   "lease", "timber_contract", "timber_settlement", "tax_statement", "rent_payment",
 ] as const;
 
+const PLSS_REFERENCE_SCHEMA = {
+  type: ["object", "null"],
+  description:
+    "The PLSS (section, township, range) reference in the legal description, copied with the digits and direction letters EXACTLY as printed (never swap N/S or E/W, never infer a meridian that is not printed). Null when the document has no such reference.",
+  properties: {
+    county: nullable("string", "County of the land as the description states it (without the word County)"),
+    state: nullable("string", "Two-letter state"),
+    meridian_hint: nullable("string", "Principal meridian ONLY if printed (e.g. Huntsville, St. Stephens); else null"),
+    township_num: nullable("number", "Township number"),
+    township_dir: { type: ["string", "null"], enum: ["N", "S", null] },
+    range_num: nullable("number", "Range number"),
+    range_dir: { type: ["string", "null"], enum: ["E", "W", null] },
+    section: nullable("number", "Section 1 to 36"),
+    aliquot_text: nullable("string", "The aliquot chain as printed, e.g. 'NW1/4 of SE1/4'; null when the tract is metes and bounds"),
+    exceptions: { type: "array", items: { type: "string" }, description: "Each 'less and except' clause, verbatim; empty when none" },
+  },
+  required: ["county", "state", "meridian_hint", "township_num", "township_dir", "range_num", "range_dir", "section", "aliquot_text", "exceptions"],
+  additionalProperties: false,
+};
+
 export const INTAKE_TOOL: Anthropic.Tool = {
   name: "record_document_intake",
   description:
@@ -443,24 +463,12 @@ export const INTAKE_TOOL: Anthropic.Tool = {
         ],
         additionalProperties: false,
       },
-      plss_reference: {
-        type: ["object", "null"],
+      plss_reference: PLSS_REFERENCE_SCHEMA,
+      plss_references: {
+        type: "array",
         description:
-          "The PLSS (section, township, range) reference in the legal description, copied with the digits and direction letters EXACTLY as printed (never swap N/S or E/W, never infer a meridian that is not printed). Null when the document has no such reference.",
-        properties: {
-          county: nullable("string", "County of the land as the description states it (without the word County)"),
-          state: nullable("string", "Two-letter state"),
-          meridian_hint: nullable("string", "Principal meridian ONLY if printed (e.g. Huntsville, St. Stephens); else null"),
-          township_num: nullable("number", "Township number"),
-          township_dir: { type: ["string", "null"], enum: ["N", "S", null] },
-          range_num: nullable("number", "Range number"),
-          range_dir: { type: ["string", "null"], enum: ["E", "W", null] },
-          section: nullable("number", "Section 1 to 36"),
-          aliquot_text: nullable("string", "The aliquot chain as printed, e.g. 'NW1/4 of SE1/4'; null when the tract is metes and bounds"),
-          exceptions: { type: "array", items: { type: "string" }, description: "Each 'less and except' clause, verbatim; empty when none" },
-        },
-        required: ["county", "state", "meridian_hint", "township_num", "township_dir", "range_num", "range_dir", "section", "aliquot_text", "exceptions"],
-        additionalProperties: false,
+          "EVERY section/township/range the description carries, one entry per tract, in document order, digits and direction letters exactly as printed (a deed conveying land in two sections lists two). Empty when none.",
+        items: PLSS_REFERENCE_SCHEMA,
       },
       mb_anchor: {
         type: ["object", "null"],
@@ -480,7 +488,7 @@ export const INTAKE_TOOL: Anthropic.Tool = {
     },
     required: [
       "doc_type", "confidence", "title", "reason", "specialized_kind", "property_hints",
-      "matched_properties", "matched_entity", "fields", "plss_reference", "mb_anchor", "unsure_fields",
+      "matched_properties", "matched_entity", "fields", "plss_reference", "plss_references", "mb_anchor", "unsure_fields",
     ],
     additionalProperties: false,
   },

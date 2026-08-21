@@ -21,6 +21,8 @@ import { DocTypeSelect } from "@/components/documents/DocTypeSelect";
 import PropertyMultiSelect, { type SelectableProperty } from "@/components/documents/PropertyMultiSelect";
 import ScanDocumentButton from "@/components/documents/ScanDocumentButton";
 import DocumentReview from "@/components/documents/DocumentReview";
+import { SpatialEvidenceBlock } from "@/components/documents/intake/ConfirmScreen";
+import type { SpatialEvidence } from "@/lib/documentMatch";
 import {
   deleteDocumentEverywhere,
   openDocument,
@@ -125,6 +127,35 @@ export default function DocumentPageClient({
     return [...ids];
   }, [links, doc]);
   const evidenceFor = (pid: string) => links.find((l) => l.property_id === pid)?.evidence ?? null;
+
+  // Spatial evidence saved with the document, re-runnable without a
+  // model call (/api/spatial-match merges into documents.extracted).
+  const spatial = ((doc.extracted ?? {}) as { spatial?: SpatialEvidence | null }).spatial ?? null;
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckError, setRecheckError] = useState<string | null>(null);
+  async function recheckDescription() {
+    setRechecking(true);
+    setRecheckError(null);
+    try {
+      const res = await fetch("/api/spatial-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extraction: doc.extracted ?? {} }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { spatial?: SpatialEvidence; error?: string };
+      if (!res.ok || !body.spatial) throw new Error(body.error ?? "The check did not finish.");
+      const { error } = await supabase
+        .from("documents")
+        .update({ extracted: { ...(doc.extracted ?? {}), spatial: body.spatial } })
+        .eq("id", doc.id);
+      if (error) throw new Error(error.message);
+      router.refresh();
+    } catch (e) {
+      setRecheckError(e instanceof Error ? e.message : "The check did not finish.");
+    } finally {
+      setRechecking(false);
+    }
+  }
   const [editingProps, setEditingProps] = useState(false);
   const [draftProps, setDraftProps] = useState<string[]>(linkedIds);
   async function saveProps() {
@@ -372,6 +403,19 @@ export default function DocumentPageClient({
               </div>
             ) : null}
           </section>
+
+          {/* Evidence from the description (the intake's spatial tier) */}
+          {spatial ? (
+            <section className="space-y-2">
+              <SpatialEvidenceBlock spatial={spatial} properties={properties} conflict={false} compact />
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={recheckDescription} disabled={rechecking} className={linkBtn}>
+                  {rechecking ? "Checking..." : "Check the description again"}
+                </button>
+                {recheckError ? <span className="text-xs text-red-600">{recheckError}</span> : null}
+              </div>
+            </section>
+          ) : null}
 
           {/* Extracted fields */}
           {scanKindFor(docType) || doc.extracted ? (

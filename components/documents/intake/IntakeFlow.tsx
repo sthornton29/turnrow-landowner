@@ -40,6 +40,7 @@ interface Saved {
   extracted: Record<string, unknown> | null;
   storagePath: string;
   propertyId: string | null;
+  propertyIds: string[];
   title: string;
 }
 
@@ -70,6 +71,9 @@ export default function IntakeFlow({
   const [mismatchDismissed, setMismatchDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  // Has the user changed the property selection since the AI pass?
+  const [propsTouched, setPropsTouched] = useState(false);
 
   // Matching context, loaded once: properties, parcels, entities and
   // their confirmed aliases. Session client; RLS scopes it.
@@ -79,17 +83,30 @@ export default function IntakeFlow({
   const [entities, setEntities] = useState<MatchableEntity[]>([]);
   const [attachOptions, setAttachOptions] = useState<AttachOption[] | null>(null);
 
+  // Warm the land index (migration 0029) so the spatial tier matches by
+  // table lookup; idempotent and cheap when nothing changed.
+  useEffect(() => {
+    fetch("/api/land-index", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } }).catch(
+      () => undefined
+    );
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [p, pc, e, a] = await Promise.all([
+      const [p, pc, e, a, pa] = await Promise.all([
         supabase.from("properties").select("id, name, county, state, fsa_numbers, acres, entity_id").order("name"),
         supabase.from("parcels").select("id, property_id, parcel_number"),
         supabase.from("entities").select("id, name").order("name"),
         supabase.from("entity_aliases").select("entity_id, alias"),
+        supabase.from("property_aliases").select("property_id, alias"),
       ]);
       if (cancelled) return;
       const props = (p.data ?? []) as Array<{ id: string; name: string; county: string | null; state: string | null; fsa_numbers: string[] | null; acres: number | string | null; entity_id: string | null }>;
+      const propAliases = new Map<string, string[]>();
+      for (const row of (pa.data ?? []) as Array<{ property_id: string; alias: string }>) {
+        propAliases.set(row.property_id, [...(propAliases.get(row.property_id) ?? []), row.alias]);
+      }
       setProperties(
         props.map((x) => ({
           id: x.id,
@@ -98,6 +115,7 @@ export default function IntakeFlow({
           state: x.state,
           fsa_numbers: x.fsa_numbers ?? null,
           acres: x.acres === null || x.acres === undefined ? null : Number(x.acres),
+          aliases: propAliases.get(x.id) ?? [],
         }))
       );
       setPropertyEntity(Object.fromEntries(props.map((x) => [x.id, x.entity_id ?? null])));
@@ -175,6 +193,7 @@ export default function IntakeFlow({
         parcel_numbers: parcels.filter((pc) => pc.property_id === p.id).map((pc) => pc.parcel_number),
         fsa_numbers: p.fsa_numbers ?? [],
         acres: p.acres,
+        aliases: p.aliases ?? [],
       })),
       entities: entities.map((e) => ({ name: e.name, aliases: e.aliases })),
     });
@@ -208,19 +227,73 @@ export default function IntakeFlow({
     const propertyIds = context
       ? base.propertyIds
       : confident;
+    // Parcel fit: the description's acreage matched one parcel, so that
+    // parcel is proposed as the specific record.
+    const fitParcel = !context && v.verified[0]?.parcelId ? v.verified[0].parcelId : null;
+    setPropsTouched(false);
     setDraft({
       ...base,
       docType: r.doc_type,
       title: r.title ?? "",
       propertyIds,
       entityId: !context && v.entity && confident.length === 0 ? v.entity.entityId : null,
+      extra: fitParcel ? { entityType: "parcel", id: fitParcel } : base.extra,
       values: kind ? initialValuesFor(kind, r.fields) : {},
     });
     setStep("confirm");
   }
 
+  // Retry the spatial tier only (no model call): the reference
+  // resolution and overlap run again, and the property pre-checks are
+  // re-seeded unless the user already changed them.
+  async function retrySpatial() {
+    if (!result) return;
+    setRetrying(true);
+    try {
+      const res = await fetch("/api/spatial-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          extraction: {
+            fields: result.fields,
+            property_hints: result.property_hints,
+            plss_reference: result.plss_reference ?? null,
+            plss_references: result.plss_references ?? null,
+            mb_anchor: result.mb_anchor ?? null,
+          },
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { spatial?: IntakeResult["spatial"] };
+      if (!res.ok || !body.spatial) return;
+      const next: IntakeResult = { ...result, spatial: body.spatial };
+      const v = verifyMatches(
+        next.matched_properties,
+        next.property_hints,
+        properties,
+        parcels,
+        entities,
+        next.matched_entity,
+        propertyEntity,
+        next.spatial ?? null
+      );
+      setResult(next);
+      setVerified(v);
+      if (!context && !propsTouched) {
+        const fitParcel = v.verified[0]?.parcelId ?? null;
+        setDraft((d) => ({
+          ...d,
+          propertyIds: v.preselect,
+          extra: fitParcel ? { entityType: "parcel", id: fitParcel } : d.extra,
+        }));
+      }
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   // Re-seed the fields when the user changes the type on the confirm screen.
   function changeDraft(next: Draft) {
+    if (next.propertyIds !== draft.propertyIds) setPropsTouched(true);
     if (result && next.docType !== draft.docType) {
       const kind = scanKindFor(next.docType);
       next = { ...next, values: kind ? initialValuesFor(kind, result.fields) : {} };
@@ -273,6 +346,13 @@ export default function IntakeFlow({
       if (hasAny || result) {
         if (result?.pages_scanned != null) out.pages_scanned = result.pages_scanned;
         if (result?.total_pages != null) out.total_pages = result.total_pages;
+        // Keep the spatial evidence with the document (the page shows it
+        // and the description can be checked again later).
+        if (result?.spatial) {
+          out.spatial = result.spatial;
+          if (result.spatial.references?.length) out.plss_references = result.spatial.references;
+          if (result.spatial.stated_acres != null) out.stated_acres = result.spatial.stated_acres;
+        }
         extracted = out;
       }
     }
@@ -338,6 +418,7 @@ export default function IntakeFlow({
       extracted,
       storagePath: (path.data?.storage_path as string) ?? "",
       propertyId: propertyIds[0] ?? null,
+      propertyIds,
       title,
     });
     setStep("saved");
@@ -443,6 +524,9 @@ export default function IntakeFlow({
                 }}
                 attachOptions={attachOptions}
                 loadAttachOptions={loadAttachOptions}
+                parcels={parcels}
+                onRetrySpatial={retrySpatial}
+                retrying={retrying}
               />
             ) : null}
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -487,6 +571,10 @@ export default function IntakeFlow({
           storagePath={saved.storagePath}
           propertyId={saved.propertyId}
           title={saved.title}
+          placeNames={result?.property_hints?.place_names ?? []}
+          savedProperties={properties
+            .filter((p) => saved.propertyIds.includes(p.id))
+            .map((p) => ({ id: p.id, name: p.name, aliases: p.aliases ?? [] }))}
           onUploadAnother={reset}
           onDone={onClose}
         />
