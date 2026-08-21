@@ -263,8 +263,22 @@ export default function PlotClient({
 
   // Target
   const [targetMode, setTargetMode] = useState<TargetMode>("new_property");
-  const [targetPropertyId, setTargetPropertyId] = useState(properties[0]?.id ?? "");
-  const [targetParcelId, setTargetParcelId] = useState("");
+  // The target starts on the document's OWN property (or its parcel's
+  // property), never the first name in the list: an alphabetical
+  // default once pointed a Courtland deed at a property near Trinity,
+  // so the preview map stretched miles east to fit both. With no
+  // attachment the target stays empty until a tract resolves, then
+  // follows the nearest boundary unless the user has picked one.
+  const attachedParcel = doc.entity_type === "parcel" ? parcels.find((p) => p.id === doc.entity_id) ?? null : null;
+  const attachedPropertyId =
+    doc.entity_type === "property"
+      ? doc.entity_id
+      : (attachedParcel?.property_id ?? null);
+  const [targetPropertyId, setTargetPropertyId] = useState(
+    attachedPropertyId && properties.some((p) => p.id === attachedPropertyId) ? attachedPropertyId : ""
+  );
+  const [targetParcelId, setTargetParcelId] = useState(attachedParcel?.id ?? "");
+  const [targetTouched, setTargetTouched] = useState(!!attachedPropertyId);
   const [newName, setNewName] = useState("");
   const [newCounty, setNewCounty] = useState("");
   const [newState, setNewState] = useState("");
@@ -456,6 +470,10 @@ export default function PlotClient({
             properties.map((p) => ({ name: p.name, geometry: p.boundary_geojson }))
           )
         : null;
+      if (near && !targetTouched) {
+        const nearId = properties.find((p) => p.name === near.name)?.id;
+        if (nearId) setTargetPropertyId(nearId);
+      }
       patchTract(i, {
         loading: false,
         candidates,
@@ -582,6 +600,33 @@ export default function PlotClient({
         ? (targetParcel?.acres ?? null)
         : null;
   const deededAcres = targetMode === "replace_parcel" ? (targetParcel?.deeded_acres ?? null) : null;
+  // "containing 120 acres, more or less": when the description states an
+  // acreage and the plot is far from it (a creek-bounded portion plotted
+  // as the whole section, a misread quarter), say so plainly.
+  const statedAcres = useMemo(() => {
+    const m = sourceText.match(/containing\s+([\d,]+(?:\.\d+)?)\s+acres?/i);
+    if (!m) return null;
+    const n = Number(m[1].replace(/,/g, ""));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [sourceText]);
+  const acresGap =
+    statedAcres !== null && plottedAcres !== null && Math.abs(plottedAcres - statedAcres) / statedAcres > 0.25
+      ? { stated: statedAcres, plotted: plottedAcres }
+      : null;
+  // A target that sits miles from the plotted tract is almost always the
+  // wrong pick; say so and name the nearest boundary instead.
+  const targetDistance = useMemo(() => {
+    if (!plotted || !existingGeometry) return null;
+    const c = centroidOf(plotted);
+    if (!c) return null;
+    const toTarget = nearestBoundary(c, [{ name: "target", geometry: existingGeometry }]);
+    if (!toTarget || toTarget.miles < 2) return null;
+    const nearest = nearestBoundary(
+      c,
+      properties.map((p) => ({ name: p.name, geometry: p.boundary_geojson }))
+    );
+    return { miles: toTarget.miles, nearest: nearest && nearest.miles < toTarget.miles ? nearest.name : null };
+  }, [plotted, existingGeometry, properties]);
 
   // POB helpers: start at the chosen property's centroid.
   const referenceGeometry: Geometry | null =
@@ -1265,6 +1310,7 @@ export default function PlotClient({
               <select
                 value={targetPropertyId}
                 onChange={(e) => {
+                  setTargetTouched(true);
                   setTargetPropertyId(e.target.value);
                   setPob(null);
                 }}
@@ -1420,7 +1466,7 @@ export default function PlotClient({
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <label className="text-xs font-medium text-gray-700">
                     Property
-                    <select value={targetPropertyId} onChange={(e) => setTargetPropertyId(e.target.value)} className={inputClass}>
+                    <select value={targetPropertyId} onChange={(e) => { setTargetTouched(true); setTargetPropertyId(e.target.value); }} className={inputClass}>
                       <option value="">Pick a property</option>
                       {properties.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
@@ -1440,7 +1486,7 @@ export default function PlotClient({
               {targetMode === "replace_property" ? (
                 <label className="block text-xs font-medium text-gray-700">
                   Property
-                  <select value={targetPropertyId} onChange={(e) => setTargetPropertyId(e.target.value)} className={inputClass}>
+                  <select value={targetPropertyId} onChange={(e) => { setTargetTouched(true); setTargetPropertyId(e.target.value); }} className={inputClass}>
                     <option value="">Pick a property</option>
                     {properties.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -1481,6 +1527,21 @@ export default function PlotClient({
                   {pobCounty ? `, in ${pobCounty} County` : ""}
                   {deedCounty ? ` (deed: ${deedCounty})` : ""}; rotation {rotation.toFixed(1)} degrees
                   {trav ? `; ${formatClosure(trav)}` : ""}.
+                </p>
+              ) : null}
+              {acresGap ? (
+                <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  The description says {formatAcres(acresGap.stated)} acres; the plot is {formatAcres(acresGap.plotted)} acres.
+                  {useAliquot && tracts.every((t) => !t.aliquot_text || parseAliquot(t.aliquot_text).parts.length === 0)
+                    ? " The tract is a portion of the section not defined by quarters (a creek, a road, or a deeded line), so the whole section is shown. Draw it by hand on the map or import the parcel from county records for the exact shape."
+                    : " Check the quarter calls against the deed."}
+                </p>
+              ) : null}
+              {targetDistance ? (
+                <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  The plotted tract is {formatNumber(targetDistance.miles)} miles from{" "}
+                  {targetMode === "replace_parcel" ? "that parcel" : targetProperty?.name ?? "that property"}.
+                  {targetDistance.nearest ? ` Your nearest boundary is ${targetDistance.nearest}.` : ""} Check the target before saving.
                 </p>
               ) : null}
               <div className="grid grid-cols-3 gap-2 text-center">

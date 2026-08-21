@@ -1042,6 +1042,18 @@ Functions and views:
     photo galleries keep Add photos and photo delete, and the plot
     page's breadcrumb links back here. /documents/retype rows link
     here too.
+  - PLOT TARGET DEFAULTS (2026-08-21 fix): the preview's Replace /
+    New parcel target starts on the document's OWN property (or its
+    parcel's property), else follows the nearest boundary found at
+    resolve time until the user picks one; it never defaults to the
+    first property alphabetically (that sent a Courtland deed's
+    preview to Albemarle-Trinity near Trinity and stretched the map
+    miles east). The preview warns when the chosen target sits more
+    than 2 miles from the plotted tract (naming the nearest boundary)
+    and when the description's "containing N acres" differs from the
+    plot by more than 25% (a creek- or road-bounded portion of a
+    section plots as the whole section; draw by hand or import the
+    parcel from county records).
   - /documents/[id]/plot (PLOT BOUNDARY FROM THIS DOCUMENT, the
     flagship, on deeds, plats, and legal descriptions): a three-step
     mobile-first stepper (app/(app)/documents/[id]/plot/PlotClient.tsx,
