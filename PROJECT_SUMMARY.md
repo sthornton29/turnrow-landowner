@@ -1,6 +1,9 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-20, evening (documents attach to several
+Last updated: 2026-08-20, night (AI-first document intake replacing
+the upload pickers, FSA farm numbers editable on the property page with
+156EZ farms linking to properties by number and splitting pro rata by
+ag field acres, model request size caps; earlier that evening: documents attach to several
 properties, Unfiled documents, AI property matching with the owner's
 property list, 156EZ multi-farm packets, resumable uploads and scan by
 storage path, migrations 0023 to 0026; earlier the same day: document vault with a typed taxonomy, AI
@@ -146,10 +149,13 @@ Tables:
 - properties: name, county, state, notes, boundary, acres (generated),
   unique (id, organization_id) as a composite-FK target. Migration 0010
   adds fsa_numbers text[] (optional FSA farm numbers, several per
-  property; entered comma-separated, shown as chips on the property
-  page, in the list line, and in the map click panel; the shared
-  EditField "list" flag in FeaturePanel/RowEditor handles the
-  comma-string <-> array conversion)
+  property; edited on the property page through the FSA FARM NUMBERS
+  card (components/properties/FsaNumbersCard.tsx: chips with add and
+  remove, saved immediately) and comma-separated in the map panel /
+  RowEditor via the shared EditField "list" flag; shown as chips in
+  the list line and the click panel). These numbers are the key that
+  lets a scanned FSA-156EZ land its farms on the right land (see
+  lib/gov/fsaImport.ts below).
 - parcels: property_id, parcel_number, county, notes, boundary, acres.
   Composite FK (property_id, organization_id) -> properties (id,
   organization_id) makes cross-tenant references impossible.
@@ -264,11 +270,22 @@ Tables:
   so a 60 MB packet never passes through Vercel's 4.5 MB request body
   limit; the route allows 300 s (maxDuration) for long packets.
   /api/extract accepts PDFs up to 100 MB and splits long ones with
-  pdf-lib (app/api/extract/pdfChunks.ts): classification reads the first 20 pages, single-record
-  scans the first 90 (pages_scanned/total_pages recorded and an unsure
-  note when truncated), and FSA-156EZ reads EVERY 90-page chunk (two at
-  a time) and merges farms by farm number (mergeFsaExtractions in
-  lib/gov/fsaImport.ts, unit tested). The 156EZ extraction is now
+  pdf-lib (app/api/extract/pdfChunks.ts): classification and intake
+  read the first 20 pages, single-record scans the first 90
+  (pages_scanned/total_pages recorded and an unsure note when
+  truncated), and FSA-156EZ reads EVERY 90-page chunk (two at a time)
+  and merges farms by farm number (mergeFsaExtractions in
+  lib/gov/fsaImport.ts, unit tested). MODEL REQUEST SIZE CAP: the
+  Anthropic API rejects requests over 32 MB AFTER base64 (x1.33), so
+  every PDF slice sent to the model stays under MODEL_PDF_MAX_BYTES =
+  18 MB raw: firstPages halves its page count until the slice fits
+  (a scanned packet runs several MB per page) and splitPdf re-splits
+  oversized chunks; a 413 from the API reads as a plain "too large in
+  one piece, split the PDF or enter by hand" message. The intake
+  flow uploads the file to storage FIRST (<org>/intake/<uuid>-<name>,
+  resumable over 6 MB) and the server reads it by path, the same
+  no-request-body rule as scans; an abandoned intake removes its
+  object. The 156EZ extraction is now
   { farms: [...] } (one entry per distinct farm; legacy single-farm
   extractions still read); the review shows one card per farm with its
   base acres grid, and confirming offers to create or update every farm
@@ -611,8 +628,20 @@ limits, Barchart futures, and SCO dropped):
   orgId, extracted, { sourceDocumentId, propertyId }) turns a reviewed
   FSA-156EZ scan into a farm + base acre rows (fuzzy commodity
   matching via lib/crops.ts canonicalCrop; unmatched commodities are
-  reported, never guessed). Called from the scan review with an
-  explicit confirm; manual entry on /gov-payments works without a
+  reported, never guessed); createOrUpdateFarmsFromExtraction handles
+  a whole packet. PROPERTY LINKING BY FSA NUMBER: the farm links to
+  every property whose fsa_numbers contain the farm number (digits
+  compared); when several properties share one farm number the
+  allocation_pct splits PRO RATA by each property's ag field acres
+  (sum of fields.acres per property; rounding drift lands on the last
+  property so the shares total 100; equal shares only when no field
+  acres exist to weigh by). Only when no property carries the number
+  does the farm link to the page the 156EZ was uploaded from. The
+  result carries linkedProperties and the confirm message says
+  "linked to River Place" or names farms still unlinked with a nudge
+  to add the number on the property page or link on Government
+  Payments. Called from the intake SavedPanel and the scan review with
+  an explicit confirm; manual entry on /gov-payments works without a
   scan.
 - Routes (session required): GET /api/gov/nass-monthly-prices
   (commodity + year; 24 h in-process promise cache; POST lets a
