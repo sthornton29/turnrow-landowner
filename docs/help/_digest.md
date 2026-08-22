@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-22, version 0.1.0, build 1a2c05c. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-22, version 0.1.0, build 26f6202. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -273,9 +273,9 @@ After connecting, the app suggests which of the tenant's fields match your ag fi
 
 Data refreshes on a schedule and with the Refresh now button. When the farm software is unreachable, the last synced data still shows with a note.
 
-## Entities behind a share
+## Tenants come from the farm data
 
-A connection lists the farming entities behind the shared fields when the farmer's software provides them. On a tenant's page you can link the tenant to one of those entities (Turnrow suggests it when every field mapped on that tenant's leases belongs to one entity); leases with that tenant then use the entity's own crop prices instead of the whole operation's, labeled either way.
+Your tenants are the farming entities behind the share. Each entity the farmer's software names becomes a tenant in Turnrow the first time the connection syncs (a share with no entities becomes one tenant for the whole operation); an existing tenant with the same name is linked rather than duplicated, and you can rename a tenant freely. Lease that tenant and the lease's Tenant Data panel scopes to that entity's fields and prices. Farm Data's by-tenant cards are those same entities. For a tenant that did not come from the farm data, the tenant page still lets you link one by hand (Turnrow suggests the entity when every field mapped on that tenant's leases belongs to one).
 
 ## Common questions
 
@@ -390,7 +390,7 @@ Photograph or upload a rent check or a tenant's settlement sheet. The app reads 
 
 ## Tenants and leases
 
-A **tenant** is the person or operation that rents from you, with contact details and insurance on file. A **lease** belongs to a tenant and covers land you pick (whole properties or specific ag fields) with editable leased acres, since contract acres often differ from map acres.
+A **tenant** is the person or operation that rents from you, with contact details and insurance on file. When a farm connection is in place, tenants come from the farm data: each farming entity the farmer shares is a tenant (marked "farm data" in the lease's tenant list), and a lease with that tenant scopes its Tenant Data panel to that entity's fields and prices. A **lease** belongs to a tenant and covers land you pick (whole properties or specific ag fields) with editable leased acres, since contract acres often differ from map acres.
 
 Agricultural leases are **cash** (per acre or lump sum), **flex** (a base rate plus a bonus), or **crop share** (your share of the crop less any shared expenses). Hunting leases are a flat amount or per acre, with an insurance reminder.
 

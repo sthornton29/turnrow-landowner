@@ -85,7 +85,7 @@ export default function LeaseForm({
   parcels = [],
 }: {
   orgId: string;
-  tenants: Array<{ id: string; name: string }>;
+  tenants: Array<{ id: string; name: string; farm_connection_id?: string | null }>;
   lease?: ExistingLease | null;
   prefill?: LeasePrefill | null;
   unsure?: string[];
@@ -364,12 +364,16 @@ export default function LeaseForm({
             onChange={(e) => setTenantId(e.target.value)}
             className={inputClass + ring("tenant_name")}
           >
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-                {matchedTenant?.id === t.id && prefill?.tenant_name ? " (suggested match)" : ""}
-              </option>
-            ))}
+            {[...tenants]
+              // Farm-data tenants (the farming entities) first.
+              .sort((a, b) => Number(Boolean(b.farm_connection_id)) - Number(Boolean(a.farm_connection_id)) || a.name.localeCompare(b.name))
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                  {t.farm_connection_id ? " (farm data)" : ""}
+                  {matchedTenant?.id === t.id && prefill?.tenant_name ? " (suggested match)" : ""}
+                </option>
+              ))}
             <option value="__new__">+ New tenant...</option>
           </select>
           {tenantId === "__new__" ? (

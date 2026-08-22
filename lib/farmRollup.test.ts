@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FarmFieldDataRow, FieldMappingRow } from "./farmDisplay";
-import { NO_ENTITY_KEY, propertyRollups, rollups, scopedRollup, type RollupInput } from "./farmRollup";
+import { NO_ENTITY_KEY, propertyRollups, rollups, scopedRollup, tenantKey, type RollupInput } from "./farmRollup";
 
 function planting(p: Partial<FarmFieldDataRow> & { farm_connection_id: string; remote_field_id: string }): FarmFieldDataRow {
   return {
@@ -104,12 +104,12 @@ describe("rollups by entity", () => {
 describe("rollups by tenant", () => {
   it("rolls a tenant across entities and keeps unmapped acres", () => {
     const { byTenant } = rollups(base);
-    const acme = byTenant.find((r) => r.key === "acme")!;
+    const acme = byTenant.find((r) => r.key === tenantKey("acme", null))!;
     expect(acme.name).toBe("Acme Ag");
     expect(acme.plantedAcres).toBe(210);
     expect(acme.propertyCount).toBe(2);
     expect(acme.unmappedAcres).toBe(0);
-    const bravo = byTenant.find((r) => r.key === "bravo")!;
+    const bravo = byTenant.find((r) => r.key === tenantKey("bravo", null))!;
     expect(bravo.name).toBe("Bravo"); // no operation name: label
     expect(bravo.plantedAcres).toBe(65);
     expect(bravo.unmappedAcres).toBe(25);
@@ -119,7 +119,7 @@ describe("rollups by tenant", () => {
 
 describe("yields and prices", () => {
   it("weights actual yield by harvested acres", () => {
-    const acme = rollups(base).byTenant.find((r) => r.key === "acme")!;
+    const acme = rollups(base).byTenant.find((r) => r.key === tenantKey("acme", null))!;
     const corn = acme.yieldByCrop.find((y) => y.crop === "Corn")!;
     // (18000 + 6000) / (100 + 30)
     expect(corn.yieldPerAcre).toBeCloseTo(24000 / 130, 6);
@@ -131,7 +131,7 @@ describe("yields and prices", () => {
   });
 
   it("weights projected yield by planted acres when no production exists", () => {
-    const bravo = rollups(base).byTenant.find((r) => r.key === "bravo")!;
+    const bravo = rollups(base).byTenant.find((r) => r.key === tenantKey("bravo", null))!;
     const cotton = bravo.yieldByCrop.find((y) => y.crop === "Cotton")!;
     // (1000*40 + 1300*25) / 65
     expect(cotton.yieldPerAcre).toBeCloseTo((40000 + 32500) / 65, 6);
@@ -188,8 +188,7 @@ describe("drill-in", () => {
     expect(tenantOnly.unmappedAcres).toBe(25);
   });
 });
-
-describe("tenant farming entities (migration 0031)", () => {
+describe("tenants are the farming entities (migration 0031)", () => {
   const ent = (p: Partial<FarmFieldDataRow> & { farm_connection_id: string; remote_field_id: string }) => planting(p);
   const multi: RollupInput = {
     ...base,
@@ -204,30 +203,40 @@ describe("tenant farming entities (migration 0031)", () => {
       { farm_connection_id: "acme", crop: "Corn", projected_avg_price: 4.8, unit: "usd_per_bu", is_final: false, remote_entity_id: "e1" },
       { farm_connection_id: "acme", crop: "Soybeans", projected_avg_price: 11, unit: "usd_per_bu", is_final: true, remote_entity_id: "e2" },
     ],
+    tenants: [{ id: "t1", name: "Acme Farms (renamed)", farm_connection_id: "acme", farm_entity_id: "e1" }],
   };
 
-  it("breaks a two-entity connection out by entity, acres summing to the tenant total", () => {
-    const acme = rollups(multi).byTenant.find((t) => t.key === "acme")!;
-    expect(acme.plantedAcres).toBe(210);
-    expect(acme.entityBreakdown).not.toBeNull();
-    const names = acme.entityBreakdown!.map((e) => e.name);
-    expect(names).toEqual(["Acme Farms Inc", "Acme Land LLC", "Unassigned"]);
-    expect(acme.entityBreakdown!.reduce((s, e) => s + e.plantedAcres, 0)).toBe(210);
-    expect(acme.entityBreakdown![0].cropMix).toEqual([{ crop: "Corn", acres: 100 }]);
+  it("makes one tenant card per farming entity, plus one for plantings without an entity", () => {
+    const { byTenant } = rollups(multi);
+    expect(byTenant.map((t) => [t.key, t.plantedAcres])).toEqual([
+      [tenantKey("acme", "e1"), 100],
+      [tenantKey("acme", null), 60],
+      [tenantKey("acme", "e2"), 50],
+      [tenantKey("bravo", "b-only"), 40],
+    ]);
+    expect(byTenant.reduce((s, t) => s + t.plantedAcres, 0)).toBe(250);
   });
 
-  it("leaves a single-entity connection without a breakdown", () => {
-    const bravo = rollups(multi).byTenant.find((t) => t.key === "bravo")!;
-    expect(bravo.entityBreakdown).toBeNull();
+  it("names a card after the linked tenants row, else the farm data's entity name, else the operation", () => {
+    const { byTenant } = rollups(multi);
+    const e1 = byTenant.find((t) => t.key === tenantKey("acme", "e1"))!;
+    expect(e1.name).toBe("Acme Farms (renamed)");
+    expect(e1.tenantId).toBe("t1");
+    expect(e1.subtitle).toBe("Acme Ag");
+    const e2 = byTenant.find((t) => t.key === tenantKey("acme", "e2"))!;
+    expect(e2.name).toBe("Acme Land LLC");
+    expect(e2.tenantId).toBeNull();
+    const none = byTenant.find((t) => t.key === tenantKey("acme", null))!;
+    expect(none.name).toBe("Acme Ag");
+    expect(none.remoteEntityId).toBeNull();
+    expect(none.connectionId).toBe("acme");
   });
 
-  it("puts per-entity prices on the right sub-rollup and keeps whole-operation prices on the tenant", () => {
-    const acme = rollups(multi).byTenant.find((t) => t.key === "acme")!;
-    expect(acme.prices.map((p) => [p.crop, p.price])).toEqual([["Corn", 4.5]]);
-    const [inc, llc, unassigned] = acme.entityBreakdown!;
-    expect(inc.prices.map((p) => [p.crop, p.price])).toEqual([["Corn", 4.8]]);
-    expect(llc.prices.map((p) => [p.crop, p.price, p.isFinal])).toEqual([["Soybeans", 11, true]]);
-    expect(unassigned.prices).toEqual([]);
+  it("gives each entity card its own prices and the no-entity card the whole-operation prices", () => {
+    const { byTenant } = rollups(multi);
+    expect(byTenant.find((t) => t.key === tenantKey("acme", "e1"))!.prices.map((p) => [p.crop, p.price])).toEqual([["Corn", 4.8]]);
+    expect(byTenant.find((t) => t.key === tenantKey("acme", "e2"))!.prices.map((p) => [p.crop, p.price, p.isFinal])).toEqual([["Soybeans", 11, true]]);
+    expect(byTenant.find((t) => t.key === tenantKey("acme", null))!.prices.map((p) => [p.crop, p.price])).toEqual([["Corn", 4.5]]);
   });
 
   it("names an entity from the connection's list when the planting carries only the id", () => {
@@ -236,19 +245,25 @@ describe("tenant farming entities (migration 0031)", () => {
       plantings: multi.plantings.map((p) => (p.remote_entity_id === "e2" ? { ...p, remote_entity_name: null } : p)),
       connections: multi.connections.map((c) => (c.id === "acme" ? { ...c, entities: [{ id: "e2", name: "Acme Land LLC" }] } : c)),
     };
-    const acme = rollups(input).byTenant.find((t) => t.key === "acme")!;
-    expect(acme.entityBreakdown!.map((e) => e.name)).toContain("Acme Land LLC");
+    expect(rollups(input).byTenant.find((t) => t.key === tenantKey("acme", "e2"))!.name).toBe("Acme Land LLC");
   });
 
-  it("changes nothing for pre-entity data", () => {
-    const r = rollups(base);
-    expect(r.byTenant.every((t) => t.entityBreakdown === null)).toBe(true);
-    const llc = r.byEntity[0];
-    expect(llc.prices).toEqual([{ crop: "Corn", price: 4.5, unit: "usd_per_bu", isFinal: false, tenant: "Acme Ag" }]);
+  it("pre-entity data still yields one card per connection, named after the tenant row or the operation", () => {
+    const r = rollups({ ...base, tenants: [{ id: "tb", name: "Bravo Brothers", farm_connection_id: "bravo", farm_entity_id: null }] });
+    expect(r.byTenant.map((t) => [t.key, t.name])).toEqual([
+      [tenantKey("acme", null), "Acme Ag"],
+      [tenantKey("bravo", null), "Bravo Brothers"],
+    ]);
+    expect(r.byEntity[0].prices).toEqual([{ crop: "Corn", price: 4.5, unit: "usd_per_bu", isFinal: false, tenant: "Acme Ag" }]);
   });
 
-  it("gives the drill-in tenant card the same breakdown", () => {
-    const card = scopedRollup(multi, { connectionId: "acme" }, "Acme Ag");
-    expect(card.entityBreakdown!.map((e) => e.plantedAcres)).toEqual([100, 50, 60]);
+  it("scopes the drill-in card and property rows to one farming entity", () => {
+    const card = scopedRollup(multi, { connectionId: "acme", remoteEntityId: "e1" }, "Acme Farms Inc");
+    expect(card.plantedAcres).toBe(100);
+    expect(card.prices.map((p) => p.price)).toEqual([4.8]);
+    expect(card.tenantId).toBe("t1");
+    const none = scopedRollup(multi, { connectionId: "acme", remoteEntityId: null }, "Acme Ag");
+    expect(none.plantedAcres).toBe(60);
+    expect(propertyRollups(multi, { connectionId: "acme", remoteEntityId: "e2" }).map((p) => [p.name, p.plantedAcres])).toEqual([["River Place", 50]]);
   });
 });

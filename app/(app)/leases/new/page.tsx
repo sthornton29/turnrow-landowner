@@ -7,7 +7,7 @@ export default async function NewLeasePage() {
   const { supabase, profile } = await requireOrg();
   const [{ data: tenants }, { data: properties }, { data: parcels }] =
     await Promise.all([
-      supabase.from("tenants").select("id, name").order("name"),
+      supabase.from("tenants").select("id, name, farm_connection_id").order("name"),
       supabase
         .from("properties")
         .select("id, name, county, state, acres, fsa_numbers")

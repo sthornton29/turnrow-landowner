@@ -32,6 +32,7 @@ export default function FarmsClient({
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
   const [connectedInfo, setConnectedInfo] = useState<{
     operation: string;
     fields: number;
@@ -78,12 +79,26 @@ export default function FarmsClient({
   async function refresh(connectionId: string) {
     setSyncing(connectionId);
     setError(null);
+    setSyncNote(null);
     try {
-      await fetch("/api/farm/sync", {
+      const res = await fetch("/api/farm/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connection_id: connectionId }),
       });
+      const body = (await res.json().catch(() => ({}))) as {
+        results?: Array<{ ok: boolean; fields?: number; plantings?: number; tenants?: { created: number; linked: number }; error?: string }>;
+      };
+      const r = body.results?.[0];
+      if (r?.ok) {
+        const t = r.tenants;
+        const tenantText = t && (t.created > 0 || t.linked > 0)
+          ? `; ${[t.created > 0 ? `${t.created} tenant${t.created === 1 ? "" : "s"} created` : null, t.linked > 0 ? `${t.linked} linked` : null].filter(Boolean).join(", ")} from the farm's entities`
+          : "";
+        setSyncNote(`Synced ${formatNumber(r.fields ?? 0)} fields and ${formatNumber(r.plantings ?? 0)} plantings${tenantText}.`);
+      } else if (r?.error) {
+        setError(r.error);
+      }
     } finally {
       setSyncing(null);
       reload();
@@ -141,6 +156,7 @@ export default function FarmsClient({
           </button>
         </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {syncNote ? <p className="text-sm font-medium text-pine-900">{syncNote}</p> : null}
         {connectedInfo ? (
           <p className="text-sm font-medium text-pine-900">
             Connected to {connectedInfo.operation}: {formatNumber(connectedInfo.fields)}{" "}

@@ -239,19 +239,29 @@ export default function LeaseDetail({
     const wholePropertyIds = new Set(
       lands.filter((l) => !l.field_id).map((l) => l.property_id)
     );
-    for (const m of farmMappings) {
+    const onLeaseMappings = farmMappings.filter((m) => {
       const mappedField = m.local_field_id ? fieldById.get(m.local_field_id) : null;
-      const onLease =
+      return Boolean(
         (m.local_field_id && leasedFieldIds.has(m.local_field_id)) ||
-        (mappedField && wholePropertyIds.has(mappedField.property_id)) ||
-        (m.local_property_id && wholePropertyIds.has(m.local_property_id));
-      if (onLease) {
-        keys.add(`${m.farm_connection_id}|${m.remote_field_id}`);
-        connectionIds.add(m.farm_connection_id);
-      }
+          (mappedField && wholePropertyIds.has(mappedField.property_id)) ||
+          (m.local_property_id && wholePropertyIds.has(m.local_property_id))
+      );
+    });
+    // The tenant IS a farming entity: when linked, only that entity's
+    // fields on the lease land count. Fall back to every mapping on the
+    // land when none carries an entity (a pre-entity farm API).
+    const entityScoped = tenantEntity
+      ? onLeaseMappings.filter(
+          (m) => m.farm_connection_id === tenantEntity.connectionId && m.remote_entity_id === tenantEntity.entityId
+        )
+      : [];
+    const chosen = entityScoped.length > 0 ? entityScoped : onLeaseMappings;
+    for (const m of chosen) {
+      keys.add(`${m.farm_connection_id}|${m.remote_field_id}`);
+      connectionIds.add(m.farm_connection_id);
     }
-    return { keys, connectionIds: Array.from(connectionIds) };
-  }, [lands, farmMappings, fieldById]);
+    return { keys, connectionIds: Array.from(connectionIds), scopedToEntity: entityScoped.length > 0 };
+  }, [lands, farmMappings, fieldById, tenantEntity]);
 
   const priceMethod: PriceMethod = lease.terms?.price_method ?? "manual";
   const priceScopedConnections = useMemo(
@@ -681,6 +691,13 @@ export default function LeaseDetail({
                 "your farm connection"
               }
               lastSyncedAt={farmLastSynced}
+              scopeNote={
+                tenantEntity && relevantFarm.scopedToEntity
+                  ? `Tenant data for ${tenantEntity.entityName ?? tenant?.name ?? "this entity"} (from ${
+                      relevantConnections.map((c) => c.label).join(", ") || "your farm connection"
+                    })`
+                  : null
+              }
               canUse={lease.rent_structure === "crop_share"}
               savedEntriesByYear={savedEntriesByYear}
               onFill={handlePanelFill}

@@ -17,6 +17,7 @@ import {
   getProjectedYields,
 } from "@/lib/farmApi";
 import { suggestLocalField } from "@/lib/farmDisplay";
+import { normalizeOwnerName } from "@/lib/ownerNames";
 
 interface ConnectionRow {
   id: string;
@@ -31,6 +32,8 @@ export interface SyncResult {
   error?: string;
   fields?: number;
   plantings?: number;
+  // Tenants rows created or linked from the share's farming entities.
+  tenants?: { created: number; linked: number };
 }
 
 // Refresh the mapping snapshot rows for a connection: insert any new remote
@@ -87,6 +90,72 @@ export async function refreshMappings(
     }
   }
   return remoteFields.length;
+}
+
+// The tenant on a lease is the farming entity the farm data names. For
+// each entity behind a share: a tenant already linked to it keeps its
+// own name (only the remembered entity name refreshes); an unlinked
+// tenant whose name is the same owner name (normalizeOwnerName) is
+// linked; otherwise a tenant is created from the entity. Nothing is
+// ever deleted or unlinked here. Connections without entities (a
+// pre-entity farm API) link or create ONE tenant for the whole
+// operation (farm_entity_id null) so leases still have a tenant that
+// comes from the farm data.
+export async function syncTenantsFromEntities(
+  supabase: AnyClient,
+  connection: { id: string; organization_id: string },
+  entities: Array<{ id: string; name: string }>,
+  operationName: string | null
+): Promise<{ created: number; linked: number }> {
+  const { data: rows } = await supabase
+    .from("tenants")
+    .select("id, name, farm_connection_id, farm_entity_id")
+    .eq("organization_id", connection.organization_id);
+  const tenants = (rows ?? []) as Array<{ id: string; name: string; farm_connection_id: string | null; farm_entity_id: string | null }>;
+  const wanted: Array<{ id: string | null; name: string }> =
+    entities.length > 0 ? entities : operationName ? [{ id: null, name: operationName }] : [];
+  let created = 0;
+  let linked = 0;
+  for (const e of wanted) {
+    const already = tenants.find(
+      (t) => t.farm_connection_id === connection.id && (t.farm_entity_id ?? null) === (e.id ?? null)
+    );
+    if (already) {
+      await supabase.from("tenants").update({ farm_entity_name: e.name }).eq("id", already.id);
+      continue;
+    }
+    const key = normalizeOwnerName(e.name).normalized;
+    const byName = key
+      ? tenants.find((t) => !t.farm_connection_id && normalizeOwnerName(t.name).normalized === key)
+      : undefined;
+    if (byName) {
+      await supabase
+        .from("tenants")
+        .update({ farm_connection_id: connection.id, farm_entity_id: e.id, farm_entity_name: e.name })
+        .eq("id", byName.id);
+      byName.farm_connection_id = connection.id;
+      byName.farm_entity_id = e.id;
+      linked++;
+      continue;
+    }
+    const { data: inserted } = await supabase
+      .from("tenants")
+      .insert({
+        organization_id: connection.organization_id,
+        name: e.name,
+        farm_connection_id: connection.id,
+        farm_entity_id: e.id,
+        farm_entity_name: e.name,
+        notes: `From farm data${operationName ? ` (${operationName})` : ""}.`,
+      })
+      .select("id")
+      .single();
+    if (inserted) {
+      tenants.push({ id: inserted.id as string, name: e.name, farm_connection_id: connection.id, farm_entity_id: e.id });
+      created++;
+    }
+  }
+  return { created, linked };
 }
 
 export async function syncConnection(
@@ -228,7 +297,11 @@ export async function syncConnection(
       })
       .eq("id", connection.id);
 
-    return { connectionId: connection.id, ok: true, fields: fieldCount, plantings: plantings.length };
+    // Tenants ARE the farming entities: every entity the share carries
+    // becomes (or links to) a tenant record on the landowner side.
+    const tenants = await syncTenantsFromEntities(supabase, connection, handshake.entities ?? [], handshake.operation_name);
+
+    return { connectionId: connection.id, ok: true, fields: fieldCount, plantings: plantings.length, tenants };
   } catch (err) {
     const revoked = err instanceof FarmApiError && err.isRevoked;
     const message =

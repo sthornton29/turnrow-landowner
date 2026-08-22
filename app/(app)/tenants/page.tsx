@@ -13,7 +13,7 @@ export default async function TenantsPage() {
   const [{ data: tenants }, { data: leases }] = await Promise.all([
     supabase
       .from("tenants")
-      .select("id, name, contact_person, phone, email, insurance_on_file, insurance_expires")
+      .select("id, name, contact_person, phone, email, insurance_on_file, insurance_expires, farm_connection_id, farm_entity_name")
       .order("name"),
     supabase.from("leases").select("id, tenant_id, status"),
   ]);
@@ -71,8 +71,15 @@ export default async function TenantsPage() {
         </div>
       ) : (
         <ul className="space-y-2">
-          {(tenants ?? []).map((t) => {
+          {[...(tenants ?? [])]
+            // Tenants that come from the farm data first: they are the
+            // farming entities behind the shares.
+            .sort((a, b) => Number(Boolean(b.farm_connection_id)) - Number(Boolean(a.farm_connection_id)) || a.name.localeCompare(b.name))
+            .map((t) => {
             const badge = insuranceBadge(t);
+            const farmChip = t.farm_connection_id
+              ? `From farm data${t.farm_entity_name && t.farm_entity_name !== t.name ? `: ${t.farm_entity_name}` : ""}`
+              : null;
             return (
               <li key={t.id} className="rounded-xl border border-gray-200 bg-white p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -82,6 +89,9 @@ export default async function TenantsPage() {
                   >
                     {t.name}
                   </Link>
+                  {farmChip ? (
+                    <span className="rounded-full bg-kelly-50 px-2 py-0.5 text-xs font-medium text-pine-900">{farmChip}</span>
+                  ) : null}
                   <span className="text-sm text-gray-500">
                     {[t.contact_person, t.phone, t.email].filter(Boolean).join(" · ")}
                   </span>

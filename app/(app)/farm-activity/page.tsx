@@ -16,6 +16,9 @@ import {
   rollups,
   scopedRollup,
   tenantName,
+  parseTenantKey,
+  tenantDisplayName,
+  tenantKey,
   type PriceRow,
   type ProjectedYieldRow,
   type Rollup,
@@ -33,7 +36,7 @@ export const metadata = { title: "Farm Data" };
 export default async function FarmActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ year?: string; connection?: string; property?: string; entity?: string }>;
+  searchParams: Promise<{ year?: string; connection?: string; tenantEntity?: string; property?: string; entity?: string }>;
 }) {
   const { supabase } = await requireOrg();
   const params = await searchParams;
@@ -60,11 +63,25 @@ export default async function FarmActivityPage({
   // entry stays front and center on the connections page instead.
   if ((connections ?? []).length === 0) redirect("/farms");
 
+  // Tenants ARE the farming entities the farm data names (the sync
+  // creates or links a tenants row per entity); they name the cards.
+  const { data: tenantRows } = await supabase
+    .from("tenants")
+    .select("id, name, farm_connection_id, farm_entity_id");
+
   const allData = (farmData ?? []) as FarmFieldDataRow[];
   const years = Array.from(new Set(allData.map((d) => d.crop_year))).sort((a, b) => b - a);
   const currentYear = new Date().getFullYear();
   const year = Number(params.year) || years[0] || currentYear;
-  const connectionFilter = params.connection ?? "";
+  // The tenant filter is a connection plus a farming entity: links use
+  // ?connection=<id>&tenantEntity=<entity>; the form select sends the
+  // combined tenant key. No tenantEntity on a connection = the plantings
+  // the farm data does not assign to an entity (the whole operation).
+  const rawConnection = params.connection ?? "";
+  const parsedKey = rawConnection.startsWith("conn:") ? parseTenantKey(rawConnection) : null;
+  const connectionFilter = parsedKey ? parsedKey.connectionId : rawConnection;
+  const tenantEntityFilter = parsedKey ? (parsedKey.remoteEntityId ?? "") : (params.tenantEntity ?? "");
+  const entityScoped: string | null | undefined = connectionFilter ? tenantEntityFilter || null : undefined;
   const propertyFilter = params.property ?? "";
   const entityFilter = params.entity ?? "";
 
@@ -116,6 +133,12 @@ export default async function FarmActivityPage({
       ...p,
       projected_avg_price: p.projected_avg_price === null ? null : Number(p.projected_avg_price),
     })),
+    tenants: (tenantRows ?? []).map((t) => ({
+      id: t.id,
+      name: t.name,
+      farm_connection_id: t.farm_connection_id ?? null,
+      farm_entity_id: t.farm_entity_id ?? null,
+    })),
   };
 
   interface Row {
@@ -129,6 +152,7 @@ export default async function FarmActivityPage({
 
   const rows: Row[] = yearData
     .filter((d) => !connectionFilter || d.farm_connection_id === connectionFilter)
+    .filter((d) => entityScoped === undefined || (d.remote_entity_id ?? null) === entityScoped)
     .map((d) => {
       const mapping = mappingByKey.get(`${d.farm_connection_id}|${d.remote_field_id}`) ?? null;
       const localField = mapping?.local_field_id ? fieldById.get(mapping.local_field_id) : null;
@@ -173,27 +197,36 @@ export default async function FarmActivityPage({
     ? { id: entityFilter, name: entityFilter === NO_ENTITY_KEY ? "No entity" : (entityNameById.get(entityFilter) ?? "Entity") }
     : null;
   const drillConnection = connectionFilter
-    ? { id: connectionFilter, name: connectionById.get(connectionFilter) ? tenantName(connectionById.get(connectionFilter)!) : "Tenant" }
+    ? {
+        id: connectionFilter,
+        remoteEntityId: entityScoped ?? null,
+        name: connectionById.get(connectionFilter)
+          ? tenantDisplayName(rollupInput, connectionFilter, entityScoped ?? null).name
+          : "Tenant",
+      }
     : null;
   const drillProperty = propertyFilter
     ? { id: propertyFilter, name: propertyById.get(propertyFilter)?.name ?? "Property" }
     : null;
   const atSummary = !drillEntity && !drillConnection && !drillProperty;
 
-  const href = (p: { entity?: string; connection?: string; property?: string }) => {
+  const href = (p: { entity?: string; connection?: string; tenantEntity?: string | null; property?: string }) => {
     const q = new URLSearchParams();
     q.set("year", String(year));
     if (p.entity) q.set("entity", p.entity);
     if (p.connection) q.set("connection", p.connection);
+    if (p.connection && p.tenantEntity) q.set("tenantEntity", p.tenantEntity);
     if (p.property) q.set("property", p.property);
     return `/farm-activity?${q.toString()}`;
   };
+  const tenantHref = (r: Rollup, extra: { entity?: string; property?: string } = {}) =>
+    href({ ...extra, connection: r.connectionId ?? undefined, tenantEntity: r.remoteEntityId });
 
   // Level 1 parent (entity or tenant) for the breadcrumb and rows.
   const parentHref = drillEntity
-    ? href({ entity: drillEntity.id, connection: drillConnection?.id })
+    ? href({ entity: drillEntity.id, connection: drillConnection?.id, tenantEntity: drillConnection?.remoteEntityId })
     : drillConnection
-      ? href({ connection: drillConnection.id })
+      ? href({ connection: drillConnection.id, tenantEntity: drillConnection.remoteEntityId })
       : href({});
   const parentName = drillEntity?.name ?? drillConnection?.name ?? null;
 
@@ -201,7 +234,7 @@ export default async function FarmActivityPage({
     ? null
     : scopedRollup(
         rollupInput,
-        { entityId: drillEntity?.id, connectionId: drillConnection?.id, propertyId: drillProperty?.id },
+        { entityId: drillEntity?.id, connectionId: drillConnection?.id, remoteEntityId: entityScoped, propertyId: drillProperty?.id },
         drillProperty?.name ?? parentName ?? "Your land",
         drillProperty
           ? (parentName ?? null)
@@ -211,10 +244,23 @@ export default async function FarmActivityPage({
       );
   const propertyRows: Rollup[] =
     !atSummary && !drillProperty
-      ? propertyRollups(rollupInput, { entityId: drillEntity?.id, connectionId: drillConnection?.id })
+      ? propertyRollups(rollupInput, { entityId: drillEntity?.id, connectionId: drillConnection?.id, remoteEntityId: entityScoped })
       : [];
 
   const singleCard = summary.byEntity.length <= 1 && summary.byTenant.length <= 1;
+
+  // Tenant options: every farming entity the year's data names (the
+  // cards), plus connections with nothing this year so the filter can
+  // still reach them.
+  const tenantOptions: Array<{ key: string; name: string }> = summary.byTenant.map((r) => ({ key: r.key, name: r.name }));
+  for (const c of conns) {
+    if (!tenantOptions.some((t) => parseTenantKey(t.key)?.connectionId === c.id)) {
+      tenantOptions.push({ key: tenantKey(c.id, null), name: tenantDisplayName(rollupInput, c.id, null).name });
+    }
+  }
+  if (connectionFilter && !tenantOptions.some((t) => t.key === tenantKey(connectionFilter, entityScoped ?? null))) {
+    tenantOptions.push({ key: tenantKey(connectionFilter, entityScoped ?? null), name: drillConnection?.name ?? "Tenant" });
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
@@ -251,13 +297,13 @@ export default async function FarmActivityPage({
           ) : null}
           <select
             name="connection"
-            defaultValue={connectionFilter}
+            defaultValue={connectionFilter ? tenantKey(connectionFilter, entityScoped ?? null) : ""}
             className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
           >
-            <option value="">All connections</option>
-            {conns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {tenantName(c)}
+            <option value="">All tenants</option>
+            {tenantOptions.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.name}
               </option>
             ))}
           </select>
@@ -347,7 +393,7 @@ export default async function FarmActivityPage({
                 summary.byEntity[0]
                   ? href({ entity: summary.byEntity[0].key })
                   : summary.byTenant[0]
-                    ? href({ connection: summary.byTenant[0].key })
+                    ? tenantHref(summary.byTenant[0])
                     : null
               }
               year={year}
@@ -370,7 +416,7 @@ export default async function FarmActivityPage({
                 <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">By tenant</h2>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {summary.byTenant.map((r) => (
-                    <SummaryCard key={r.key} rollup={r} href={href({ connection: r.key })} year={year} />
+                    <SummaryCard key={r.key} rollup={r} href={tenantHref(r)} year={year} />
                   ))}
                 </div>
               </section>
@@ -416,7 +462,7 @@ export default async function FarmActivityPage({
                 {propertyRows.map((p) => (
                   <li key={p.key}>
                     <Link
-                      href={href({ entity: drillEntity?.id, connection: drillConnection?.id, property: p.key })}
+                      href={href({ entity: drillEntity?.id, connection: drillConnection?.id, tenantEntity: drillConnection?.remoteEntityId, property: p.key })}
                       className="block px-4 py-3 hover:bg-kelly-50"
                     >
                       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
@@ -635,32 +681,6 @@ function Chips({ rollup, compact = false }: { rollup: Rollup; compact?: boolean 
   );
 }
 
-// A tenant that farms as several entities: one compact row per entity
-// under the whole-operation card. Nothing renders for one entity.
-function EntityRows({ rollup }: { rollup: Rollup }) {
-  const rows = rollup.entityBreakdown;
-  if (!rows || rows.length === 0) return null;
-  return (
-    <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-100 bg-gray-50/60">
-      {rows.map((e) => {
-        const pct = e.plantedAcres > 0 ? Math.min(100, (e.harvestedAcres / e.plantedAcres) * 100) : 0;
-        return (
-          <div key={e.key} className="px-2.5 py-1.5">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <p className="text-xs font-semibold text-gray-800">{e.name}</p>
-              <p className="text-xs tabular-nums text-pine-900">{formatAcres(e.plantedAcres)} acres</p>
-            </div>
-            <p className="text-[11px] text-gray-600">
-              {cropMixLine(e.cropMix)} · {formatAcres(e.harvestedAcres)} of {formatAcres(e.plantedAcres)} harvested ({Math.round(pct)}%)
-            </p>
-            <Chips rollup={e} />
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function SummaryCard({ rollup, href, year }: { rollup: Rollup; href: string | null; year: number }) {
   const pct = rollup.plantedAcres > 0 ? Math.min(100, (rollup.harvestedAcres / rollup.plantedAcres) * 100) : 0;
   const body = (
@@ -688,7 +708,6 @@ function SummaryCard({ rollup, href, year }: { rollup: Rollup; href: string | nu
         </div>
       </div>
       <Chips rollup={rollup} />
-      <EntityRows rollup={rollup} />
       <p className="mt-1.5 text-[11px] text-gray-400">
         {year} · {formatNumber(rollup.plantings)} planting{rollup.plantings === 1 ? "" : "s"}
         {rollup.propertyCount > 0 ? ` · ${rollup.propertyCount} propert${rollup.propertyCount === 1 ? "y" : "ies"}` : ""}

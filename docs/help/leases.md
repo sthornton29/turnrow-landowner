@@ -8,7 +8,7 @@ keywords: lease, tenant, agricultural, hunting, cash rent, flex, crop share, ter
 ---
 ## Tenants and leases
 
-A **tenant** is the person or operation that rents from you, with contact details and insurance on file. A **lease** belongs to a tenant and covers land you pick (whole properties or specific ag fields) with editable leased acres, since contract acres often differ from map acres.
+A **tenant** is the person or operation that rents from you, with contact details and insurance on file. When a farm connection is in place, tenants come from the farm data: each farming entity the farmer shares is a tenant (marked "farm data" in the lease's tenant list), and a lease with that tenant scopes its Tenant Data panel to that entity's fields and prices. A **lease** belongs to a tenant and covers land you pick (whole properties or specific ag fields) with editable leased acres, since contract acres often differ from map acres.
 
 Agricultural leases are **cash** (per acre or lump sum), **flex** (a base rate plus a bonus), or **crop share** (your share of the crop less any shared expenses). Hunting leases are a flat amount or per acre, with an insurance reminder.
 

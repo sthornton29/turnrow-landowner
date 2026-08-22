@@ -94,6 +94,14 @@ export default async function TenantDetailPage({
         </Link>
         <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold text-gray-900">{tenant.name}</h1>
+          {tenant.farm_connection_id ? (
+            <span className="mt-1 inline-block rounded-full bg-kelly-50 px-2 py-0.5 text-xs font-medium text-pine-900">
+              From farm data: {tenant.farm_entity_name ?? "whole operation"}
+              {connectionList.find((c) => c.id === tenant.farm_connection_id)
+                ? ` (${connectionList.find((c) => c.id === tenant.farm_connection_id)!.label})`
+                : ""}
+            </span>
+          ) : null}
           <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.className}`}>
             {badge.label}
           </span>

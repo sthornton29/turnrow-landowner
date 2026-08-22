@@ -94,10 +94,14 @@ export default function TenantDataPanel({
   onFill,
   onRefresh,
   refreshing,
+  scopeNote = null,
 }: {
   yearBlocks: Array<{ year: number; rows: TenantCropRow[] }>;
   connectionLabel: string;
   lastSyncedAt: string | null;
+  // "Tenant data for <entity> (from <connection>)" when the lease's
+  // tenant is one farming entity of the connection.
+  scopeNote?: string | null;
   canUse: boolean; // crop share fills; flex shows the panel as reference
   savedEntriesByYear: Map<number, CropAssumption[]>;
   onFill: (year: number, fills: PanelFill[], force: boolean) => void;
@@ -111,7 +115,7 @@ export default function TenantDataPanel({
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold text-pine-900">Tenant data</h3>
         <span className="text-xs text-gray-500">
-          from {connectionLabel}
+          {scopeNote ?? `from ${connectionLabel}`}
           {lastSyncedAt
             ? `, last synced ${new Date(lastSyncedAt).toLocaleString()}`
             : ""}

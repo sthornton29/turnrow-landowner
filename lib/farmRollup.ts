@@ -2,7 +2,8 @@ import type { FarmFieldDataRow, FieldMappingRow } from "@/lib/farmDisplay";
 
 // Summary rollups for the Farm Data page: acres in crops, crop mix,
 // harvest progress, and (where the tenant shares them) yields and
-// prices, by entity, by tenant (farm connection), and by property.
+// prices, by entity, by tenant (the farming entity the farm data
+// names, linked to a tenants row), and by property.
 // Pure functions over rows already synced for ONE crop year, so the
 // card totals are the same sums as the field table underneath them.
 
@@ -64,6 +65,16 @@ export interface CropYield {
   basis: "actual" | "projected" | null;
 }
 
+// A tenant as the farm data names it: the farming entity of one
+// connection, or the whole operation when the farm API sends no
+// entities. Linked to a tenants row by the sync (migration 0031).
+export interface RollupTenant {
+  id: string;
+  name: string;
+  farm_connection_id: string | null;
+  farm_entity_id: string | null;
+}
+
 export interface CropPrice {
   crop: string;
   price: number;
@@ -87,9 +98,12 @@ export interface Rollup {
   propertyCount: number;
   unmappedAcres: number;
   connectionIds: string[];
-  // Tenant rollups only: one sub-rollup per farming entity when the
-  // connection's plantings span more than one; null otherwise.
-  entityBreakdown: Rollup[] | null;
+  // Tenant rollups only: the tenants row the farming entity is linked
+  // to (null when the sync has not created it yet), its connection,
+  // and the farm-side entity id (null = the whole operation).
+  tenantId: string | null;
+  connectionId: string | null;
+  remoteEntityId: string | null;
 }
 
 export interface RollupInput {
@@ -101,6 +115,8 @@ export interface RollupInput {
   connections: RollupConnection[];
   projectedYields: ProjectedYieldRow[];
   prices: PriceRow[];
+  // Optional for older callers and tests; names the tenant cards.
+  tenants?: RollupTenant[];
 }
 
 export const NO_ENTITY_KEY = "none";
@@ -113,6 +129,40 @@ export interface ResolvedPlanting {
 
 export function tenantName(c: Pick<RollupConnection, "label" | "operation_name">): string {
   return (c.operation_name ?? "").trim() || c.label;
+}
+
+// Key of a tenant card: the connection, plus the farming entity when
+// the farm data names one.
+export function tenantKey(connectionId: string, remoteEntityId: string | null | undefined): string {
+  return remoteEntityId ? `conn:${connectionId}|ent:${remoteEntityId}` : `conn:${connectionId}`;
+}
+
+export function parseTenantKey(key: string): { connectionId: string; remoteEntityId: string | null } | null {
+  const m = /^conn:([^|]+)(?:\|ent:(.+))?$/.exec(key);
+  return m ? { connectionId: m[1], remoteEntityId: m[2] ?? null } : null;
+}
+
+// The name a tenant card shows: the linked tenants row first (the
+// owner may have renamed it), else the farm data's entity name, else
+// the connection's entity list, else the operation.
+export function tenantDisplayName(
+  input: Pick<RollupInput, "tenants" | "connections" | "plantings">,
+  connectionId: string,
+  remoteEntityId: string | null
+): { name: string; tenantId: string | null } {
+  const linked = (input.tenants ?? []).find(
+    (t) => t.farm_connection_id === connectionId && (t.farm_entity_id ?? null) === (remoteEntityId ?? null)
+  );
+  if (linked) return { name: linked.name, tenantId: linked.id };
+  const c = input.connections.find((x) => x.id === connectionId);
+  if (remoteEntityId) {
+    const fromPlanting = input.plantings.find(
+      (p) => p.farm_connection_id === connectionId && p.remote_entity_id === remoteEntityId && p.remote_entity_name
+    )?.remote_entity_name;
+    const fromList = c?.entities?.find((e) => e.id === remoteEntityId)?.name;
+    return { name: fromPlanting ?? fromList ?? "Unnamed entity", tenantId: null };
+  }
+  return { name: c ? tenantName(c) : "Tenant", tenantId: null };
 }
 
 // Resolve each planting to its property (mapping -> local field ->
@@ -248,38 +298,10 @@ function build(
     propertyCount: props.size,
     unmappedAcres: unmapped,
     connectionIds: [...conns],
-    entityBreakdown: null,
+    tenantId: null,
+    connectionId: null,
+    remoteEntityId: null,
   };
-}
-
-// Sub-rollups per farming entity for one connection's plantings, only
-// when more than one distinct entity is present. Plantings without an
-// entity form an "Unassigned" sub-rollup beside the named ones.
-function entityBreakdownFor(
-  connection: RollupConnection,
-  items: ResolvedPlanting[],
-  input: RollupInput
-): Rollup[] | null {
-  const ids = new Set(items.map((i) => i.row.remote_entity_id).filter((x): x is string => !!x));
-  if (ids.size < 2) return null;
-  const nameOf = (id: string): string =>
-    items.find((i) => i.row.remote_entity_id === id && i.row.remote_entity_name)?.row.remote_entity_name ??
-    connection.entities?.find((e) => e.id === id)?.name ??
-    "Unnamed entity";
-  const groups = new Map<string, ResolvedPlanting[]>();
-  for (const it of items) {
-    const k = it.row.remote_entity_id ?? "";
-    groups.set(k, [...(groups.get(k) ?? []), it]);
-  }
-  const out = [...groups.entries()]
-    .map(([id, list]) =>
-      build(id || "unassigned", id ? nameOf(id) : "Unassigned", null, list, input, { countUnmapped: true, entityId: id || null })
-    )
-    .sort((a, b) => (a.key === "unassigned" ? 1 : 0) - (b.key === "unassigned" ? 1 : 0) || b.plantedAcres - a.plantedAcres);
-  // An Unassigned sub-rollup would otherwise carry the whole-operation
-  // prices as if they were its own.
-  for (const r of out) if (r.key === "unassigned") r.prices = [];
-  return out;
 }
 
 export interface Rollups {
@@ -305,19 +327,32 @@ export function rollups(input: RollupInput): Rollups {
       })
     );
 
+  // By tenant = by farming entity: one card per (connection, entity)
+  // the farm data names, plus one per connection for plantings with no
+  // entity (the whole operation on a pre-entity farm API). Order
+  // follows the connection list, then acres.
   const byTenantMap = new Map<string, ResolvedPlanting[]>();
   for (const r of resolved) {
-    const k = r.row.farm_connection_id;
+    const k = tenantKey(r.row.farm_connection_id, r.row.remote_entity_id ?? null);
     byTenantMap.set(k, [...(byTenantMap.get(k) ?? []), r]);
   }
-  const byTenant = input.connections
-    .filter((c) => byTenantMap.has(c.id))
-    .map((c) => {
-      const items = byTenantMap.get(c.id)!;
-      const r = build(c.id, tenantName(c), null, items, input, { countUnmapped: true });
-      r.entityBreakdown = entityBreakdownFor(c, items, input);
-      return r;
-    });
+  const byTenant: Rollup[] = [];
+  for (const c of input.connections) {
+    const cards = [...byTenantMap.entries()]
+      .filter(([k]) => parseTenantKey(k)?.connectionId === c.id)
+      .map(([k, items]) => {
+        const parsed = parseTenantKey(k)!;
+        const { name, tenantId } = tenantDisplayName(input, c.id, parsed.remoteEntityId);
+        const subtitle = parsed.remoteEntityId && tenantName(c) !== name ? tenantName(c) : null;
+        const r = build(k, name, subtitle, items, input, { countUnmapped: true, entityId: parsed.remoteEntityId });
+        r.tenantId = tenantId;
+        r.connectionId = c.id;
+        r.remoteEntityId = parsed.remoteEntityId;
+        return r;
+      })
+      .sort((a, b) => b.plantedAcres - a.plantedAcres || a.name.localeCompare(b.name));
+    byTenant.push(...cards);
+  }
 
   return { byEntity, byTenant };
 }
@@ -327,12 +362,13 @@ export function rollups(input: RollupInput): Rollups {
 // properties and are left out here.
 export function propertyRollups(
   input: RollupInput,
-  filter: { entityId?: string | null; connectionId?: string | null } = {}
+  filter: { entityId?: string | null; connectionId?: string | null; remoteEntityId?: string | null } = {}
 ): Rollup[] {
   const resolved = resolvePlantings(input).filter((r) => {
     if (r.propertyId === null) return false;
     if (filter.entityId && r.entityKey !== filter.entityId) return false;
     if (filter.connectionId && r.row.farm_connection_id !== filter.connectionId) return false;
+    if (filter.connectionId && filter.remoteEntityId !== undefined && (r.row.remote_entity_id ?? null) !== (filter.remoteEntityId ?? null)) return false;
     return true;
   });
   const propName = new Map(input.properties.map((p) => [p.id, p.name]));
@@ -344,25 +380,32 @@ export function propertyRollups(
 }
 
 // One rollup for a single filter combination (the drill-in header card).
+// remoteEntityId: undefined = any entity on the connection; null = the
+// no-entity (whole operation) card; a string = that farming entity.
 export function scopedRollup(
   input: RollupInput,
-  filter: { entityId?: string | null; connectionId?: string | null; propertyId?: string | null },
+  filter: { entityId?: string | null; connectionId?: string | null; remoteEntityId?: string | null; propertyId?: string | null },
   name: string,
   subtitle: string | null = null
 ): Rollup {
   const resolved = resolvePlantings(input).filter((r) => {
     if (filter.entityId && r.entityKey !== filter.entityId) return false;
     if (filter.connectionId && r.row.farm_connection_id !== filter.connectionId) return false;
+    if (filter.connectionId && filter.remoteEntityId !== undefined && (r.row.remote_entity_id ?? null) !== (filter.remoteEntityId ?? null)) return false;
     if (filter.propertyId && r.propertyId !== filter.propertyId) return false;
     return true;
   });
   // Entity and property scopes are land scopes: unmapped plantings do
   // not belong to them. A tenant scope alone keeps them (with the count).
   const countUnmapped = Boolean(filter.connectionId) && !filter.entityId && !filter.propertyId;
-  const r = build("scoped", name, subtitle, resolved, input, { countUnmapped });
-  if (filter.connectionId && !filter.entityId && !filter.propertyId) {
-    const c = input.connections.find((x) => x.id === filter.connectionId);
-    if (c) r.entityBreakdown = entityBreakdownFor(c, resolved, input);
+  const r = build("scoped", name, subtitle, resolved, input, {
+    countUnmapped,
+    entityId: filter.connectionId ? (filter.remoteEntityId ?? null) : null,
+  });
+  if (filter.connectionId) {
+    r.connectionId = filter.connectionId;
+    r.remoteEntityId = filter.remoteEntityId ?? null;
+    r.tenantId = tenantDisplayName(input, filter.connectionId, filter.remoteEntityId ?? null).tenantId;
   }
   return r;
 }
