@@ -16,6 +16,47 @@ export interface TenantPriceRow {
   unit: string | null;
   is_final: boolean;
   as_of: string | null;
+  // null = the whole operation; set = one farming entity's price
+  // (migration 0031). Pre-entity rows simply lack it.
+  remote_entity_id?: string | null;
+  remote_entity_name?: string | null;
+}
+
+// The lease tenant's farming entity (tenants.farm_connection_id +
+// farm_entity_id). When set, that entity's price rows on that
+// connection win; otherwise whole-operation rows. Never mixed.
+export interface TenantEntityRef {
+  connectionId: string;
+  entityId: string;
+  entityName?: string | null;
+}
+
+export type PriceScope = "entity" | "operation";
+
+export function priceScopeLabel(scope: PriceScope, entityName?: string | null): string {
+  return scope === "entity" ? `${entityName?.trim() || "entity"} entity price` : "whole-operation price";
+}
+
+// Choose the price rows to consider for one crop: the tenant entity's
+// rows when a matching entity row exists for the crop, else the
+// whole-operation rows.
+export function selectPriceRows<T extends TenantPriceRow>(
+  rows: T[],
+  tenantEntity: TenantEntityRef | null | undefined
+): { rows: T[]; scope: PriceScope; entityName: string | null } {
+  if (tenantEntity) {
+    const entityRows = rows.filter(
+      (r) => r.farm_connection_id === tenantEntity.connectionId && r.remote_entity_id === tenantEntity.entityId
+    );
+    if (entityRows.length > 0) {
+      return {
+        rows: entityRows,
+        scope: "entity",
+        entityName: entityRows[0].remote_entity_name ?? tenantEntity.entityName ?? null,
+      };
+    }
+  }
+  return { rows: rows.filter((r) => !r.remote_entity_id), scope: "operation", entityName: null };
 }
 
 export type TenantPriceCard =
@@ -30,6 +71,8 @@ export type TenantPriceCard =
       isFinal: boolean;
       asOf: string | null;
       crop: string;
+      scope: PriceScope;
+      scopeLabel: string;
     };
 
 // Decide what the tenant-average card shows for one crop. The scope-off
@@ -43,19 +86,24 @@ export function tenantPriceCard(
   connectionsWithScope: Set<string>,
   prices: TenantPriceRow[],
   year: number,
-  crop: string | null
+  crop: string | null,
+  tenantEntity: TenantEntityRef | null = null
 ): TenantPriceCard {
   if (relevantConnectionIds.length === 0) return { state: "no_connection" };
   const scoped = relevantConnectionIds.filter((id) => connectionsWithScope.has(id));
   if (scoped.length === 0) return { state: "scope_off" };
   if (!crop || canonicalCrop(crop) === "") return { state: "no_crop" };
-  const candidates = prices.filter(
-    (p) =>
-      scoped.includes(p.farm_connection_id) &&
-      p.crop_year === year &&
-      p.projected_avg_price !== null &&
-      sameCrop(p.crop, crop)
+  const selected = selectPriceRows(
+    prices.filter(
+      (p) =>
+        scoped.includes(p.farm_connection_id) &&
+        p.crop_year === year &&
+        p.projected_avg_price !== null &&
+        sameCrop(p.crop, crop)
+    ),
+    tenantEntity
   );
+  const candidates = selected.rows;
   // Prefer a final settlement number, then the freshest as-of date.
   const row =
     candidates.sort(
@@ -71,6 +119,8 @@ export function tenantPriceCard(
     isFinal: row.is_final,
     asOf: row.as_of,
     crop: row.crop,
+    scope: selected.scope,
+    scopeLabel: priceScopeLabel(selected.scope, selected.entityName),
   };
 }
 

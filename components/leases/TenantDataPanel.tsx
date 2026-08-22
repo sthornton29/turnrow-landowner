@@ -259,6 +259,16 @@ export default function TenantDataPanel({
                                     : `${formatDollars(priceValue.value)} ${priceValue.unitLabel}`}
                                 </span>
                                 <Badge kind={priceValue.isFinal ? "final" : "projected"} />
+                                <span
+                                  className="text-[10px] text-gray-500"
+                                  title={
+                                    priceValue.scope === "entity"
+                                      ? "This tenant's farming entity's own price, from the farm connection"
+                                      : "The whole operation's price; link the tenant to a farming entity on the tenant page for its own"
+                                  }
+                                >
+                                  {priceValue.scopeLabel}
+                                </span>
                                 {priceValue.asOf ? (
                                   <span className="text-[10px] text-gray-500">
                                     as of {new Date(priceValue.asOf).toLocaleDateString()}

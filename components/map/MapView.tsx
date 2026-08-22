@@ -574,6 +574,7 @@ export default function MapView({
             : null,
         yieldShared: row.yield_shared,
         source: connectionLabel.get(row.farm_connection_id) ?? "Farm connection",
+        entity: row.remote_entity_name ?? null,
       };
       if (row.crop) crops.push(row.crop);
       if (mapping.local_field_id) {

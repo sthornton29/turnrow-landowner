@@ -22,6 +22,10 @@ After connecting, the app suggests which of the tenant's fields match your ag fi
 
 Data refreshes on a schedule and with the Refresh now button. When the farm software is unreachable, the last synced data still shows with a note.
 
+## Entities behind a share
+
+A connection lists the farming entities behind the shared fields when the farmer's software provides them. On a tenant's page you can link the tenant to one of those entities (Turnrow suggests it when every field mapped on that tenant's leases belongs to one entity); leases with that tenant then use the entity's own crop prices instead of the whole operation's, labeled either way.
+
 ## Common questions
 
 - **The code says already used.** Codes work once; ask the farmer for a new one.

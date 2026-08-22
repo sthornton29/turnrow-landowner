@@ -133,3 +133,21 @@ describe("rmaConfigForCrop", () => {
     expect(rmaConfigForCrop([], "corn")).toBeNull();
   });
 });
+
+describe("tenantPriceCard with a tenant farming entity", () => {
+  it("prefers the entity row and labels the scope", () => {
+    const card = tenantPriceCard(
+      ["conn1"],
+      new Set(["conn1"]),
+      [price({}), price({ projected_avg_price: 4.9, remote_entity_id: "ent-a", remote_entity_name: "Albemarle Farms" })],
+      2026,
+      "Corn",
+      { connectionId: "conn1", entityId: "ent-a" }
+    );
+    expect(card).toMatchObject({ state: "price", price: 4.9, scope: "entity", scopeLabel: "Albemarle Farms entity price" });
+  });
+  it("uses the operation row when the entity has none", () => {
+    const card = tenantPriceCard(["conn1"], new Set(["conn1"]), [price({})], 2026, "Corn", { connectionId: "conn1", entityId: "ent-a" });
+    expect(card).toMatchObject({ state: "price", price: 4.63, scope: "operation" });
+  });
+});

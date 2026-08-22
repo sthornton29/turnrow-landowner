@@ -5,6 +5,10 @@ import { formatDollars } from "@/lib/format";
 import { insuranceBadge } from "@/lib/insurance";
 import { LEASE_STATUS_LABELS, type LeaseStatus } from "@/lib/leaseLogic";
 import EntityDocuments from "@/components/documents/EntityDocuments";
+import TenantFarmEntity, {
+  type ConnectionEntities,
+  type EntitySuggestion,
+} from "@/components/tenants/TenantFarmEntity";
 import { updateTenant, deleteTenant } from "../actions";
 
 export const metadata = { title: "Tenant" };
@@ -19,17 +23,68 @@ export default async function TenantDetailPage({
   const { id } = await params;
   const { supabase, profile } = await requireOrg();
 
-  const [{ data: tenant }, { data: leases }] = await Promise.all([
+  const [{ data: tenant }, { data: leases }, { data: connections }] = await Promise.all([
     supabase.from("tenants").select("*").eq("id", id).single(),
     supabase
       .from("leases")
       .select("id, name, lease_type, status, start_date, end_date")
       .eq("tenant_id", id)
       .order("start_date", { ascending: false }),
+    supabase.from("farm_connections").select("id, label, entities").neq("status", "revoked").order("created_at"),
   ]);
   if (!tenant) notFound();
 
   const badge = insuranceBadge(tenant);
+
+  // Farming entity suggestion: the tenant's leased land -> confirmed
+  // field mappings on it -> the entities those fields belong to. One
+  // non-null entity covering everything is worth a one-tap link.
+  const connectionList: ConnectionEntities[] = (connections ?? []).map((c) => ({
+    id: c.id,
+    label: c.label,
+    entities: Array.isArray(c.entities) ? (c.entities as ConnectionEntities["entities"]) : [],
+  }));
+  let suggestion: EntitySuggestion | null = null;
+  const leaseIds = (leases ?? []).map((l) => l.id);
+  if (!tenant.farm_connection_id && leaseIds.length > 0 && connectionList.length > 0) {
+    const { data: lands } = await supabase
+      .from("lease_lands")
+      .select("property_id, field_id")
+      .in("lease_id", leaseIds);
+    const fieldIds = new Set((lands ?? []).map((l) => l.field_id).filter(Boolean) as string[]);
+    const propertyIds = new Set((lands ?? []).filter((l) => !l.field_id).map((l) => l.property_id as string));
+    if (fieldIds.size > 0 || propertyIds.size > 0) {
+      const [{ data: mappings }, { data: fields }] = await Promise.all([
+        supabase
+          .from("field_mappings")
+          .select("farm_connection_id, local_field_id, local_property_id, remote_entity_id, remote_entity_name")
+          .eq("status", "confirmed"),
+        supabase.from("fields").select("id, property_id"),
+      ]);
+      const fieldProperty = new Map((fields ?? []).map((f) => [f.id, f.property_id]));
+      const seen = new Map<string, { connectionId: string; entityId: string | null; entityName: string | null }>();
+      for (const m of mappings ?? []) {
+        const onLand =
+          (m.local_field_id && (fieldIds.has(m.local_field_id) || propertyIds.has(fieldProperty.get(m.local_field_id) ?? ""))) ||
+          (m.local_property_id && propertyIds.has(m.local_property_id));
+        if (!onLand) continue;
+        const key = `${m.farm_connection_id}|${m.remote_entity_id ?? ""}`;
+        seen.set(key, { connectionId: m.farm_connection_id, entityId: m.remote_entity_id, entityName: m.remote_entity_name });
+      }
+      if (seen.size === 1) {
+        const only = [...seen.values()][0];
+        const conn = connectionList.find((c) => c.id === only.connectionId);
+        if (only.entityId && conn) {
+          suggestion = {
+            connectionId: conn.id,
+            connectionLabel: conn.label,
+            entityId: only.entityId,
+            entityName: only.entityName ?? conn.entities.find((e) => e.id === only.entityId)?.name ?? "this entity",
+          };
+        }
+      }
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
@@ -110,6 +165,21 @@ export default async function TenantDetailPage({
           Save changes
         </button>
       </form>
+
+      <TenantFarmEntity
+        tenantId={tenant.id}
+        linked={
+          tenant.farm_connection_id
+            ? {
+                connectionId: tenant.farm_connection_id,
+                entityId: tenant.farm_entity_id ?? null,
+                entityName: tenant.farm_entity_name ?? null,
+              }
+            : null
+        }
+        connections={connectionList}
+        suggestion={suggestion}
+      />
 
       <section>
         <h2 className="mb-2 text-lg font-semibold text-gray-900">Leases</h2>

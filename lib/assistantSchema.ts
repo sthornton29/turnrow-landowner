@@ -57,10 +57,12 @@ GOVERNMENT PAYMENTS (FSA)
   NOTE: projected ARC/PLC payments are computed by gov_payments_summary, never stored.
 
 TENANT FARM DATA (shared by the farmer's own software; read-only here)
-- farm_connections(id, label, status 'active'|'error'|'revoked', operation_name, landowner_name, field_count, last_synced_at)
-- field_mappings(id, farm_connection_id, remote_field_id, remote_name, remote_acres, remote_farm_name, local_field_id nullable, local_property_id nullable, status 'suggested'|'confirmed'|'ignored')
-- farm_field_data(id, farm_connection_id, remote_field_id, crop_year, crop, planted_acres, irrigated_acres, dryland_acres, planting_date, varieties jsonb, harvested_acres, production_units (null when yields are not shared), production_unit 'bu'|'lbs', yield_shared)
-- farm_marketing_prices(id, farm_connection_id, crop, crop_year, price, unit, is_final, as_of)
+- farm_connections(id, label, status 'active'|'error'|'revoked', operation_name, landowner_name, field_count, last_synced_at, entities jsonb [{id, name, field_count}] the tenant's farming entities)
+- field_mappings(id, farm_connection_id, remote_field_id, remote_name, remote_acres, remote_farm, remote_entity_id, remote_entity_name, local_field_id nullable, local_property_id nullable, status 'suggested'|'confirmed'|'ignored')
+- farm_field_data(id, farm_connection_id, remote_field_id, crop_year, crop, planted_acres, irrigated_acres, dryland_acres, planting_date, varieties jsonb, harvested_acres, production_units (null when yields are not shared), production_unit 'bu'|'lbs', yield_shared, remote_entity_id, remote_entity_name the tenant's farming entity operating the field)
+- farm_marketing_prices(id, farm_connection_id, crop, crop_year, projected_avg_price, unit 'usd_per_bu'|'cents_per_lb', is_final, as_of, remote_entity_id null = the whole operation, remote_entity_name)
+- farm_projected_yields(id, farm_connection_id, remote_field_id, crop, crop_year, planted_acres, yield_per_acre, unit 'bu_per_ac'|'lbs_per_ac', basis 'expected'|'actual', practices jsonb, remote_entity_id)
+- tenants(id, name, contact_person, phone, email, farm_connection_id nullable, farm_entity_id nullable, farm_entity_name nullable)   -- a tenant may be one farming entity of one connection
 
 Tips: join land to ownership via properties_geo.entity_id -> entities.id; route parcels to properties via parcels_geo.property_id; sum acres with round(sum(acres)::numeric, 1).
 `;

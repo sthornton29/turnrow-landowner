@@ -188,3 +188,67 @@ describe("drill-in", () => {
     expect(tenantOnly.unmappedAcres).toBe(25);
   });
 });
+
+describe("tenant farming entities (migration 0031)", () => {
+  const ent = (p: Partial<FarmFieldDataRow> & { farm_connection_id: string; remote_field_id: string }) => planting(p);
+  const multi: RollupInput = {
+    ...base,
+    plantings: [
+      ent({ farm_connection_id: "acme", remote_field_id: "a1", crop: "Corn", planted_acres: 100, remote_entity_id: "e1", remote_entity_name: "Acme Farms Inc" }),
+      ent({ farm_connection_id: "acme", remote_field_id: "a2", crop: "Soybeans", planted_acres: 50, remote_entity_id: "e2", remote_entity_name: "Acme Land LLC" }),
+      ent({ farm_connection_id: "acme", remote_field_id: "a3", crop: "Corn", planted_acres: 60, remote_entity_id: null }),
+      ent({ farm_connection_id: "bravo", remote_field_id: "b1", crop: "Cotton", planted_acres: 40, remote_entity_id: "b-only", remote_entity_name: "Bravo" }),
+    ],
+    prices: [
+      { farm_connection_id: "acme", crop: "Corn", projected_avg_price: 4.5, unit: "usd_per_bu", is_final: false, remote_entity_id: null },
+      { farm_connection_id: "acme", crop: "Corn", projected_avg_price: 4.8, unit: "usd_per_bu", is_final: false, remote_entity_id: "e1" },
+      { farm_connection_id: "acme", crop: "Soybeans", projected_avg_price: 11, unit: "usd_per_bu", is_final: true, remote_entity_id: "e2" },
+    ],
+  };
+
+  it("breaks a two-entity connection out by entity, acres summing to the tenant total", () => {
+    const acme = rollups(multi).byTenant.find((t) => t.key === "acme")!;
+    expect(acme.plantedAcres).toBe(210);
+    expect(acme.entityBreakdown).not.toBeNull();
+    const names = acme.entityBreakdown!.map((e) => e.name);
+    expect(names).toEqual(["Acme Farms Inc", "Acme Land LLC", "Unassigned"]);
+    expect(acme.entityBreakdown!.reduce((s, e) => s + e.plantedAcres, 0)).toBe(210);
+    expect(acme.entityBreakdown![0].cropMix).toEqual([{ crop: "Corn", acres: 100 }]);
+  });
+
+  it("leaves a single-entity connection without a breakdown", () => {
+    const bravo = rollups(multi).byTenant.find((t) => t.key === "bravo")!;
+    expect(bravo.entityBreakdown).toBeNull();
+  });
+
+  it("puts per-entity prices on the right sub-rollup and keeps whole-operation prices on the tenant", () => {
+    const acme = rollups(multi).byTenant.find((t) => t.key === "acme")!;
+    expect(acme.prices.map((p) => [p.crop, p.price])).toEqual([["Corn", 4.5]]);
+    const [inc, llc, unassigned] = acme.entityBreakdown!;
+    expect(inc.prices.map((p) => [p.crop, p.price])).toEqual([["Corn", 4.8]]);
+    expect(llc.prices.map((p) => [p.crop, p.price, p.isFinal])).toEqual([["Soybeans", 11, true]]);
+    expect(unassigned.prices).toEqual([]);
+  });
+
+  it("names an entity from the connection's list when the planting carries only the id", () => {
+    const input: RollupInput = {
+      ...multi,
+      plantings: multi.plantings.map((p) => (p.remote_entity_id === "e2" ? { ...p, remote_entity_name: null } : p)),
+      connections: multi.connections.map((c) => (c.id === "acme" ? { ...c, entities: [{ id: "e2", name: "Acme Land LLC" }] } : c)),
+    };
+    const acme = rollups(input).byTenant.find((t) => t.key === "acme")!;
+    expect(acme.entityBreakdown!.map((e) => e.name)).toContain("Acme Land LLC");
+  });
+
+  it("changes nothing for pre-entity data", () => {
+    const r = rollups(base);
+    expect(r.byTenant.every((t) => t.entityBreakdown === null)).toBe(true);
+    const llc = r.byEntity[0];
+    expect(llc.prices).toEqual([{ crop: "Corn", price: 4.5, unit: "usd_per_bu", isFinal: false, tenant: "Acme Ag" }]);
+  });
+
+  it("gives the drill-in tenant card the same breakdown", () => {
+    const card = scopedRollup(multi, { connectionId: "acme" }, "Acme Ag");
+    expect(card.entityBreakdown!.map((e) => e.plantedAcres)).toEqual([100, 50, 60]);
+  });
+});

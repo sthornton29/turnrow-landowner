@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-22, version 0.1.0, build e8c3502. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-22, version 0.1.0, build 1a2c05c. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -245,6 +245,10 @@ The card totals are sums of the field rows beneath them, so they always agree.
 
 The Map's Crops layer colors ag fields by the same data for the current year.
 
+## Your tenant's farming entities
+
+A farm often runs as several entities (a family corporation for one set of fields, an LLC for another). When your tenant's software shares which entity operates each field, the tenant's card breaks out per entity (acres, crop mix, harvest, and that entity's own prices) under the whole-operation totals, the field table gains an Entity column, and the map's field panel says who operates the field. A tenant with one entity shows nothing extra.
+
 ## Common questions
 
 - **Yield or prices show "Not shared."** The farmer did not enable that scope; ask them or leave it. Acres and harvest progress always show, because plantings are always shared.
@@ -268,6 +272,10 @@ After connecting, the app suggests which of the tenant's fields match your ag fi
 ## Refreshing
 
 Data refreshes on a schedule and with the Refresh now button. When the farm software is unreachable, the last synced data still shows with a note.
+
+## Entities behind a share
+
+A connection lists the farming entities behind the shared fields when the farmer's software provides them. On a tenant's page you can link the tenant to one of those entities (Turnrow suggests it when every field mapped on that tenant's leases belongs to one entity); leases with that tenant then use the entity's own crop prices instead of the whole operation's, labeled either way.
 
 ## Common questions
 

@@ -17,7 +17,7 @@ export default async function LeaseDetailPage({
       supabase.from("leases").select("*").eq("id", id).single(),
       supabase
         .from("tenants")
-        .select("id, name, insurance_on_file, insurance_expires")
+        .select("id, name, insurance_on_file, insurance_expires, farm_connection_id, farm_entity_id, farm_entity_name")
         .order("name"),
       supabase.from("properties").select("id, name, acres").order("name"),
       supabase.from("fields").select("id, property_id, name, acres").order("name"),

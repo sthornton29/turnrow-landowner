@@ -305,6 +305,8 @@ export interface FarmActivityInfo {
   yieldText: string | null;
   yieldShared: boolean;
   source: string;
+  // The tenant's operating entity for the field, when shared.
+  entity?: string | null;
 }
 
 // Detail panel for a clicked map feature. Desktop: card on the right side of
@@ -489,6 +491,9 @@ export default function FeaturePanel({
                       </span>
                     ) : null}
                   </p>
+                  {a.entity ? (
+                    <p className="text-xs text-gray-600">Operated by {a.entity}</p>
+                  ) : null}
                   <p className="text-xs text-gray-600">
                     {a.planting_date ? `Planted ${a.planting_date} · ` : ""}
                     {a.harvested ? "Harvested" : "Growing"}

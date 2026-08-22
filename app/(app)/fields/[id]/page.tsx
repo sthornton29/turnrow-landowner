@@ -188,6 +188,7 @@ export default async function FieldSummaryPage({
                 <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
                   <th className="px-3 py-2">Year</th>
                   <th className="px-3 py-2">Crop</th>
+                  {activity.some((d) => !!d.remote_entity_name) ? <th className="px-3 py-2">Entity</th> : null}
                   <th className="px-3 py-2 text-right">Acres</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2 text-right">Yield</th>
@@ -200,6 +201,9 @@ export default async function FieldSummaryPage({
                     <tr key={d.id} className="border-b border-gray-100 last:border-0">
                       <td className="px-3 py-2">{d.crop_year}</td>
                       <td className="px-3 py-2">{d.crop || "Unknown"}</td>
+                      {activity.some((x) => !!x.remote_entity_name) ? (
+                        <td className="px-3 py-2 text-gray-700">{d.remote_entity_name ?? ""}</td>
+                      ) : null}
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatAcres(d.planted_acres)}
                       </td>

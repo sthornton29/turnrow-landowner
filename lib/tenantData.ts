@@ -6,7 +6,14 @@
 
 import { canonicalCrop, matchCrop, sameCrop } from "@/lib/crops";
 import type { FarmFieldDataRow } from "@/lib/farmDisplay";
-import type { ProjectedYieldRow, TenantPriceRow } from "@/lib/leasePricing";
+import {
+  priceScopeLabel,
+  selectPriceRows,
+  type PriceScope,
+  type ProjectedYieldRow,
+  type TenantEntityRef,
+  type TenantPriceRow,
+} from "@/lib/leasePricing";
 
 export interface TenantYieldCell {
   value: number; // per acre, 1 decimal
@@ -24,6 +31,10 @@ export interface TenantPriceCell {
   fillValue: number;
   isFinal: boolean;
   asOf: string | null;
+  // Whose price: the lease tenant's farming entity, or the whole
+  // operation (the only kind before migration 0031).
+  scope: PriceScope;
+  scopeLabel: string;
 }
 
 // "not_shared": the farmer has not granted the scope that would supply
@@ -59,6 +70,8 @@ export function buildTenantCropRows(args: {
   priceScope: Set<string>; // connections sharing projected prices
   year: number;
   leaseCrops: Array<string | null | undefined>; // this year's assumption crops
+  // The lease tenant's farming entity, when linked (tenants.farm_*).
+  tenantEntity?: TenantEntityRef | null;
 }): TenantCropRow[] {
   const {
     farmData,
@@ -71,6 +84,7 @@ export function buildTenantCropRows(args: {
     priceScope,
     year,
     leaseCrops,
+    tenantEntity = null,
   } = args;
 
   const plantings = farmData.filter(
@@ -105,16 +119,19 @@ export function buildTenantCropRows(args: {
     if (!anyPriceScope) {
       priceCell = "not_shared";
     } else {
+      const selected = selectPriceRows(
+        prices.filter(
+          (p) =>
+            p.crop_year === year &&
+            p.projected_avg_price !== null &&
+            sameCrop(p.crop, crop) &&
+            priceScope.has(p.farm_connection_id) &&
+            relevantConnectionIds.includes(p.farm_connection_id)
+        ),
+        tenantEntity
+      );
       const row =
-        prices
-          .filter(
-            (p) =>
-              p.crop_year === year &&
-              p.projected_avg_price !== null &&
-              sameCrop(p.crop, crop) &&
-              priceScope.has(p.farm_connection_id) &&
-              relevantConnectionIds.includes(p.farm_connection_id)
-          )
+        selected.rows
           .sort(
             (a, b) =>
               Number(b.is_final) - Number(a.is_final) ||
@@ -130,6 +147,8 @@ export function buildTenantCropRows(args: {
             : row.projected_avg_price,
           isFinal: row.is_final,
           asOf: row.as_of,
+          scope: selected.scope,
+          scopeLabel: priceScopeLabel(selected.scope, selected.entityName),
         };
       }
     }

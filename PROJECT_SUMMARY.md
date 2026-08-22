@@ -28,6 +28,19 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
+0000. Run 0031_farm_entities.sql in Supabase BEFORE this deploy goes
+   live (2026-08-22; NOT YET RUN at the time of writing): tenant
+   farming entities from the farm API (farm_connections.entities,
+   remote_entity_id/name on field_mappings, farm_field_data,
+   farm_projected_yields, and farm_marketing_prices with a new
+   (connection, year, crop, coalesce(entity,'')) unique index replacing
+   the old three-column unique, and the optional
+   tenants.farm_connection_id / farm_entity_id / farm_entity_name
+   link). The sync writes these columns on its next run and fails
+   without them; everything renders nothing new until the farmer's
+   software sends entities. After the deploy press Refresh now on a
+   connection (or wait for the 6-hour cron) to pull entities.
+
 000. Run 0030_tax_statement_lines.sql in Supabase BEFORE this deploy goes
    live (2026-08-21, night; NOT YET RUN at the time of writing). It
    rebuilds property taxes: tax_statements becomes the header (account
@@ -1935,6 +1948,35 @@ Functions and views:
     flow (paste layer URL, auto-read fields with guessed mappings,
     dropdown mapping, one-record test query, save as active/untested),
     edit, deactivate, delete.
+  - TENANT FARMING ENTITIES (Part 2, 2026-08-22, migration 0031; the
+    partner API's operating-entities section, keyed on entity_id,
+    never on the name): the handshake's entities[] is stored on the
+    connection (shown on the /farms card as "Entities: A (12 fields),
+    B"); every field mapping, planting row, and projected yield keeps
+    the field's remote_entity_id/name; marketing prices keep the
+    whole-operation rows (remote_entity_id null) beside the by_entity
+    rows, upserted by hand against the coalesce unique index. FARM
+    DATA: lib/farmRollup.ts Rollup.entityBreakdown (sub-rollups per
+    entity, named from the planting else the connection's list else
+    "Unnamed entity", an "Unassigned" sub-rollup only when named
+    entities exist, per-entity prices on the sub-rollups and
+    whole-operation prices on the tenant card) is computed ONLY when a
+    connection's plantings span two or more entities; the by-tenant
+    cards and the drill-in tenant card render entity sub-rows, the
+    field table and the field page gain an Entity column only when a
+    row carries one, and the map's field panel says "Operated by X".
+    TENANTS: the tenant page's "Farming entity" card links a tenant to
+    one entity of one connection (or "whole operation"), with an
+    automatic suggestion when every confirmed mapping on the tenant's
+    leased land belongs to one entity (leases -> lease_lands ->
+    field_mappings). LEASES: lib/tenantData.ts and lib/leasePricing.ts
+    prefer the linked entity's price rows on that connection and fall
+    back to whole-operation rows, never mixing; the Tenant Data panel
+    and the price card label the scope ("X entity price" /
+    "whole-operation price"). Unit tested (rollup breakdown, entity vs
+    operation price selection, pre-entity data unchanged). A
+    pre-entity farm API leaves every new column null and nothing new
+    renders.
   - FARM DATA IS DATA FIRST: the Farm Data nav item lands on
     /farm-activity; with no connections yet it redirects to /farms so
     the share-code entry stays front and center. The activity page
@@ -2222,3 +2264,13 @@ Functions and views:
   target, two-edit typo tolerance on long words, personal property
   parcel-free), and the fixture regression suite around the three real
   2024 statements. Described above.
+- Post-Phase 6p (DONE, 2026-08-22, migration 0031): TENANT FARMING
+  ENTITIES from the farm API (entities on the connection, the field's
+  entity on mappings, plantings, and projected yields, per-entity
+  marketing prices beside whole-operation rows), Farm Data by-tenant
+  cards with per-entity sub-rows when a connection spans entities, an
+  Entity column on field tables and "Operated by" on the map panel,
+  tenants linkable to one farming entity with an automatic suggestion
+  from their leased land, and lease Tenant Data prices scoped to the
+  tenant's entity when linked, labeled either way. Degrades to nothing
+  new against a pre-entity API. Described above.

@@ -64,6 +64,9 @@ export async function refreshMappings(
       remote_name: remote.name,
       remote_farm: remote.farm_name,
       remote_acres: remote.acres?.total ?? null,
+      // The field's farming entity (null on a pre-entity farm API).
+      remote_entity_id: remote.entity_id ?? null,
+      remote_entity_name: remote.entity ?? null,
     };
     const existingId = known.get(remote.id);
     if (existingId) {
@@ -130,6 +133,8 @@ export async function syncConnection(
           production_units: prod?.production_units ?? null,
           production_unit: prod?.unit ?? null,
           yield_shared: Boolean(handshake.scopes?.yields),
+          remote_entity_id: planting.entity_id ?? prod?.entity_id ?? null,
+          remote_entity_name: planting.entity ?? prod?.entity ?? null,
           payload: { planting, production: prod ?? null },
           synced_at: new Date().toISOString(),
         },
@@ -144,21 +149,38 @@ export async function syncConnection(
     if (handshake.scopes?.projected_prices) {
       try {
         const prices = await getMarketingPrices(token, year);
-        for (const price of prices) {
-          await supabase.from("farm_marketing_prices").upsert(
-            {
-              organization_id: connection.organization_id,
-              farm_connection_id: connection.id,
-              crop_year: price.crop_year,
-              crop: price.crop ?? "",
-              projected_avg_price: price.projected_avg_price,
-              unit: price.unit,
-              is_final: Boolean(price.is_final),
-              as_of: price.as_of ?? null,
-              synced_at: new Date().toISOString(),
-            },
-            { onConflict: "farm_connection_id,crop_year,crop" }
-          );
+        // Whole-operation rows (remote_entity_id null) and per-entity
+        // rows side by side; the unique index keys on the entity too.
+        const rows = [
+          ...prices.data.map((price) => ({ price, entityId: null as string | null, entityName: null as string | null })),
+          ...prices.by_entity.map((price) => ({ price, entityId: price.entity_id, entityName: price.entity_name ?? null })),
+        ];
+        for (const { price, entityId, entityName } of rows) {
+          const base = {
+            organization_id: connection.organization_id,
+            farm_connection_id: connection.id,
+            crop_year: price.crop_year,
+            crop: price.crop ?? "",
+            projected_avg_price: price.projected_avg_price,
+            unit: price.unit,
+            is_final: Boolean(price.is_final),
+            as_of: price.as_of ?? null,
+            remote_entity_id: entityId,
+            remote_entity_name: entityName,
+            synced_at: new Date().toISOString(),
+          };
+          // Upsert by hand: the coalesce unique index is not an upsert target.
+          let q = supabase
+            .from("farm_marketing_prices")
+            .select("id")
+            .eq("farm_connection_id", connection.id)
+            .eq("crop_year", price.crop_year)
+            .eq("crop", price.crop ?? "");
+          q = entityId ? q.eq("remote_entity_id", entityId) : q.is("remote_entity_id", null);
+          const { data: existing } = await q.limit(1);
+          const hit = (existing as Array<{ id: string }> | null)?.[0];
+          if (hit) await supabase.from("farm_marketing_prices").update(base).eq("id", hit.id);
+          else await supabase.from("farm_marketing_prices").insert(base);
         }
       } catch (err) {
         if (err instanceof FarmApiError && err.isRevoked) throw err;
@@ -181,6 +203,7 @@ export async function syncConnection(
               unit: row.unit,
               basis: row.basis,
               practices: row.practices,
+              remote_entity_id: row.entity_id ?? null,
               synced_at: new Date().toISOString(),
             },
             { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
@@ -198,6 +221,7 @@ export async function syncConnection(
         scopes: handshake.scopes,
         operation_name: handshake.operation_name,
         landowner_name: handshake.landowner_name,
+        entities: handshake.entities ?? [],
         field_count: handshake.field_count,
         last_synced_at: new Date().toISOString(),
         last_error: null,

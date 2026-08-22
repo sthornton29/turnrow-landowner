@@ -15,6 +15,9 @@ const STATUS_CLASSES: Record<string, string> = {
 
 interface Connection extends FarmConnectionRow {
   created_at: string;
+  // The share's farming entities (migration 0031); empty on a
+  // pre-entity farm API.
+  entities?: Array<{ id: string; name: string; field_count?: number | null }> | null;
 }
 
 export default function FarmsClient({
@@ -39,7 +42,7 @@ export default function FarmsClient({
     const { data } = await supabase
       .from("farm_connections")
       .select(
-        "id, label, status, scopes, operation_name, landowner_name, field_count, last_synced_at, last_error, created_at"
+        "id, label, status, scopes, operation_name, landowner_name, field_count, entities, last_synced_at, last_error, created_at"
       )
       .order("created_at");
     setConnections((data as Connection[]) ?? []);
@@ -194,6 +197,14 @@ export default function FarmsClient({
                     </span>
                   ))}
                 </span>
+                {(c.entities ?? []).length > 0 ? (
+                  <span className="basis-full text-xs text-gray-600">
+                    Entities:{" "}
+                    {(c.entities ?? [])
+                      .map((e) => (e.field_count ? `${e.name} (${formatNumber(e.field_count)} fields)` : e.name))
+                      .join(", ")}
+                  </span>
+                ) : null}
                 <span className="ml-auto text-xs text-gray-400">
                   {c.last_synced_at
                     ? `Last synced ${new Date(c.last_synced_at).toLocaleString()}`

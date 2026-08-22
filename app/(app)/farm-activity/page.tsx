@@ -48,7 +48,7 @@ export default async function FarmActivityPage({
   ] = await Promise.all([
     supabase
       .from("farm_connections")
-      .select("id, label, scopes, status, operation_name, last_synced_at, last_error"),
+      .select("id, label, scopes, status, operation_name, last_synced_at, last_error, entities"),
     supabase.from("field_mappings").select("*"),
     supabase.from("farm_field_data").select("*").order("crop_year", { ascending: false }),
     supabase.from("fields").select("id, name, property_id"),
@@ -71,11 +71,11 @@ export default async function FarmActivityPage({
   const [{ data: marketingPrices }, { data: projectedYields }] = await Promise.all([
     supabase
       .from("farm_marketing_prices")
-      .select("farm_connection_id, crop, crop_year, projected_avg_price, unit, is_final, as_of")
+      .select("farm_connection_id, crop, crop_year, projected_avg_price, unit, is_final, as_of, remote_entity_id")
       .eq("crop_year", year),
     supabase
       .from("farm_projected_yields")
-      .select("farm_connection_id, remote_field_id, crop, planted_acres, yield_per_acre, unit, basis")
+      .select("farm_connection_id, remote_field_id, crop, planted_acres, yield_per_acre, unit, basis, remote_entity_id")
       .eq("crop_year", year),
   ]);
 
@@ -105,6 +105,7 @@ export default async function FarmActivityPage({
       label: c.label,
       operation_name: c.operation_name ?? null,
       scopes: (c.scopes ?? null) as RollupConnection["scopes"],
+      entities: (c.entities ?? null) as RollupConnection["entities"],
     })),
     projectedYields: ((projectedYields ?? []) as ProjectedYieldRow[]).map((p) => ({
       ...p,
@@ -160,6 +161,9 @@ export default async function FarmActivityPage({
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
 
+  // The tenant's operating entity per field (migration 0031): a column
+  // only when the farm software shares it.
+  const anyOperatingEntity = rows.some((r) => !!r.data.remote_entity_name);
   const totalPlanted = rows.reduce((s, r) => s + Number(r.data.planted_acres ?? 0), 0);
   const totalHarvested = rows.reduce((s, r) => s + Number(r.data.harvested_acres ?? 0), 0);
 
@@ -496,6 +500,7 @@ export default async function FarmActivityPage({
                   <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
                     <th className="px-4 py-2">Field</th>
                     <th className="px-4 py-2">Crop</th>
+                    {anyOperatingEntity ? <th className="px-4 py-2">Entity</th> : null}
                     <th className="px-4 py-2 text-right">Acres</th>
                     <th className="px-4 py-2">Planted</th>
                     <th className="px-4 py-2">Status</th>
@@ -518,6 +523,9 @@ export default async function FarmActivityPage({
                             ? ` (${r.data.varieties.map((v) => v.variety).join(", ")})`
                             : ""}
                         </td>
+                        {anyOperatingEntity ? (
+                          <td className="px-4 py-2 text-gray-700">{r.data.remote_entity_name ?? ""}</td>
+                        ) : null}
                         <td className="px-4 py-2 text-right tabular-nums">
                           {formatAcres(r.data.planted_acres)}
                         </td>
@@ -627,6 +635,32 @@ function Chips({ rollup, compact = false }: { rollup: Rollup; compact?: boolean 
   );
 }
 
+// A tenant that farms as several entities: one compact row per entity
+// under the whole-operation card. Nothing renders for one entity.
+function EntityRows({ rollup }: { rollup: Rollup }) {
+  const rows = rollup.entityBreakdown;
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-100 bg-gray-50/60">
+      {rows.map((e) => {
+        const pct = e.plantedAcres > 0 ? Math.min(100, (e.harvestedAcres / e.plantedAcres) * 100) : 0;
+        return (
+          <div key={e.key} className="px-2.5 py-1.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+              <p className="text-xs font-semibold text-gray-800">{e.name}</p>
+              <p className="text-xs tabular-nums text-pine-900">{formatAcres(e.plantedAcres)} acres</p>
+            </div>
+            <p className="text-[11px] text-gray-600">
+              {cropMixLine(e.cropMix)} · {formatAcres(e.harvestedAcres)} of {formatAcres(e.plantedAcres)} harvested ({Math.round(pct)}%)
+            </p>
+            <Chips rollup={e} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function SummaryCard({ rollup, href, year }: { rollup: Rollup; href: string | null; year: number }) {
   const pct = rollup.plantedAcres > 0 ? Math.min(100, (rollup.harvestedAcres / rollup.plantedAcres) * 100) : 0;
   const body = (
@@ -654,6 +688,7 @@ function SummaryCard({ rollup, href, year }: { rollup: Rollup; href: string | nu
         </div>
       </div>
       <Chips rollup={rollup} />
+      <EntityRows rollup={rollup} />
       <p className="mt-1.5 text-[11px] text-gray-400">
         {year} · {formatNumber(rollup.plantings)} planting{rollup.plantings === 1 ? "" : "s"}
         {rollup.propertyCount > 0 ? ` · ${rollup.propertyCount} propert${rollup.propertyCount === 1 ? "y" : "ies"}` : ""}

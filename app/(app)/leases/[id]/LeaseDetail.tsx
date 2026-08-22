@@ -85,7 +85,15 @@ export default function LeaseDetail({
 }: {
   orgId: string;
   lease: LeaseRow;
-  tenants: Array<{ id: string; name: string; insurance_on_file: boolean; insurance_expires: string | null }>;
+  tenants: Array<{
+    id: string;
+    name: string;
+    insurance_on_file: boolean;
+    insurance_expires: string | null;
+    farm_connection_id?: string | null;
+    farm_entity_id?: string | null;
+    farm_entity_name?: string | null;
+  }>;
   properties: Array<{ id: string; name: string; acres: number | null }>;
   fields: Array<{ id: string; property_id: string; name: string; acres: number | null }>;
 }) {
@@ -157,6 +165,12 @@ export default function LeaseDetail({
   }, [load]);
 
   const tenant = tenants.find((t) => t.id === lease.tenant_id) ?? null;
+  // The lease tenant's farming entity: its prices win over the whole
+  // operation's when the tenant is linked on the tenant page.
+  const tenantEntity =
+    tenant?.farm_connection_id && tenant.farm_entity_id
+      ? { connectionId: tenant.farm_connection_id, entityId: tenant.farm_entity_id, entityName: tenant.farm_entity_name ?? null }
+      : null;
   const propertyName = new Map(properties.map((p) => [p.id, p.name]));
   const fieldById = new Map(fields.map((f) => [f.id, f]));
   const totalAcres = lands.reduce((s, l) => s + (l.leased_acres ?? 0), 0);
@@ -288,6 +302,7 @@ export default function LeaseDetail({
           priceScope: priceScopedConnections,
           year,
           leaseCrops: (savedEntriesByYear.get(year) ?? []).map((e) => e.crop ?? null),
+          tenantEntity,
         })
       );
     }
@@ -691,7 +706,8 @@ export default function LeaseDetail({
                       priceScopedConnections,
                       marketingPrices,
                       year,
-                      crop
+                      crop,
+                      tenantEntity
                     )
                   }
                   rmaConfigFor={(crop) =>

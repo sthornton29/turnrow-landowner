@@ -4,7 +4,7 @@ route: /farm-activity
 group: Farm Data
 order: 2
 updated: 2026-08-21
-keywords: farm activity, plantings, crop year, varieties, harvested, yield, production, irrigated, dryland, by field, by property, by entity, by tenant, crop mix, harvest progress, projected yield, prices, summary, drill in, crops layer
+keywords: farm activity, entity, farming entity, operated by, plantings, crop year, varieties, harvested, yield, production, irrigated, dryland, by field, by property, by entity, by tenant, crop mix, harvest progress, projected yield, prices, summary, drill in, crops layer
 ---
 ## What this page shows
 
@@ -17,6 +17,10 @@ Everything connected tenants have shared, by crop year, at three levels.
 The card totals are sums of the field rows beneath them, so they always agree.
 
 The Map's Crops layer colors ag fields by the same data for the current year.
+
+## Your tenant's farming entities
+
+A farm often runs as several entities (a family corporation for one set of fields, an LLC for another). When your tenant's software shares which entity operates each field, the tenant's card breaks out per entity (acres, crop mix, harvest, and that entity's own prices) under the whole-operation totals, the field table gains an Entity column, and the map's field panel says who operates the field. A tenant with one entity shows nothing extra.
 
 ## Common questions
 

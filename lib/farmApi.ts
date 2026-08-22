@@ -30,6 +30,14 @@ export interface FarmScopes {
   projected_yields?: boolean;
 }
 
+// A farming entity behind the shared fields (operating entities section
+// of PARTNER_API.md). Key on id, never on the name: farmers rename.
+export interface FarmEntity {
+  id: string;
+  name: string;
+  field_count?: number | null;
+}
+
 export interface FarmHandshake {
   operation_name: string;
   landowner_name: string | null;
@@ -37,6 +45,8 @@ export interface FarmHandshake {
   scopes: FarmScopes;
   field_count: number;
   api_version: string;
+  // Absent on a pre-entity farm API.
+  entities?: FarmEntity[] | null;
 }
 
 // One aggregate number per crop by design (no components, no bushel
@@ -50,6 +60,13 @@ export interface RemoteMarketingPrice {
   as_of: string;
 }
 
+// by_entity[] rows: the same shape per farming entity. A crop the API
+// cannot compute for an entity is omitted (whereas data[] carries null).
+export interface RemoteEntityMarketingPrice extends RemoteMarketingPrice {
+  entity_id: string;
+  entity_name: string | null;
+}
+
 export interface RemoteProjectedYield {
   field_id: string;
   field_name: string | null;
@@ -60,6 +77,7 @@ export interface RemoteProjectedYield {
   unit: "bu_per_ac" | "lbs_per_ac" | null;
   basis: "expected" | "actual";
   practices: Array<{ practice: string; acres: number; yield_per_acre: number }> | null;
+  entity_id?: string | null;
 }
 
 export interface RemoteField {
@@ -68,6 +86,7 @@ export interface RemoteField {
   farm_name: string | null;
   farm_code: string | null;
   entity: string | null;
+  entity_id?: string | null;
   acres: { total: number | null; irrigated: number | null; dryland: number | null };
 }
 
@@ -82,6 +101,8 @@ export interface RemotePlanting {
   dryland_acres: number | null;
   planting_date: string | null;
   varieties: Array<{ variety: string; acres: number }>;
+  entity_id?: string | null;
+  entity?: string | null;
 }
 
 export interface RemoteProduction {
@@ -92,6 +113,8 @@ export interface RemoteProduction {
   harvested_acres: number | null;
   production_units: number | null; // null when yields are not shared
   unit: "bu" | "lbs" | null;
+  entity_id?: string | null;
+  entity?: string | null;
 }
 
 function baseUrl(): string {
@@ -180,12 +203,12 @@ export async function getProduction(token: string, year: number): Promise<Remote
 export async function getMarketingPrices(
   token: string,
   year: number
-): Promise<RemoteMarketingPrice[]> {
-  const body = await farmFetch<{ data: RemoteMarketingPrice[] }>(
+): Promise<{ data: RemoteMarketingPrice[]; by_entity: RemoteEntityMarketingPrice[] }> {
+  const body = await farmFetch<{ data: RemoteMarketingPrice[]; by_entity?: RemoteEntityMarketingPrice[] | null }>(
     `/marketing-prices?year=${year}`,
     { token }
   );
-  return body.data ?? [];
+  return { data: body.data ?? [], by_entity: body.by_entity ?? [] };
 }
 
 export async function getProjectedYields(

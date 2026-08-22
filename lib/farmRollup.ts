@@ -28,6 +28,8 @@ export interface RollupConnection {
   label: string;
   operation_name: string | null;
   scopes: { yields?: boolean; projected_yields?: boolean; projected_prices?: boolean } | null;
+  // The share's farming entities (migration 0031; absent pre-entity).
+  entities?: Array<{ id: string; name: string }> | null;
 }
 
 export interface ProjectedYieldRow {
@@ -46,6 +48,8 @@ export interface PriceRow {
   projected_avg_price: number | null;
   unit: string | null; // usd_per_bu | cents_per_lb
   is_final: boolean;
+  // null = the whole operation; set = one farming entity's price.
+  remote_entity_id?: string | null;
 }
 
 export interface CropAcres {
@@ -83,6 +87,9 @@ export interface Rollup {
   propertyCount: number;
   unmappedAcres: number;
   connectionIds: string[];
+  // Tenant rollups only: one sub-rollup per farming entity when the
+  // connection's plantings span more than one; null otherwise.
+  entityBreakdown: Rollup[] | null;
 }
 
 export interface RollupInput {
@@ -145,7 +152,7 @@ function build(
   subtitle: string | null,
   items: ResolvedPlanting[],
   input: RollupInput,
-  opts: { countUnmapped: boolean }
+  opts: { countUnmapped: boolean; entityId?: string | null }
 ): Rollup {
   const connById = new Map(input.connections.map((c) => [c.id, c]));
   const rows = opts.countUnmapped ? items : items.filter((i) => i.propertyId !== null);
@@ -211,7 +218,11 @@ function build(
   });
 
   const cropSet = new Set(cropMix.map((c) => c.crop));
+  // Whole-operation prices for a plain rollup; an entity sub-rollup
+  // takes that entity's rows instead.
+  const wantEntity = opts.entityId ?? null;
   const prices: CropPrice[] = input.prices
+    .filter((p) => (p.remote_entity_id ?? null) === wantEntity)
     .filter((p) => conns.has(p.farm_connection_id) && p.projected_avg_price !== null && cropSet.has(p.crop))
     .map((p) => ({
       crop: p.crop,
@@ -237,7 +248,38 @@ function build(
     propertyCount: props.size,
     unmappedAcres: unmapped,
     connectionIds: [...conns],
+    entityBreakdown: null,
   };
+}
+
+// Sub-rollups per farming entity for one connection's plantings, only
+// when more than one distinct entity is present. Plantings without an
+// entity form an "Unassigned" sub-rollup beside the named ones.
+function entityBreakdownFor(
+  connection: RollupConnection,
+  items: ResolvedPlanting[],
+  input: RollupInput
+): Rollup[] | null {
+  const ids = new Set(items.map((i) => i.row.remote_entity_id).filter((x): x is string => !!x));
+  if (ids.size < 2) return null;
+  const nameOf = (id: string): string =>
+    items.find((i) => i.row.remote_entity_id === id && i.row.remote_entity_name)?.row.remote_entity_name ??
+    connection.entities?.find((e) => e.id === id)?.name ??
+    "Unnamed entity";
+  const groups = new Map<string, ResolvedPlanting[]>();
+  for (const it of items) {
+    const k = it.row.remote_entity_id ?? "";
+    groups.set(k, [...(groups.get(k) ?? []), it]);
+  }
+  const out = [...groups.entries()]
+    .map(([id, list]) =>
+      build(id || "unassigned", id ? nameOf(id) : "Unassigned", null, list, input, { countUnmapped: true, entityId: id || null })
+    )
+    .sort((a, b) => (a.key === "unassigned" ? 1 : 0) - (b.key === "unassigned" ? 1 : 0) || b.plantedAcres - a.plantedAcres);
+  // An Unassigned sub-rollup would otherwise carry the whole-operation
+  // prices as if they were its own.
+  for (const r of out) if (r.key === "unassigned") r.prices = [];
+  return out;
 }
 
 export interface Rollups {
@@ -270,7 +312,12 @@ export function rollups(input: RollupInput): Rollups {
   }
   const byTenant = input.connections
     .filter((c) => byTenantMap.has(c.id))
-    .map((c) => build(c.id, tenantName(c), null, byTenantMap.get(c.id)!, input, { countUnmapped: true }));
+    .map((c) => {
+      const items = byTenantMap.get(c.id)!;
+      const r = build(c.id, tenantName(c), null, items, input, { countUnmapped: true });
+      r.entityBreakdown = entityBreakdownFor(c, items, input);
+      return r;
+    });
 
   return { byEntity, byTenant };
 }
@@ -312,5 +359,10 @@ export function scopedRollup(
   // Entity and property scopes are land scopes: unmapped plantings do
   // not belong to them. A tenant scope alone keeps them (with the count).
   const countUnmapped = Boolean(filter.connectionId) && !filter.entityId && !filter.propertyId;
-  return build("scoped", name, subtitle, resolved, input, { countUnmapped });
+  const r = build("scoped", name, subtitle, resolved, input, { countUnmapped });
+  if (filter.connectionId && !filter.entityId && !filter.propertyId) {
+    const c = input.connections.find((x) => x.id === filter.connectionId);
+    if (c) r.entityBreakdown = entityBreakdownFor(c, resolved, input);
+  }
+  return r;
 }

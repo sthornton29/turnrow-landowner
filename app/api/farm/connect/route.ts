@@ -47,6 +47,7 @@ export async function POST(request: Request) {
         operation_name: handshake.operation_name,
         landowner_name: handshake.landowner_name,
         field_count: handshake.field_count,
+        entities: handshake.entities ?? [],
       })
       .select("*")
       .single();

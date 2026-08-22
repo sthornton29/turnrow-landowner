@@ -18,6 +18,9 @@ export interface FarmFieldDataRow {
   production_unit: string | null;
   yield_shared: boolean;
   synced_at: string;
+  // The field's farming entity (migration 0031; null on a pre-entity API).
+  remote_entity_id?: string | null;
+  remote_entity_name?: string | null;
 }
 
 export interface FieldMappingRow {
@@ -30,6 +33,8 @@ export interface FieldMappingRow {
   local_field_id: string | null;
   local_property_id: string | null;
   status: "suggested" | "confirmed" | "ignored";
+  remote_entity_id?: string | null;
+  remote_entity_name?: string | null;
 }
 
 export interface FarmConnectionRow {
@@ -41,6 +46,7 @@ export interface FarmConnectionRow {
   landowner_name: string | null;
   field_count: number | null;
   last_synced_at: string | null;
+  entities?: Array<{ id: string; name: string; field_count?: number | null }> | null;
   last_error: string | null;
 }
 

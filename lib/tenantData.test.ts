@@ -239,3 +239,27 @@ describe("buildTenantCropRows", () => {
     expect(rows.find((r) => r.crop === "Soybeans")?.matchedLeaseCrop).toBe("beans");
   });
 });
+
+describe("tenant farming entity prices (migration 0031)", () => {
+  const op = { farm_connection_id: "conn1", crop_year: 2026, crop: "Wheat", projected_avg_price: 5.5, unit: "usd_per_bu", is_final: false, as_of: "2026-08-01", remote_entity_id: null, remote_entity_name: null };
+  const ent = { ...op, projected_avg_price: 6.1, remote_entity_id: "ent-a", remote_entity_name: "Albemarle Farms" };
+  const linked = { connectionId: "conn1", entityId: "ent-a", entityName: "Albemarle Farms" };
+
+  it("uses the linked entity's own price and labels it", () => {
+    const rows = buildTenantCropRows({ ...base, farmData: [planting({})], projectedYields: [], prices: [op, ent], tenantEntity: linked });
+    expect(rows[0].priceCell).toMatchObject({ value: 6.1, scope: "entity", scopeLabel: "Albemarle Farms entity price" });
+  });
+  it("uses the whole-operation price when the tenant is not linked", () => {
+    const rows = buildTenantCropRows({ ...base, farmData: [planting({})], projectedYields: [], prices: [op, ent] });
+    expect(rows[0].priceCell).toMatchObject({ value: 5.5, scope: "operation", scopeLabel: "whole-operation price" });
+  });
+  it("falls back to the operation price when the entity has no row for that crop", () => {
+    const rows = buildTenantCropRows({ ...base, farmData: [planting({})], projectedYields: [], prices: [op, { ...ent, crop: "Canola" }], tenantEntity: linked });
+    expect(rows[0].priceCell).toMatchObject({ value: 5.5, scope: "operation" });
+  });
+  it("treats pre-entity rows (no remote_entity_id) as the operation", () => {
+    const legacy = { farm_connection_id: "conn1", crop_year: 2026, crop: "Wheat", projected_avg_price: 5.96, unit: "usd_per_bu", is_final: true, as_of: "2026-08-17" };
+    const rows = buildTenantCropRows({ ...base, farmData: [planting({})], projectedYields: [], prices: [legacy], tenantEntity: linked });
+    expect(rows[0].priceCell).toMatchObject({ value: 5.96, scope: "operation" });
+  });
+});
