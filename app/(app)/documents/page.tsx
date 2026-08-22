@@ -28,7 +28,9 @@ export default async function DocumentsPage() {
     supabase.from("timber_sales").select("id, sale_name"),
     supabase.from("entities").select("id, name").order("name"),
     supabase.from("tenants").select("id, name"),
-    supabase.from("tax_statements").select("id, parcel_id, tax_year"),
+    supabase
+      .from("tax_statements")
+      .select("id, tax_year, county, account_number, taxpayer_name_printed, tax_statement_lines(parcel_id, line_no)"),
     supabase.from("document_properties").select("document_id, property_id"),
   ]);
 
@@ -78,11 +80,18 @@ export default async function DocumentsPage() {
   );
   push(
     "tax_statement",
-    (taxStatements.data ?? []).map((t) => ({
-      id: t.id,
-      name: `${t.tax_year} tax statement${t.parcel_id ? ` (parcel ${parcelProperty.get(t.parcel_id)?.number ?? ""})` : ""}`,
-      property_id: t.parcel_id ? (parcelProperty.get(t.parcel_id)?.property_id ?? null) : null,
-    })),
+    (taxStatements.data ?? []).map((t) => {
+      // Header + lines (migration 0030): the first matched line's parcel
+      // places the statement on a property.
+      const lines = (t.tax_statement_lines ?? []) as Array<{ parcel_id: string | null; line_no: number }>;
+      const first = [...lines].sort((a, b) => a.line_no - b.line_no).find((l) => l.parcel_id);
+      const who = t.account_number ?? t.taxpayer_name_printed ?? "";
+      return {
+        id: t.id,
+        name: `${t.tax_year} tax statement (${[t.county, who].filter(Boolean).join(", ")})`,
+        property_id: first?.parcel_id ? (parcelProperty.get(first.parcel_id)?.property_id ?? null) : null,
+      };
+    }),
     (r) => r.name ?? "",
     () => "/taxes"
   );

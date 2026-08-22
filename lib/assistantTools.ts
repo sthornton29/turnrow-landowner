@@ -295,12 +295,17 @@ const incomeSummary: ToolImpl = async (supabase, input) => {
 
 const taxesStatus: ToolImpl = async (supabase, input) => {
   const year = Number(input.year) || new Date().getFullYear();
-  const [statements, payments, parcels, props] = await Promise.all([
+  // Headers + lines (migration 0030): a statement covers the parcels
+  // on its lines; coverage and unmatched counts come from lines.
+  const [statements, lines, payments, parcels, props] = await Promise.all([
     all<{
-      id: string; parcel_id: string | null; tax_year: number; county: string | null;
-      amount_due: number; due_date: string | null; delinquent_date: string | null;
-      parcel_number_raw: string | null; owner_name_raw: string | null;
-    }>(supabase.from("tax_statements").select("id, parcel_id, tax_year, county, amount_due, due_date, delinquent_date, parcel_number_raw, owner_name_raw").eq("tax_year", year)),
+      id: string; tax_year: number; county: string | null; account_number: string | null;
+      taxpayer_name_printed: string | null; amount_due: number; due_date: string | null;
+      delinquent_date: string | null; reconciled: boolean;
+    }>(supabase.from("tax_statements").select("id, tax_year, county, account_number, taxpayer_name_printed, amount_due, due_date, delinquent_date, reconciled").eq("tax_year", year)),
+    all<{ id: string; tax_statement_id: string; parcel_id: string | null; line_type: string; tax_due: number }>(
+      supabase.from("tax_statement_lines").select("id, tax_statement_id, parcel_id, line_type, tax_due").eq("tax_year", year)
+    ),
     all<{ tax_statement_id: string; amount: number; paid_date: string }>(
       supabase.from("tax_payments").select("tax_statement_id, amount, paid_date")
     ),
@@ -315,22 +320,27 @@ const taxesStatus: ToolImpl = async (supabase, input) => {
   const parcelById = new Map(parcels.map((p) => [p.id, p]));
   const rows = statements.map((s) => {
     const paid = paidBy.get(s.id) ?? 0;
-    const parcel = s.parcel_id ? parcelById.get(s.parcel_id) : null;
+    const sLines = lines.filter((l) => l.tax_statement_id === s.id);
+    const matched = sLines.filter((l) => l.parcel_id).map((l) => parcelById.get(l.parcel_id!)).filter(Boolean);
     return {
       statement_id: s.id,
-      parcel_number: parcel?.parcel_number ?? s.parcel_number_raw,
-      property: parcel ? (propName.get(parcel.property_id) ?? null) : null,
-      county: s.county ?? parcel?.county ?? null,
+      county: s.county ?? null,
+      account_number: s.account_number,
+      taxpayer_as_printed: s.taxpayer_name_printed,
+      parcels: matched.map((p) => ({ parcel_number: p!.parcel_number, property: propName.get(p!.property_id) ?? null })),
+      lines: sLines.length,
+      unmatched_lines: sLines.filter((l) => l.line_type === "real_property" && !l.parcel_id).length,
+      personal_property_lines: sLines.filter((l) => l.line_type === "personal_property").length,
       amount_due: r2(num(s.amount_due)),
+      reconciled: s.reconciled,
       paid: r2(paid),
       balance: r2(Math.max(num(s.amount_due) - paid, 0)),
       due_date: s.due_date,
       delinquent_date: s.delinquent_date,
       status: taxStatus(s, paid),
-      matched_to_parcel: !!parcel,
     };
   });
-  const covered = new Set(statements.map((s) => s.parcel_id).filter(Boolean));
+  const covered = new Set(lines.filter((l) => l.line_type === "real_property" && l.parcel_id).map((l) => l.parcel_id));
   const missing = parcels
     .filter((p) => !covered.has(p.id))
     .map((p) => ({ parcel_number: p.parcel_number, property: propName.get(p.property_id) ?? null, county: p.county }));
@@ -345,7 +355,7 @@ const taxesStatus: ToolImpl = async (supabase, input) => {
     total_paid: r2(statements.reduce((a, s) => a + (paidBy.get(s.id) ?? 0), 0)),
     statements: rows,
     parcels_without_a_statement: missing,
-    note: "Status is computed from payments against the statement amount; a parcel with no statement for the year may simply not have been uploaded yet.",
+    note: "Status is computed from payments against the statement total; a statement can cover several parcels (its lines); a parcel with no statement line for the year may simply not have been uploaded yet.",
   };
 };
 

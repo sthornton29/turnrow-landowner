@@ -48,6 +48,7 @@ export default async function DashboardPage({
     { data: timberSales },
     { data: taxStatements },
     { data: taxPayments },
+    { data: taxLines },
     { data: farmData },
   ] = await Promise.all([
     supabase
@@ -75,9 +76,14 @@ export default async function DashboardPage({
     supabase.from("timber_sales").select("id, sale_name"),
     supabase
       .from("tax_statements")
-      .select("id, parcel_id, tax_year, amount_due, delinquent_date")
+      .select("id, tax_year, amount_due, delinquent_date")
       .eq("tax_year", new Date().getFullYear()),
     supabase.from("tax_payments").select("tax_statement_id, amount"),
+    supabase
+      .from("tax_statement_lines")
+      .select("parcel_id, line_type")
+      .eq("tax_year", new Date().getFullYear())
+      .not("parcel_id", "is", null),
     supabase
       .from("farm_field_data")
       .select("planted_acres, harvested_acres")
@@ -155,8 +161,9 @@ export default async function DashboardPage({
     );
   }
   const yearStatements = taxStatements ?? [];
+  // Covered = a real-property LINE for the year links to the parcel.
   const coveredParcels = new Set(
-    yearStatements.filter((s) => s.parcel_id).map((s) => s.parcel_id)
+    (taxLines ?? []).filter((l) => l.line_type === "real_property").map((l) => l.parcel_id)
   );
   const unpaidStatements = yearStatements.filter(
     (s) => (taxPaidByStatement.get(s.id) ?? 0) < s.amount_due - 0.005

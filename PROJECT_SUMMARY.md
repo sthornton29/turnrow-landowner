@@ -28,6 +28,24 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
+000. Run 0030_tax_statement_lines.sql in Supabase BEFORE this deploy goes
+   live (2026-08-21, night; NOT YET RUN at the time of writing). It
+   rebuilds property taxes: tax_statements becomes the header (account
+   number and kind, taxpayer as printed, C/O, entity, source document,
+   line_total, reconciled), tax_statement_lines holds every parcel block
+   with its identifiers, parcel_identifiers is the universal identifier
+   store (backfilled from every parcel number, kept in step by trigger),
+   parcels gain raw county attributes, entity_accounts registers
+   account numbers to entities, and every existing statement migrates
+   to a single-line statement with its payments untouched (the old
+   parcel_id / parcel_number_printed / owner_name_printed /
+   assessed_value header columns are DROPPED). The Property Taxes
+   pages, income, dashboard, parcel pages, and the Ask taxes tool read
+   the new shape and fail without it. After the deploy: Settings >
+   Admin > Parcel identifiers > "Fetch attributes for parcels imported
+   before retention" (pulls PPINs and the rest from the county layers
+   for existing parcels), then upload the 2024 statements.
+
 0. Migrations for this release, in order, BEFORE the deploy goes
    live: 0028_document_pages.sql (RUN 2026-08-21: documents.notes /
    title_reviewed / extraction_history / updated_at,
@@ -585,7 +603,130 @@ missing unique (id, organization_id) on parcels):
   App fallback is the Alabama calendar (due Oct 1 of the tax year,
   delinquent Jan 1 following; a delinquent month at or before the due
   month means next calendar year). lib/tax.ts applies these.
-- tax_statements: parcel_id nullable until matched (unmatched statements
+- PROPERTY TAXES, REBUILT FOR HOW COUNTIES BILL (2026-08-21, migration
+  0030). HEADER (tax_statements): tax_year, county, state,
+  authority_name, account_number + account_kind (account_number |
+  receipt_number | key_number | parcel_number | bill_number | other:
+  whatever the county bills on, so uniqueness works everywhere),
+  taxpayer_name_printed and care_of_printed AS PRINTED, entity_id +
+  entity_evidence (matched landowner entity), source_document_id,
+  amount_due (the statement total; column name kept), line_total,
+  reconciled, due_date, delinquent_date (from the document when
+  printed, else the county calendar), notes. Unique partial index
+  (organization_id, county, coalesce(state,''), account_number,
+  tax_year). LINES (tax_statement_lines): line_no, tax_year
+  (denormalized), line_type real_property | personal_property,
+  identifiers jsonb [{label as printed, kind, value as printed,
+  normalized}], appraised_value, assessed_value, tax_due, exemptions,
+  legal_description, property_address, acres, parcel_id (nullable),
+  match_source identifier | manual | name | spatial | migrated,
+  match_evidence, confirmed; partial unique (parcel_id, tax_year) so
+  one line per parcel per year across every statement. RECONCILIATION
+  (lib/taxSegment.ts reconcile): lines must sum to the header within
+  $0.01; the gap is shown on the review screen and the statement card,
+  never hidden; a gap does not block confirming. PAYMENTS stay at the
+  statement level (one check pays an account; partials); expense
+  allocation derives from lines (lib/tax.ts allocateByLines: pro rata
+  by line tax) so parcels, properties, and entities carry their part;
+  personal property lines roll up to the statement's entity, never to
+  a parcel, and are excluded from parcel completeness. Completeness,
+  rollups, the dashboard card, parcel pages, the Ask taxes_status tool
+  (its broken column names fixed), and the income allocation all
+  re-key off LINES. Status stays computed (taxStatus on the header).
+  THE UNIVERSAL IDENTIFIER SYSTEM (lib/taxIdentifiers.ts, unit
+  tested): parcel_identifiers (parcel_id, kind from the seeded list
+  parcel_number | apn | pin | ppin | account_number | key_number |
+  receipt_number | property_id | geo_id | folio | alt_key |
+  schedule_number | duplicate_number | bill_number | sbl | bbl | tmk |
+  assessment_number | control_map | upc | other with its label,
+  value as printed, normalized, source county_import | tax_statement |
+  manual, source_ref, first/last seen; unique (parcel, kind,
+  normalized)). The parcel's parcel_number mirrors in by trigger
+  (private.mirror_parcel_number, SQL twin of canonicalParcel in
+  private.canonical_identifier) so matching has ONE path.
+  normalizeIdentifier = lib/parcelNumber.ts canonicalParcel (case,
+  dashes/dots/spaces equivalent, leading zeros per segment, trailing
+  zero-only segments); identifiersEqual also accepts the compact key.
+  guessKind(label or GIS field name) and harvestIdentifiers(attrs)
+  (county attributes -> identifiers, skipping acres/names/prose).
+  EXTRACTION, TWO STAGES (app/api/extract/taxTools.ts): kind
+  tax_segment reads every page's header in 8-page groups (county,
+  state, billing_key + billing_kind, taxpayer, year, printed total,
+  continuation flag, is_statement); lib/taxSegment.ts groupPages
+  groups pages by county + normalized billing key + year (a
+  whole-account bill repeats its number and total on every page, so
+  ten pages group as ONE; unkeyed continuation pages follow the page
+  before) and pre-labels the entity from entity_accounts. kind
+  tax_statement reads ONE statement (pdf-lib slicePages of its pages;
+  a photo whole) into the header plus EVERY line with EVERY labeled
+  number as {label, kind, value}; unknown labels keep kind other with
+  the label. Handwriting is the owner's notes: the prompts say so for
+  every field. MATCHING (lib/taxMatch.ts, unit tested): matchLine is
+  kind-aware first (a printed PPIN against stored ppin rows), then
+  kind-agnostic on the normalized value (counties relabel the same
+  number); evidence names the identifier ("PPIN 44521 matches parcel
+  11 07 26 0 000 001.000 on Cottontown"); several parcels matching
+  different numbers are listed, none chosen; personal property never
+  matches. matchEntity: the C/O target is the signal (careOfTarget),
+  the taxpayer stays as printed; entity names and entity_aliases
+  through normalizeOwnerName + ownerSimilarity >= 0.75, with
+  tokensMatch extended to two edits on 8+ letter words (AMBEMARLE,
+  ALBERMALE, ALBEMARLE all meet). SELF-LEARNING (components/taxes/
+  taxLearn.ts, the loop tested in taxMatch.test.ts and the fixture
+  suite): confirming a line's parcel (auto or manual) upserts EVERY
+  identifier printed on that line onto the parcel (source
+  tax_statement, source_ref the line); confirming a statement's entity
+  registers county + account to it (entity_accounts) and saves the
+  printed taxpayer variant as an entity alias when new (per-org alias
+  uniqueness, never stolen). First year in a county may need one
+  hand-confirmation; every later year matches on the numbers learned
+  from the county's own paper. COUNTY IMPORT FEEDS THE STORE: features
+  keep their raw attribute set (parcels.attributes, attributes_source,
+  attributes_fetched_at; trimmed of Shape_* keys, 60 keys, 200 chars)
+  and harvestIdentifiers writes parcel_identifiers at import (KCS
+  layers carry PPIN); Settings > Admin > Parcel identifiers offers
+  "Re-harvest identifiers from stored attributes" (POST
+  /api/parcels/reharvest) and "Fetch attributes for parcels imported
+  before retention" (POST /api/gis/parcel-attributes, by parcel number
+  against the active registry service, parcelsEqual picks the
+  feature); parcel pages list identifiers with remove and inline add.
+  UPLOAD (/taxes/upload, rebuilt): drop PDFs or photos (several),
+  each uploaded by storage path; segmentation progress; a statement
+  LIST (county, billing number with its kind, taxpayer with the entity
+  chip and evidence, year, total, line count, page range,
+  reconciliation chip, Ready / Needs: ...) with Confirm all ready and
+  per-statement Confirm; expanding shows the editable header (amber on
+  unsure), the lines with identifier chips (add / remove re-runs the
+  match), values, line type toggle, the match select with candidates
+  and evidence, Create the parcel, or leave unmatched; a duplicate
+  billing key for the year is skipped with a link to /taxes; a line
+  duplicate (the partial unique index) rolls the statement insert
+  back. Confirm writes the header, the documents row (entity_type
+  tax_statement, title "<County> County property tax <year>
+  (<account>)") as source_document_id, the lines, then the learning.
+  /taxes lists statement cards with expandable lines, an Unmatched
+  LINES section with Match to parcel (learning on confirm), payments
+  at statement level, ?year= honored, delete removes the attached
+  documents and says so. FIXTURES: fixtures/tax-statements/ holds the
+  three real 2024 statements (Lawrence whole-account, Colbert PPIN
+  only, Morgan parcel + key + receipt); lib/taxFixtures.live.test.ts
+  (TAX_FIXTURES_LIVE=1) runs the real two-stage extraction and writes
+  <name>.expected.json snapshots; lib/taxFixtures.test.ts runs on the
+  snapshots every time (segmentation groups the Lawrence pages as one,
+  reconciliation, PPIN capture and the learn-once loop, Morgan's three
+  numbers with the spaced parcel format, typo'd Albemarle names,
+  personal property parcel-free, dates). The suites skip until the
+  PDFs and snapshots exist.
+  NEW-STATE ONBOARDING CHECKLIST: (1) if the state's bills use a
+  number not in IDENTIFIER_KINDS, add it to the check constraint in a
+  migration, to IDENTIFIER_KINDS, its label, and a guessKind pattern;
+  (2) register the county GIS service in Settings > Admin (parcel and
+  owner fields) so imports harvest its identifiers; (3) add the
+  county's due / delinquent calendar through "remember dates" on the
+  first upload; (4) upload one year of statements and confirm matches
+  by hand once; every later year matches on the learned numbers. No
+  code changes otherwise.
+- (legacy, pre-0030, kept for history) tax_statements: parcel_id nullable until matched (unmatched statements
   await resolution), tax_year, county/state/authority, parcel number and
   owner name kept verbatim as printed, assessed_value, amount_due,
   due_date, delinquent_date, notes. unique (parcel_id, tax_year) with a
@@ -2043,3 +2184,19 @@ Functions and views:
   reference parser, parcel fit and preselect policy, aliases, and the
   parcel canonical form; the DLM deed verified by hand end to end.
   Described above.
+- Post-Phase 6o (DONE, 2026-08-21, migration 0030): PROPERTY TAXES
+  REBUILT FOR HOW COUNTIES BILL (header + parcel line items,
+  reconciliation to the penny, payments at the account level with
+  line-derived allocation, single-parcel statements as one-line
+  statements, dates from the document), THE UNIVERSAL IDENTIFIER
+  SYSTEM (parcel_identifiers with 21 seeded kinds, one normalizer,
+  kind-aware then kind-agnostic matching with evidence, SELF-LEARNING
+  on every confirmation, county import attribute retention and
+  harvesting with admin backfill actions, the entity account
+  registry), BATCH UPLOAD WITH SEGMENTATION (page headers grouped by
+  county + billing key + year, per-statement extraction of every
+  labeled number, handwriting ignored, a statement list to confirm one
+  or all), name and description matching as secondary tiers (C/O
+  target, two-edit typo tolerance on long words, personal property
+  parcel-free), and the fixture regression suite around the three real
+  2024 statements. Described above.

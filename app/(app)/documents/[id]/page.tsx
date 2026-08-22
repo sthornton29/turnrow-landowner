@@ -72,8 +72,16 @@ async function primaryAttachment(
   };
   if (entityType === "property" || entityType === "organization") return null;
   if (entityType === "tax_statement") {
-    const { data } = await supabase.from("tax_statements").select("tax_year").eq("id", entityId).maybeSingle();
-    return { label: data ? `${data.tax_year} tax statement` : "Tax statement", href: "/taxes" };
+    const { data } = await supabase
+      .from("tax_statements")
+      .select("tax_year, county, account_number, taxpayer_name_printed")
+      .eq("id", entityId)
+      .maybeSingle();
+    const who = data ? [data.county, data.account_number ?? data.taxpayer_name_printed].filter(Boolean).join(", ") : "";
+    return {
+      label: data ? `${data.tax_year} tax statement${who ? ` (${who})` : ""}` : "Tax statement",
+      href: data ? `/taxes?year=${data.tax_year}` : "/taxes",
+    };
   }
   const s = simple[entityType];
   if (!s) return null;

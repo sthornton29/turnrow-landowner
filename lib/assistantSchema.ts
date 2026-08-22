@@ -38,8 +38,11 @@ TIMBER SALES
 - timber_settlements(id, timber_sale_id, settlement_date, period_start, period_end, lines jsonb, total_amount, check_number, allocation jsonb)   -- pay-as-cut receipts; count directly as received timber income
 
 PROPERTY TAXES
-- tax_statements(id, parcel_id nullable (unmatched statements await a parcel), tax_year, county, state, authority_name, parcel_number_raw, owner_name_raw, assessed_value, amount_due, due_date, delinquent_date, notes)
-- tax_payments(id, tax_statement_id, paid_date, amount, method, check_number, memo)
+- tax_statements(id, tax_year, county, state, authority_name, account_number, account_kind, taxpayer_name_printed, care_of_printed, entity_id nullable, entity_evidence, source_document_id, amount_due (the statement total), line_total, reconciled bool, due_date, delinquent_date, notes)   -- the HEADER: how the county billed; one statement can cover many parcels
+- tax_statement_lines(id, tax_statement_id, line_no, tax_year, line_type 'real_property'|'personal_property', identifiers jsonb [{label, kind, value, normalized}], appraised_value, assessed_value, tax_due, exemptions, legal_description, property_address, acres, parcel_id nullable (unmatched lines await a parcel), match_source, match_evidence, confirmed bool)   -- one line per parcel block on the statement; a parcel is covered for a year when a real_property line links to it
+- tax_payments(id, tax_statement_id, paid_date, amount, method, memo)   -- payments apply to the whole statement; allocate to parcels by line tax_due share
+- parcel_identifiers(id, parcel_id, kind 'parcel_number'|'ppin'|'account_number'|'key_number'|'receipt_number'|..., label, value, normalized, source 'county_import'|'tax_statement'|'manual', first_seen_at, last_seen_at)   -- every number a county prints for a parcel
+- entity_accounts(id, county, state, account_number, entity_id, taxpayer_name_printed, confirmed_at)   -- recurring statement accounts registered to entities
 - county_tax_defaults(id, county, state, due_month, due_day, delinquent_month, delinquent_day)
   NOTE: tax status (paid, partial, unpaid, delinquent) is computed from payments vs amount_due; prefer taxes_status.
 

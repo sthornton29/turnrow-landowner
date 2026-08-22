@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatNumber } from "@/lib/format";
 import { toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
+import { harvestIdentifiers } from "@/lib/taxIdentifiers";
 import { clusterOwners, displayOwnerName, pickDisplayName } from "@/lib/ownerNames";
 import { ENTITY_TYPE_LABELS, guessEntityType } from "@/lib/entities";
 import MiniParcelSketch from "@/components/county/MiniParcelSketch";
@@ -553,6 +554,28 @@ export default function CountyImportClient({
     }
 
     const source = `Imported from ${service.display_name} county records on ${new Date().toISOString().slice(0, 10)}`;
+    // Every identifier the county's record carries (PPIN, folio, ...)
+    // lands in the parcel's identifier store so tax statements match on
+    // the county's own numbers. The parcel number itself mirrors by trigger.
+    const saveHarvestedIdentifiers = async (parcelId: string, attrs: Record<string, unknown> | undefined) => {
+      const ids = harvestIdentifiers(attrs ?? {}, { parcelField: service.parcel_field });
+      if (ids.length === 0) return;
+      const now = new Date().toISOString();
+      await supabase.from("parcel_identifiers").upsert(
+        ids.map((i) => ({
+          organization_id: orgId,
+          parcel_id: parcelId,
+          kind: i.kind,
+          label: i.label,
+          value: i.value,
+          normalized: i.normalized,
+          source: "county_import",
+          source_ref: service.id,
+          last_seen_at: now,
+        })),
+        { onConflict: "parcel_id,kind,normalized" }
+      );
+    };
     const failures: string[] = [];
     let importedCount = 0;
     const importedNow: string[] = [];
@@ -580,8 +603,15 @@ export default function CountyImportClient({
         }
         await supabase
           .from("parcels")
-          .update({ deeded_acres: row.deeded_acres, source })
+          .update({
+            deeded_acres: row.deeded_acres,
+            source,
+            attributes: row.attributes ?? {},
+            attributes_source: service.display_name,
+            attributes_fetched_at: new Date().toISOString(),
+          })
           .eq("id", dup.id);
+        await saveHarvestedIdentifiers(dup.id, row.attributes);
         importedCount++;
         importedNow.push(row.localId);
         continue;
@@ -597,6 +627,9 @@ export default function CountyImportClient({
           notes: row.owner_name ? `Owner as recorded: ${row.owner_name}` : null,
           deeded_acres: row.deeded_acres,
           source,
+          attributes: row.attributes ?? {},
+          attributes_source: service.display_name,
+          attributes_fetched_at: new Date().toISOString(),
         })
         .select("id")
         .single();
@@ -604,6 +637,7 @@ export default function CountyImportClient({
         failures.push(`${row.parcel_number}: ${err?.message ?? "insert failed"}`);
         continue;
       }
+      await saveHarvestedIdentifiers(data.id, row.attributes);
       const { error: gErr } = await supabase.rpc("set_geometry", {
         p_entity_type: "parcel",
         p_entity_id: data.id,

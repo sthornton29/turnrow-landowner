@@ -3,20 +3,68 @@
 
 import { canonicalParcel } from "@/lib/parcelNumber";
 
+// The statement HEADER (migration 0030): how the county billed it. The
+// parcels it covers are tax_statement_lines; amount_due is the total.
 export interface TaxStatementRow {
   id: string;
-  parcel_id: string | null;
   tax_year: number;
   county: string | null;
   state: string | null;
   authority_name: string | null;
-  parcel_number_printed: string | null;
-  owner_name_printed: string | null;
-  assessed_value: number | null;
+  account_number: string | null;
+  account_kind: "account_number" | "receipt_number" | "key_number" | "parcel_number" | "bill_number" | "other" | null;
+  taxpayer_name_printed: string | null;
+  care_of_printed: string | null;
+  entity_id: string | null;
+  entity_evidence: string | null;
+  source_document_id: string | null;
   amount_due: number;
+  line_total: number | null;
+  reconciled: boolean;
   due_date: string | null;
   delinquent_date: string | null;
   notes: string | null;
+}
+
+export interface TaxStatementLineRow {
+  id: string;
+  tax_statement_id: string;
+  line_no: number;
+  tax_year: number;
+  line_type: "real_property" | "personal_property";
+  identifiers: Array<{ label: string | null; kind: string; value: string; normalized: string }>;
+  appraised_value: number | null;
+  assessed_value: number | null;
+  tax_due: number;
+  exemptions: string | null;
+  legal_description: string | null;
+  property_address: string | null;
+  acres: number | null;
+  parcel_id: string | null;
+  match_source: "identifier" | "manual" | "name" | "spatial" | "migrated" | null;
+  match_evidence: string | null;
+  confirmed: boolean;
+}
+
+// A payment is applied at the statement level; its expense is spread
+// across the statement's lines by their share of the line total (the
+// header total when lines do not reconcile), so parcels and properties
+// carry their part. Personal property lines carry their share too
+// (attributed to the entity, never to a parcel).
+export function allocateByLines<T extends { id: string; tax_due: number }>(
+  amount: number,
+  lines: T[]
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const total = lines.reduce((a, l) => a + (Number(l.tax_due) || 0), 0);
+  if (lines.length === 0) return out;
+  if (total <= 0) {
+    const each = amount / lines.length;
+    for (const l of lines) out.set(l.id, each);
+    return out;
+  }
+  for (const l of lines) out.set(l.id, (amount * (Number(l.tax_due) || 0)) / total);
+  return out;
 }
 
 export interface TaxPaymentRow {

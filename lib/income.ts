@@ -20,6 +20,7 @@ import {
   type YearAssumptions,
 } from "@/lib/leaseLogic";
 import { loadGovInputs, projectForPaymentYear, type GovInputs } from "@/lib/gov/govData";
+import { allocateByLines } from "@/lib/tax";
 
 // "government" = the landowner's contractual share (terms.gov_payment_share_pct)
 // of projected ARC/PLC payments on leased base acres, attributed to the
@@ -58,11 +59,23 @@ export interface IncomeInputs {
   }>;
   saleStands: Array<{ timber_sale_id: string; timber_stand_id: string }>;
   stands: Array<{ id: string; property_id: string; acres: number | null }>;
+  // Statement HEADERS (migration 0030): the total the county billed.
   taxStatements: Array<{
     id: string;
-    parcel_id: string | null;
     tax_year: number;
     amount_due: number;
+    entity_id?: string | null;
+  }>;
+  // The parcel lines under each header: each line's tax routes to its
+  // parcel's property; personal property and unmatched lines land in
+  // Unassigned. Absent (older callers / tests) means no routing.
+  taxLines?: Array<{
+    id: string;
+    tax_statement_id: string;
+    tax_year: number;
+    tax_due: number;
+    parcel_id: string | null;
+    line_type: "real_property" | "personal_property" | string;
   }>;
   taxPayments: Array<{ tax_statement_id: string; paid_date: string; amount: number }>;
   parcels: Array<{ id: string; property_id: string }>;
@@ -467,19 +480,42 @@ export function allocateToProperties(
     spread(null, s.timber_sale_id, "received", s.total_amount);
   }
 
+  // Taxes route LINE by LINE: a line's tax goes to its parcel's property;
+  // personal property and unmatched lines go to Unassigned. A header
+  // with no lines (or a line gap) keeps its remainder in Unassigned so
+  // the year total always equals what the county billed.
   const parcelProperty = new Map(inputs.parcels.map((p) => [p.id, p.property_id]));
-  const statementById = new Map(inputs.taxStatements.map((t) => [t.id, t]));
-  const propertyOfStatement = (parcelId: string | null) =>
+  const propertyOfParcel = (parcelId: string | null) =>
     (parcelId && parcelProperty.get(parcelId)) || UNASSIGNED;
+  const linesByStatement = new Map<string, NonNullable<IncomeInputs["taxLines"]>>();
+  for (const l of inputs.taxLines ?? []) {
+    const list = linesByStatement.get(l.tax_statement_id) ?? [];
+    list.push(l);
+    linesByStatement.set(l.tax_statement_id, list);
+  }
+  const propertyOfLine = (l: { parcel_id: string | null; line_type: string }) =>
+    l.line_type === "personal_property" ? UNASSIGNED : propertyOfParcel(l.parcel_id);
 
   for (const t of inputs.taxStatements) {
     if (t.tax_year !== year) continue;
-    add(propertyOfStatement(t.parcel_id), "taxesDue", t.amount_due);
+    const lines = linesByStatement.get(t.id) ?? [];
+    let routed = 0;
+    for (const l of lines) {
+      add(propertyOfLine(l), "taxesDue", l.tax_due);
+      routed += l.tax_due;
+    }
+    const remainder = t.amount_due - routed;
+    if (Math.abs(remainder) > 0.005) add(UNASSIGNED, "taxesDue", remainder);
   }
   for (const p of inputs.taxPayments) {
     if (Number(p.paid_date.slice(0, 4)) !== year) continue;
-    const statement = statementById.get(p.tax_statement_id);
-    add(propertyOfStatement(statement?.parcel_id ?? null), "taxesPaid", p.amount);
+    const lines = linesByStatement.get(p.tax_statement_id) ?? [];
+    if (lines.length === 0) {
+      add(UNASSIGNED, "taxesPaid", p.amount);
+      continue;
+    }
+    const shares = allocateByLines(p.amount, lines);
+    for (const l of lines) add(propertyOfLine(l), "taxesPaid", shares.get(l.id) ?? 0);
   }
   return result;
 }
@@ -498,6 +534,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     saleStands,
     stands,
     taxStatements,
+    taxLines,
     taxPayments,
     parcels,
     propertyAcres,
@@ -521,7 +558,10 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
       .select("timber_sale_id, settlement_date, total_amount"),
     supabase.from("timber_sale_stands").select("timber_sale_id, timber_stand_id"),
     supabase.from("timber_stands").select("id, property_id, acres"),
-    supabase.from("tax_statements").select("id, parcel_id, tax_year, amount_due"),
+    supabase.from("tax_statements").select("id, tax_year, amount_due, entity_id"),
+    supabase
+      .from("tax_statement_lines")
+      .select("id, tax_statement_id, tax_year, tax_due, parcel_id, line_type"),
     supabase.from("tax_payments").select("tax_statement_id, paid_date, amount"),
     supabase.from("parcels").select("id, property_id"),
     supabase.from("properties").select("id, acres"),
@@ -537,6 +577,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     saleStands: saleStands.data ?? [],
     stands: stands.data ?? [],
     taxStatements: taxStatements.data ?? [],
+    taxLines: taxLines.data ?? [],
     taxPayments: taxPayments.data ?? [],
     parcels: parcels.data ?? [],
     propertyAcres: propertyAcres.data ?? [],

@@ -234,6 +234,9 @@ export function tokensMatch(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.length === 1) return b.startsWith(a);
   if (b.length === 1) return a.startsWith(b);
+  // County typists: one edit on a 5+ letter word, two on an 8+ letter
+  // word (AMBEMARLE, ALBERMALE, and ALBEMARLE all meet).
+  if (a.length >= 8 && b.length >= 8) return levenshtein(a, b) <= 2;
   if (a.length >= 5 && b.length >= 5) return levenshtein(a, b) <= 1;
   return false;
 }

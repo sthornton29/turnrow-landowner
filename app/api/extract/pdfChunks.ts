@@ -56,6 +56,53 @@ export async function splitPdf(
   return out;
 }
 
+// A sub-PDF of exactly the given 1-based pages (a statement's pages).
+export async function slicePages(
+  buffer: Buffer | Uint8Array,
+  pages: number[]
+): Promise<Buffer> {
+  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const total = src.getPageCount();
+  const indices = [...new Set(pages)]
+    .filter((p) => Number.isInteger(p) && p >= 1 && p <= total)
+    .sort((a, b) => a - b)
+    .map((p) => p - 1);
+  if (indices.length === 0) throw new Error("No such pages in the file.");
+  const part = await PDFDocument.create();
+  const copied = await part.copyPages(src, indices);
+  for (const p of copied) part.addPage(p);
+  return Buffer.from(await part.save({ useObjectStreams: true }));
+}
+
+// Page groups of at most maxPages, each under maxBytes, with the
+// 1-based number of each group's first page (segmentation).
+export async function pageGroups(
+  buffer: Buffer | Uint8Array,
+  maxPages: number,
+  maxBytes: number = DEFAULT_MAX_BYTES
+): Promise<Array<{ bytes: Buffer; firstPage: number; pages: number }>> {
+  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const total = src.getPageCount();
+  const out: Array<{ bytes: Buffer; firstPage: number; pages: number }> = [];
+  let start = 0;
+  let size = Math.max(1, maxPages);
+  while (start < total) {
+    const end = Math.min(total, start + size);
+    const indices = Array.from({ length: end - start }, (_, i) => start + i);
+    const part = await PDFDocument.create();
+    const copied = await part.copyPages(src, indices);
+    for (const p of copied) part.addPage(p);
+    const bytes = Buffer.from(await part.save({ useObjectStreams: true }));
+    if (bytes.byteLength > maxBytes && size > 1) {
+      size = Math.max(1, Math.floor(size / 2));
+      continue;
+    }
+    out.push({ bytes, firstPage: start + 1, pages: end - start });
+    start = end;
+  }
+  return out;
+}
+
 // First N pages only (classification, single-record scans).
 // First n pages, halving n until the slice fits the model's byte cap
 // (scanned packets run several MB per page).

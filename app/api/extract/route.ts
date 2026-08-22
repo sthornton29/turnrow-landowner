@@ -8,7 +8,8 @@ import {
   type SettlementColumnMap,
 } from "@/lib/timberSettlement";
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
-import { MODEL_PDF_MAX_BYTES, firstPages, pageCount, splitPdf } from "./pdfChunks";
+import { MODEL_PDF_MAX_BYTES, firstPages, pageCount, pageGroups, slicePages, splitPdf } from "./pdfChunks";
+import { TAX_SEGMENT_PROMPT, TAX_SEGMENT_TOOL, TAX_STATEMENT_PROMPT, TAX_STATEMENT_TOOL } from "./taxTools";
 import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
 import { spatialEvidenceFor } from "@/lib/spatialEvidence";
 import {
@@ -518,8 +519,10 @@ export async function POST(request: Request) {
   // photos; leases are PDFs; logger/mill settlements arrive as PDFs,
   // photos, or Excel/CSV exports.
   const isVaultKind = (VAULT_KINDS as readonly string[]).includes(kind);
+  const isTaxKind = kind === "tax_segment" || kind === "tax_statement";
   const allowsImages =
     kind === "tax" ||
+    isTaxKind ||
     kind === "payment" ||
     kind === "timber" ||
     kind === "timber_settlement" ||
@@ -546,10 +549,10 @@ export async function POST(request: Request) {
   // PDFs may be long scans (a 156EZ packet, a deed book run); the vault
   // branch splits them into page chunks. Photos and spreadsheets stay
   // at 30 MB.
-  const sizeCap = isPdf && isVaultKind ? 100 * 1024 * 1024 : 30 * 1024 * 1024;
+  const sizeCap = isPdf && (isVaultKind || isTaxKind) ? 100 * 1024 * 1024 : 30 * 1024 * 1024;
   if (file.size > sizeCap) {
     return NextResponse.json(
-      { error: isPdf && isVaultKind ? "File is too large (100 MB max). Split the PDF and scan the parts." : "File is too large (30 MB max)." },
+      { error: isPdf && (isVaultKind || isTaxKind) ? "File is too large (100 MB max). Split the PDF and scan the parts." : "File is too large (30 MB max)." },
       { status: 400 }
     );
   }
@@ -675,6 +678,84 @@ export async function POST(request: Request) {
 
   const fileBytes = Buffer.from(await file.arrayBuffer());
   const base64 = fileBytes.toString("base64");
+
+  // Property tax statements, two stages (taxTools.ts): tax_segment reads
+  // every page's header in page groups so the client can group pages
+  // into statements; tax_statement reads ONE statement (the pages named
+  // in the request, or the whole photo) into a header plus lines with
+  // every labeled identifier. Handwriting is ignored by instruction.
+  if (kind === "tax_segment" || kind === "tax_statement") {
+    const imageBlock = (bytes: Buffer, pdf: boolean): Anthropic.ContentBlockParam =>
+      pdf
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: bytes.toString("base64") } }
+        : { type: "image", source: { type: "base64", media_type: file.type as (typeof IMAGE_TYPES)[number], data: bytes.toString("base64") } };
+    const run = async (bytes: Buffer, pdf: boolean, tool: Anthropic.Tool, text: string) => {
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8192,
+        tools: [tool],
+        tool_choice: { type: "tool", name: tool.name },
+        messages: [{ role: "user", content: [imageBlock(bytes, pdf), { type: "text", text }] }],
+      });
+      const toolUse = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+      if (!toolUse) throw new Error("no tool use");
+      return toolUse.input as Record<string, unknown>;
+    };
+    try {
+      if (kind === "tax_segment") {
+        if (!isPdf) {
+          // A photo is one page of one statement.
+          const r = await run(fileBytes, false, TAX_SEGMENT_TOOL, TAX_SEGMENT_PROMPT(1, 1));
+          return NextResponse.json({ extraction: { pages: r.pages ?? [], total_pages: 1 } });
+        }
+        const groups = await pageGroups(fileBytes, 8, MODEL_PDF_MAX_BYTES);
+        const pages: unknown[] = [];
+        let next = 0;
+        const worker = async () => {
+          while (next < groups.length) {
+            const g = groups[next++];
+            const r = await run(g.bytes, true, TAX_SEGMENT_TOOL, TAX_SEGMENT_PROMPT(g.firstPage, g.pages));
+            const got = Array.isArray(r.pages) ? (r.pages as Array<Record<string, unknown>>) : [];
+            // Trust the model's page numbers only inside this group's range.
+            got.forEach((p, i) => {
+              const n = Number(p.page_number);
+              const page = n >= g.firstPage && n < g.firstPage + g.pages ? n : g.firstPage + i;
+              pages.push({ ...p, page_number: page });
+            });
+          }
+        };
+        await Promise.all([worker(), worker()]);
+        const total = await pageCount(fileBytes);
+        return NextResponse.json({ extraction: { pages, total_pages: total } });
+      }
+      // tax_statement
+      const pagesParam = String(formData.get("pages") ?? "").trim();
+      let bytes: Buffer = fileBytes;
+      if (isPdf && pagesParam) {
+        const wanted = pagesParam.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
+        bytes = await slicePages(fileBytes, wanted);
+      }
+      if (isPdf && bytes.byteLength > MODEL_PDF_MAX_BYTES) {
+        // A heavy scan: read it in parts and merge the lines.
+        const parts = await splitPdf(bytes, { maxPages: 4, maxBytes: MODEL_PDF_MAX_BYTES });
+        const results: Array<Record<string, unknown>> = [];
+        for (const part of parts) results.push(await run(part, true, TAX_STATEMENT_TOOL, TAX_STATEMENT_PROMPT));
+        const merged = { ...results[0] };
+        merged.lines = results.flatMap((r) => (Array.isArray(r.lines) ? (r.lines as unknown[]) : []));
+        merged.unsure_fields = [...new Set(results.flatMap((r) => (Array.isArray(r.unsure_fields) ? (r.unsure_fields as unknown[]).map(String) : [])))];
+        return NextResponse.json({ extraction: merged });
+      }
+      const r = await run(bytes, isPdf, TAX_STATEMENT_TOOL, TAX_STATEMENT_PROMPT);
+      return NextResponse.json({ extraction: r });
+    } catch (err) {
+      const status = err instanceof Anthropic.APIError ? err.status : undefined;
+      console.error("extract tax kind failed", kind, status, err instanceof Error ? err.message : err);
+      return NextResponse.json(
+        { error: status === 413 ? "This file is too large to read in one piece. Split the PDF and try again." : status ? `Extraction failed (${status}).` : "Extraction failed." },
+        { status: 502 }
+      );
+    }
+  }
 
   // Document vault kinds: classification, per-type extraction, and the
   // legal description parse. Same forced-tool contract; upstream error

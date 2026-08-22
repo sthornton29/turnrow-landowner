@@ -243,7 +243,7 @@ export default function TenantDataPanel({
                                 ) : null}
                               </span>
                             ) : (
-                              <span className="text-xs text-gray-400">—</span>
+                              <span className="text-xs text-gray-400">n/a</span>
                             )}
                           </td>
                           <td className="py-1.5 pr-2">
@@ -272,7 +272,7 @@ export default function TenantDataPanel({
                                 ) : null}
                               </span>
                             ) : (
-                              <span className="text-xs text-gray-400">—</span>
+                              <span className="text-xs text-gray-400">n/a</span>
                             )}
                           </td>
                           {canUse ? (

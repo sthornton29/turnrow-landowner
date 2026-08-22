@@ -37,6 +37,9 @@ export interface CountyParcelFeature {
   // decimal; the display fallback when deeded acres are missing.
   computed_acres: number | null;
   situs: string | null;
+  // The feature's raw attribute set (capped), kept on the parcel at
+  // import so identifiers (PPIN, folio, ...) can be harvested from it.
+  attributes: Record<string, unknown>;
 }
 
 // Entity-mode search results also carry the canonical owner name (from

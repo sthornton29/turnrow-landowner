@@ -18,8 +18,49 @@ const emptyInputs = (): IncomeInputs => ({
   saleStands: [],
   stands: [],
   taxStatements: [],
+  taxLines: [],
   taxPayments: [],
   parcels: [],
+});
+
+describe("property taxes by statement lines", () => {
+  it("routes each line's tax to its parcel's property and splits a payment by line share", () => {
+    const inputs: IncomeInputs = {
+      ...emptyInputs(),
+      parcels: [
+        { id: "pa", property_id: "propA" },
+        { id: "pb", property_id: "propB" },
+      ],
+      taxStatements: [{ id: "s1", tax_year: 2024, amount_due: 1000, entity_id: null }],
+      taxLines: [
+        { id: "l1", tax_statement_id: "s1", tax_year: 2024, tax_due: 750, parcel_id: "pa", line_type: "real_property" },
+        { id: "l2", tax_statement_id: "s1", tax_year: 2024, tax_due: 250, parcel_id: "pb", line_type: "real_property" },
+      ],
+      taxPayments: [{ tax_statement_id: "s1", paid_date: "2024-12-15", amount: 400 }],
+    };
+    const by = allocateToProperties(inputs, 2024);
+    expect(by.get("propA")?.taxesDue).toBe(750);
+    expect(by.get("propB")?.taxesDue).toBe(250);
+    expect(by.get("propA")?.taxesPaid).toBe(300);
+    expect(by.get("propB")?.taxesPaid).toBe(100);
+    expect(by.get(UNASSIGNED)).toBeUndefined();
+    expect(summarizeByYear(inputs).get(2024)?.taxesDue).toBe(1000);
+  });
+  it("sends personal property, unmatched lines, and a line gap to Unassigned", () => {
+    const inputs: IncomeInputs = {
+      ...emptyInputs(),
+      parcels: [{ id: "pa", property_id: "propA" }],
+      taxStatements: [{ id: "s1", tax_year: 2024, amount_due: 500, entity_id: null }],
+      taxLines: [
+        { id: "l1", tax_statement_id: "s1", tax_year: 2024, tax_due: 200, parcel_id: "pa", line_type: "real_property" },
+        { id: "l2", tax_statement_id: "s1", tax_year: 2024, tax_due: 100, parcel_id: null, line_type: "personal_property" },
+        { id: "l3", tax_statement_id: "s1", tax_year: 2024, tax_due: 150, parcel_id: null, line_type: "real_property" },
+      ],
+    };
+    const by = allocateToProperties(inputs, 2024);
+    expect(by.get("propA")?.taxesDue).toBe(200);
+    expect(by.get(UNASSIGNED)?.taxesDue).toBe(300); // 100 + 150 + the 50 gap
+  });
 });
 
 // A 500-acre crop share lease at 25%: 100 ac corn x 180 bu x $4.50

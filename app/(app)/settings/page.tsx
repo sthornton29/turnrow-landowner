@@ -1,6 +1,7 @@
 import { requireOrg } from "@/lib/auth";
 import { signOut } from "@/app/(auth)/actions";
 import AdminGisClient from "@/app/(app)/admin/gis/AdminGisClient";
+import ParcelIdentifierTools from "@/components/admin/ParcelIdentifierTools";
 import AdminProgramParams from "@/components/gov/AdminProgramParams";
 import { createInvite, deleteInvite } from "./actions";
 
@@ -153,6 +154,7 @@ export default async function SettingsPage() {
             </h2>
           </div>
           <AdminGisClient initialServices={services ?? []} embedded />
+          <ParcelIdentifierTools />
         </section>
       ) : null}
 

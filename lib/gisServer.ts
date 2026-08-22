@@ -279,6 +279,21 @@ export async function queryLayerFeatures(
 // reference guard repairs servers that ignore outSR=4326 and return
 // Web Mercator, warning with the service label so the registry entry
 // can be reviewed.
+// The raw attribute set, bounded: geometry bookkeeping dropped, at most
+// 60 keys, strings cut to 200 characters.
+export function trimAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(attrs ?? {})) {
+    if (/^(shape[_.]?(area|len|length|starea|stlength)|st_area|st_length)/i.test(k)) continue;
+    if (v === null || v === undefined) continue;
+    if (typeof v === "object") continue;
+    out[k] = typeof v === "string" ? v.slice(0, 200) : v;
+    if (++n >= 60) break;
+  }
+  return out;
+}
+
 export function normalizeFeatures(
   features: RawFeature[],
   mapping: {
@@ -316,6 +331,7 @@ export function normalizeFeatures(
     const deeded = Number(acresRaw);
     return {
       geometry,
+      attributes: trimAttributes(attrs),
       parcel_number: String(attrs[mapping.parcel_field] ?? "").trim(),
       owner_name: String(attrs[mapping.owner_field] ?? "").trim(),
       deeded_acres:
