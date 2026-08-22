@@ -2,7 +2,7 @@
 // the self-learning that makes the next year automatic. Pure; unit
 // tested in taxMatch.test.ts (including the learn-once loop).
 
-import { identifiersEqual, IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
+import { sameIdentifier, IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
 import { normalizeOwnerName, ownerSimilarity, CLUSTER_THRESHOLD } from "@/lib/ownerNames";
 
 export interface MatchableParcelRef {
@@ -50,13 +50,13 @@ export function matchLine(
   for (const printed of line.identifiers) {
     if (printed.kind === "other") continue;
     for (const s of stored) {
-      if (s.kind === printed.kind && identifiersEqual(printed.normalized, s.normalized)) consider(printed, s, true);
+      if (s.kind === printed.kind && sameIdentifier(printed, s)) consider(printed, s, true);
     }
   }
   if (hits.size === 0) {
     for (const printed of line.identifiers) {
       for (const s of stored) {
-        if (identifiersEqual(printed.normalized, s.normalized)) consider(printed, s, false);
+        if (sameIdentifier(printed, s)) consider(printed, s, false);
       }
     }
   }
@@ -143,7 +143,7 @@ export function identifiersToLearn(
   const out: LearnedIdentifier[] = [];
   for (const p of printed) {
     if (p.kind === "other" && !p.label) continue;
-    const dup = stored.some((s) => s.parcel_id === parcelId && s.kind === p.kind && identifiersEqual(s.normalized, p.normalized));
+    const dup = stored.some((s) => s.parcel_id === parcelId && s.kind === p.kind && sameIdentifier(s, p));
     if (dup) continue;
     if (out.some((o) => o.kind === p.kind && o.normalized === p.normalized)) continue;
     out.push({ parcel_id: parcelId, kind: p.kind, label: p.label, value: p.value, normalized: p.normalized });

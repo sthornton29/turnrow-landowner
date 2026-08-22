@@ -717,6 +717,28 @@ missing unique (id, organization_id) on parcels):
   numbers with the spaced parcel format, typo'd Albemarle names,
   personal property parcel-free, dates). The suites skip until the
   PDFs and snapshots exist.
+  VERIFIED ON THE LIVE DEPLOY (2026-08-21 night, the three real 2024
+  statements through /taxes/upload, reviewed, not confirmed): Colbert
+  reads as one statement (account 1234, $510.10, two PPIN lines 2471
+  and 2661, reconciles, taxpayer "ALBEMARLE CORP/ THE" matched the
+  entity); Morgan as two statements (keys 678 and 1066, receipts
+  48042 and 47675, parcels in the county's spaced format matched, all
+  three numbers captured); Lawrence (24 pages) as 13 statements with
+  the whole-account bill 8080 grouped as ONE (pages 3 to 14, 45
+  lines, $13,647.18, reconciles to the cent; 39 lines matched on
+  PPINs harvested from the Lawrence layer, the rest are parcels not
+  yet in Turnrow), the typo'd AMBEMARLE / ALBERMALE names and the C/O
+  form matched Albemarle. Two lessons fixed the same night: a
+  multi-page statement is read in 3-page parts and merged (one reply
+  cannot carry 45 lines), and identifier equality compares canonical
+  forms, with the compact key only on RAW printed values (the compact
+  key of zero-stripped strings loses segment boundaries: 013.000 and
+  001.003 collided; lib/taxIdentifiers.ts sameIdentifier, tested).
+  The Colbert county GIS service was down ("not started") so its two
+  parcels have no PPINs yet; confirming the Colbert lines by hand once
+  teaches them. The live snapshot writer needs ANTHROPIC_API_KEY in
+  .env.local (the Vercel value is marked Sensitive and cannot be
+  pulled), so the fixture snapshot suite has not been generated yet.
   NEW-STATE ONBOARDING CHECKLIST: (1) if the state's bills use a
   number not in IDENTIFIER_KINDS, add it to the check constraint in a
   migration, to IDENTIFIER_KINDS, its label, and a guessKind pattern;

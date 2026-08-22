@@ -43,6 +43,16 @@ describe("matchLine", () => {
     expect(m.parcelId).toBe("c1");
     expect(m.evidence).toContain("matches the PPIN on parcel");
   });
+  it("keeps 013.000 and 001.003 apart (segment boundaries survive the compact key)", () => {
+    const two = [
+      { id: "a", parcel_number: "07 09 29 0 200 013.000", property_id: "shop", property_name: "Shop Area" },
+      { id: "b", parcel_number: "07 09 29 0 200 001.003", property_id: "phin", property_name: "Phinizy" },
+    ];
+    const store: StoredIdentifier[] = two.map((p) => ({ parcel_id: p.id, kind: "parcel_number", value: p.parcel_number, normalized: normalizedOf(p.parcel_number) }));
+    const m = matchLine({ line_type: "real_property", identifiers: ids(["PARCEL", "parcel_number", "07-09-29-0-200-013.000-0"]) }, store, two);
+    expect(m.parcelId).toBe("a");
+    expect(m.candidates).toHaveLength(1);
+  });
   it("never matches personal property, and lists several candidates without choosing", () => {
     expect(matchLine({ line_type: "personal_property", identifiers: ids(["Parcel", "parcel_number", "00-00-00-0-000-000.000"]) }, base, parcels).parcelId).toBeNull();
     const two = matchLine({ line_type: "real_property", identifiers: ids(["Parcel", "parcel_number", "07-09-31-0-000-003.000"], ["Parcel", "parcel_number", "11-07-26-0-000-001.000"]) }, base, parcels);

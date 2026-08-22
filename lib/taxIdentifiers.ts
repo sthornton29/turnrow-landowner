@@ -78,12 +78,27 @@ export function normalizeIdentifier(value: string | null | undefined): string {
   return canonicalParcel(value);
 }
 
-// Equal when the dashed canonical forms agree, or the compact keys do
-// (a run-together printing against a punctuated one).
+// Equal RAW values: the dashed canonical forms agree, or the compact
+// keys of the raw printings do (a run-together printing against a
+// punctuated one). Only ever pass values AS PRINTED here: the compact
+// key of an already zero-stripped canonical string loses segment
+// boundaries ("7-9-29-0-200-13" and "7-9-29-0-200-1-3" would both read
+// 7929020013), which is what sameIdentifier guards against.
 export function identifiersEqual(a: string | null | undefined, b: string | null | undefined): boolean {
   const ca = canonicalParcel(a);
   const ka = parcelKey(a);
   return (ca !== "" && ca === canonicalParcel(b)) || (ka !== "" && ka === parcelKey(b));
+}
+
+// Equal stored/printed identifiers: canonical forms agree, or the
+// compact keys of the raw values agree.
+export function sameIdentifier(
+  a: { value: string; normalized: string },
+  b: { value: string; normalized: string }
+): boolean {
+  if (a.normalized !== "" && a.normalized === b.normalized) return true;
+  const ka = parcelKey(a.value);
+  return ka !== "" && ka === parcelKey(b.value);
 }
 
 // Label (as printed on paper or as a GIS field name) -> kind. Order
