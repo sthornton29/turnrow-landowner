@@ -84,7 +84,21 @@ describe.skipIf(!lawrence)("Lawrence County 2024 (whole-account statement)", () 
   });
 });
 
-describe.skipIf(!colbert)("Colbert County 2024 (PPIN only)", () => {
+describe.skipIf(!colbert)("Colbert County 2024 (account 1234, PPIN only)", () => {
+  it("reads the account header and two PPIN lines that reconcile", () => {
+    const s = colbert!;
+    expect(s.statements).toHaveLength(1);
+    const st = s.statements[0];
+    expect(printedIdentifier("Account", "account_number", st.extraction.billing_key as string)?.normalized).toBe("1234");
+    expect(st.extraction.total_tax).toBe(510.1);
+    const lines = linesOf(st);
+    expect(lines.map((l) => [l.identifiers.find((i) => i.kind === "ppin")?.normalized, l.tax_due])).toEqual([
+      ["2471", 69],
+      ["2661", 441.1],
+    ]);
+    expect(reconcile(lines.map((l) => l.tax_due), st.extraction.total_tax as number).reconciled).toBe(true);
+    expect(matchEntity({ taxpayer_name: st.extraction.taxpayer_name as string, care_of: null }, entities).entityId).toBe("alb");
+  });
   it("captures PPINs and matches only after the PPIN is learned", () => {
     const s = colbert!;
     const lines = s.statements.flatMap(linesOf).filter((l) => l.line_type === "real_property");
@@ -107,22 +121,38 @@ describe.skipIf(!colbert)("Colbert County 2024 (PPIN only)", () => {
   });
 });
 
-describe.skipIf(!morgan)("Morgan County 2024 (single parcel with key and receipt)", () => {
+describe.skipIf(!morgan)("Morgan County 2024 (two single-parcel statements in one file)", () => {
+  it("segments the two receipts as two statements with one line each", () => {
+    const s = morgan!;
+    expect(s.total_pages).toBe(2);
+    expect(s.groups).toHaveLength(2);
+    expect(s.groups.map((g) => g.pages)).toEqual([[1], [2]]);
+    for (const st of s.statements) expect(linesOf(st)).toHaveLength(1);
+  });
   it("captures the parcel, key, and receipt numbers and matches despite the space format", () => {
     const s = morgan!;
-    const st = s.statements[0];
-    const lines = linesOf(st);
-    expect(lines).toHaveLength(1);
-    const header = ((st.extraction.header_identifiers as Array<{ label: string; kind: string; value: string }>) ?? []).map((i) => printedIdentifier(i.label, i.kind, i.value)).filter(Boolean);
-    const kinds = new Set([...lines[0].identifiers, ...(header as NonNullable<ReturnType<typeof printedIdentifier>>[])].map((i) => i.kind));
-    expect(kinds.has("parcel_number")).toBe(true);
-    expect(kinds.has("key_number")).toBe(true);
-    expect(kinds.has("receipt_number")).toBe(true);
-    const printedParcel = lines[0].identifiers.find((i) => i.kind === "parcel_number")!;
-    const spaced = printedParcel.value.replace(/[-.]/g, " ");
-    const parcels = [{ id: "m1", parcel_number: spaced, property_id: "mor", property_name: "Morgan County" }];
-    const stored: StoredIdentifier[] = [{ parcel_id: "m1", kind: "parcel_number", value: spaced, normalized: printedIdentifier("x", "parcel_number", spaced)!.normalized }];
-    expect(matchLine(lines[0], stored, parcels).parcelId).toBe("m1");
+    const expected = [
+      { parcel: "02 04 20 0 002 002.000", key: "678", receipt: "48042", total: 150.86 },
+      { parcel: "02 05 21 0 200 013.003", key: "1066", receipt: "47675", total: 70.3 },
+    ];
+    for (const [i, st] of s.statements.entries()) {
+      const lines = linesOf(st);
+      const header = ((st.extraction.header_identifiers as Array<{ label: string; kind: string; value: string }>) ?? [])
+        .map((h) => printedIdentifier(h.label, h.kind, h.value))
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+      const all = [...lines[0].identifiers, ...header];
+      const byKind = (k: string) => all.find((x) => x.kind === k)?.normalized;
+      expect(byKind("parcel_number"), "parcel").toBe(printedIdentifier("x", "parcel_number", expected[i].parcel)!.normalized);
+      expect(byKind("key_number"), "key").toBe(expected[i].key);
+      expect(byKind("receipt_number"), "receipt").toBe(expected[i].receipt);
+      expect(st.extraction.total_tax).toBe(expected[i].total);
+      expect(lines[0].tax_due).toBe(expected[i].total);
+      // Stored with spaces (county GIS style), printed with spaces too: equal either way.
+      const parcels = [{ id: "m1", parcel_number: expected[i].parcel, property_id: "mor", property_name: "Morgan County" }];
+      const stored: StoredIdentifier[] = [{ parcel_id: "m1", kind: "parcel_number", value: expected[i].parcel, normalized: printedIdentifier("x", "parcel_number", expected[i].parcel)!.normalized }];
+      expect(matchLine(lines[0], stored, parcels).parcelId).toBe("m1");
+      expect(matchEntity({ taxpayer_name: st.extraction.taxpayer_name as string, care_of: null }, entities).entityId).toBe("alb");
+    }
   });
 });
 

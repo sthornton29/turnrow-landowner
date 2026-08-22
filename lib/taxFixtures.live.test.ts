@@ -16,14 +16,19 @@ const DIR = path.join(process.cwd(), "fixtures", "tax-statements");
 const live = process.env.TAX_FIXTURES_LIVE === "1";
 const files = fs.existsSync(DIR) ? fs.readdirSync(DIR).filter((f) => f.toLowerCase().endsWith(".pdf")) : [];
 
+// .env.local first, then a pulled Vercel env (vercel env pull
+// .env.vercel.local --environment=production) for keys that only live
+// in the deployment, such as ANTHROPIC_API_KEY.
 function loadEnv() {
-  const p = path.join(process.cwd(), ".env.local");
-  if (!fs.existsSync(p)) return;
-  for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
-    const i = line.indexOf("=");
-    if (i < 0 || line.startsWith("#")) continue;
-    const k = line.slice(0, i).trim();
-    if (!process.env[k]) process.env[k] = line.slice(i + 1).trim().replace(/^"|"$/g, "");
+  for (const name of [".env.local", ".env.vercel.local"]) {
+    const p = path.join(process.cwd(), name);
+    if (!fs.existsSync(p)) continue;
+    for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+      const i = line.indexOf("=");
+      if (i < 0 || line.startsWith("#")) continue;
+      const k = line.slice(0, i).trim();
+      if (!process.env[k]) process.env[k] = line.slice(i + 1).trim().replace(/^"|"$/g, "");
+    }
   }
 }
 
