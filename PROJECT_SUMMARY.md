@@ -1980,7 +1980,25 @@ Functions and views:
     prefer the linked entity's price rows on that connection and fall
     back to whole-operation rows, never mixing; the Tenant Data panel
     and the price card label the scope ("X entity price" /
-    "whole-operation price"). Unit tested (rollup breakdown, entity vs
+    "whole-operation price"). TENANTS ARE THE FARMING ENTITIES
+    (2026-08-22, Stuart's direction): lib/farmSync.ts
+    syncTenantsFromEntities runs on every sync: each entity behind a
+    share creates a tenants row (farm_connection_id + farm_entity_id,
+    notes "From farm data") or links an unlinked tenant with the same
+    owner name (normalizeOwnerName); a linked tenant keeps the owner's
+    own name and only farm_entity_name refreshes; a pre-entity
+    connection links or creates ONE whole-operation tenant
+    (farm_entity_id null); nothing is deleted (unit tested with a fake
+    client in farmSyncTenants.test.ts). Farm Data BY TENANT is one
+    card per (connection, entity) named from the tenants row, keys
+    conn:<id>|ent:<entity> (drill-in ?connection=&tenantEntity=), plus
+    a no-entity card per connection for plantings without one;
+    entityBreakdown is gone (the tenant card IS the entity). The lease
+    Tenant Data panel restricts its farm data to the tenant's entity
+    when linked ("Tenant data for X (from Y)"), the lease form lists
+    farm-data tenants first with "(farm data)", tenant pages carry a
+    "From farm data" chip, and Refresh now reports tenants created or
+    linked. Unit tested (rollup per entity card, entity vs
     operation price selection, pre-entity data unchanged). A
     pre-entity farm API leaves every new column null and nothing new
     renders.
