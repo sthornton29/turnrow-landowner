@@ -692,7 +692,7 @@ export async function POST(request: Request) {
     const run = async (bytes: Buffer, pdf: boolean, tool: Anthropic.Tool, text: string) => {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
-        max_tokens: 8192,
+        max_tokens: 16384,
         tools: [tool],
         tool_choice: { type: "tool", name: tool.name },
         messages: [{ role: "user", content: [imageBlock(bytes, pdf), { type: "text", text }] }],
@@ -735,14 +735,40 @@ export async function POST(request: Request) {
         const wanted = pagesParam.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
         bytes = await slicePages(fileBytes, wanted);
       }
-      if (isPdf && bytes.byteLength > MODEL_PDF_MAX_BYTES) {
-        // A heavy scan: read it in parts and merge the lines.
-        const parts = await splitPdf(bytes, { maxPages: 4, maxBytes: MODEL_PDF_MAX_BYTES });
-        const results: Array<Record<string, unknown>> = [];
-        for (const part of parts) results.push(await run(part, true, TAX_STATEMENT_TOOL, TAX_STATEMENT_PROMPT));
-        const merged = { ...results[0] };
+      // A whole-account bill runs many pages with several parcel blocks
+      // per page: more lines than one model reply can carry. Every
+      // multi-page statement is read in parts of at most 3 pages (two in
+      // flight) and the lines are merged in page order; the header comes
+      // from the first part, with later parts filling blanks.
+      const statementPages = isPdf ? await pageCount(bytes) : 1;
+      if (isPdf && (statementPages > 3 || bytes.byteLength > MODEL_PDF_MAX_BYTES)) {
+        const parts = await splitPdf(bytes, { maxPages: 3, maxBytes: MODEL_PDF_MAX_BYTES });
+        const results: Array<Record<string, unknown>> = new Array(parts.length);
+        let next = 0;
+        const worker = async () => {
+          while (next < parts.length) {
+            const i = next++;
+            results[i] = await run(
+              parts[i],
+              true,
+              TAX_STATEMENT_TOOL,
+              TAX_STATEMENT_PROMPT +
+                ` These are pages of part ${i + 1} of ${parts.length} of ONE statement; record every parcel line printed in this part (the header repeats on each part).`
+            );
+          }
+        };
+        await Promise.all([worker(), worker()]);
+        const merged: Record<string, unknown> = { ...results[0] };
+        for (const r of results.slice(1)) {
+          for (const [k, v] of Object.entries(r)) {
+            if (k === "lines" || k === "unsure_fields" || k === "header_identifiers") continue;
+            if ((merged[k] === null || merged[k] === undefined || merged[k] === "") && v !== null && v !== undefined) merged[k] = v;
+          }
+        }
         merged.lines = results.flatMap((r) => (Array.isArray(r.lines) ? (r.lines as unknown[]) : []));
+        merged.header_identifiers = results.flatMap((r) => (Array.isArray(r.header_identifiers) ? (r.header_identifiers as unknown[]) : []));
         merged.unsure_fields = [...new Set(results.flatMap((r) => (Array.isArray(r.unsure_fields) ? (r.unsure_fields as unknown[]).map(String) : [])))];
+        merged.parts = parts.length;
         return NextResponse.json({ extraction: merged });
       }
       const r = await run(bytes, isPdf, TAX_STATEMENT_TOOL, TAX_STATEMENT_PROMPT);

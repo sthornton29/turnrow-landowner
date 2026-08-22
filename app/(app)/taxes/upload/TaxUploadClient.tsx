@@ -863,7 +863,13 @@ export default function TaxUploadClient({
                           key={l.localId}
                           index={i}
                           line={l}
-                          parcels={parcelList}
+                          parcels={[...parcelList].sort((a, b) => {
+                            // The statement's county first; the picker stays short to scan.
+                            const sc = s.county.trim().toLowerCase();
+                            const ac = (a.county ?? "").toLowerCase() === sc ? 0 : 1;
+                            const bc = (b.county ?? "").toLowerCase() === sc ? 0 : 1;
+                            return ac - bc || a.parcel_number.localeCompare(b.parcel_number);
+                          })}
                           parcelById={parcelById}
                           properties={properties}
                           onChange={(patch) => patchLine(s.localId, l.localId, patch)}
