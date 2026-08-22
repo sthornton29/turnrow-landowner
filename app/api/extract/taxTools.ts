@@ -82,8 +82,8 @@ export const TAX_STATEMENT_TOOL: Anthropic.Tool = {
       care_of: nullable("string", "The name after C/O when printed separately; else null"),
       mailing_address: nullable("string", "Mailing address as printed, one line"),
       total_tax: nullable("number", "Total tax due for the whole statement, dollars"),
-      due_date: nullable("string", "Due date if printed, YYYY-MM-DD"),
-      delinquent_date: nullable("string", "The date the tax becomes delinquent if printed (e.g. 'delinquent after December 31' -> the next day), YYYY-MM-DD"),
+      due_date: nullable("string", "The date the tax becomes DUE, the START of the payment window (e.g. 'due October 1' or 'taxes due October 1, 2024 - December 31, 2024' -> 2024-10-01), YYYY-MM-DD; never the last day to pay"),
+      delinquent_date: nullable("string", "The first day the tax is delinquent if printed (e.g. 'delinquent after December 31' or 'pay by December 31' -> 2025-01-01; 'delinquent January 1' -> that day), YYYY-MM-DD"),
       header_identifiers: {
         type: "array",
         description: "Every labeled number printed in the HEADER that is not tied to one parcel line (account number, receipt number, key number, bill number, ...)",

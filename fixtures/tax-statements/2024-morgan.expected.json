@@ -1,0 +1,203 @@
+{
+  "file": "2024-morgan.pdf",
+  "total_pages": 2,
+  "pages": [
+    {
+      "page": 1,
+      "county": "Morgan",
+      "state": "AL",
+      "billing_key": "48042",
+      "billing_kind": "receipt_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION THE",
+      "tax_year": 2024,
+      "total_tax": 150.86,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 2,
+      "county": "Morgan",
+      "state": "AL",
+      "billing_key": "47675",
+      "billing_kind": "receipt_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION THE",
+      "tax_year": 2024,
+      "total_tax": 70.3,
+      "is_continuation": false,
+      "is_statement": true
+    }
+  ],
+  "groups": [
+    {
+      "key": "morgan|al|48042|2024",
+      "pages": [
+        1
+      ],
+      "county": "Morgan",
+      "state": "AL",
+      "billing_key": "48042",
+      "billing_kind": "receipt_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION THE",
+      "tax_year": 2024,
+      "total_tax": 150.86,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "morgan|al|47675|2024",
+      "pages": [
+        2
+      ],
+      "county": "Morgan",
+      "state": "AL",
+      "billing_key": "47675",
+      "billing_kind": "receipt_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION THE",
+      "tax_year": 2024,
+      "total_tax": 70.3,
+      "entity_id": null,
+      "entity_evidence": null
+    }
+  ],
+  "statements": [
+    {
+      "pages": [
+        1
+      ],
+      "extraction": {
+        "county": "Morgan",
+        "state": "AL",
+        "authority_name": "Morgan County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "678",
+        "billing_kind": "key_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION THE",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND, AL 35618-0356",
+        "total_tax": 150.86,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "KEY #",
+            "kind": "key_number",
+            "value": "678"
+          },
+          {
+            "label": "PARCEL #",
+            "kind": "parcel_number",
+            "value": "02 04 20 0 002 002.000"
+          },
+          {
+            "label": "RECEIPT #",
+            "kind": "receipt_number",
+            "value": "48042"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "KEY #",
+                "kind": "key_number",
+                "value": "678"
+              },
+              {
+                "label": "PARCEL #",
+                "kind": "parcel_number",
+                "value": "02 04 20 0 002 002.000"
+              },
+              {
+                "label": "RECEIPT #",
+                "kind": "receipt_number",
+                "value": "48042"
+              }
+            ],
+            "appraised_value": 444900,
+            "assessed_value": 4020,
+            "tax_due": 150.86,
+            "exemptions": null,
+            "legal_description": "A TR BE INT THE SE1/4 OF NE1/4 SEC 20 T5S R5W ALSO THAT PART OF NE1/4 OF NE1/4 LYING SO OF SOUTHERN RR LESS A TR BEG AT A PT ON E LN SD 1/4 1/4 WHERE SE LN SO RR INT SD E LN TH SWY 275' ALG RR R/W TH SO 549.5' TH E 209' TO SD E SEC LN 31 AC IN NE1/4 OF NE1/4 TH N 704.5' TO POB ALSO SW1/4 OF NE1/4 LESS A TR BEG AT SW COR SD 1/4 1/4 TH N 210'S TH E 1250'S TH SO 210'S TH W 1250'S TO POB",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].acres",
+          "lines[0].property_address"
+        ]
+      }
+    },
+    {
+      "pages": [
+        2
+      ],
+      "extraction": {
+        "county": "Morgan",
+        "state": "AL",
+        "authority_name": "Morgan County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "1066",
+        "billing_kind": "key_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION THE",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND, AL 35618-0356",
+        "total_tax": 70.3,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "KEY #",
+            "kind": "key_number",
+            "value": "1066"
+          },
+          {
+            "label": "RECEIPT #",
+            "kind": "receipt_number",
+            "value": "47675"
+          },
+          {
+            "label": "PARCEL #",
+            "kind": "parcel_number",
+            "value": "02 05 21 0 200 013.003"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "KEY #",
+                "kind": "key_number",
+                "value": "1066"
+              },
+              {
+                "label": "PARCEL #",
+                "kind": "parcel_number",
+                "value": "02 05 21 0 200 013.003"
+              },
+              {
+                "label": "RECEIPT #",
+                "kind": "receipt_number",
+                "value": "47675"
+              }
+            ],
+            "appraised_value": 18800,
+            "assessed_value": 1880,
+            "tax_due": 70.3,
+            "exemptions": null,
+            "legal_description": "COM AT NW COR OF SEC 21 T5S R5W TH SO ALG W BDRY OF SAID SEC 507.19' TO S'LY R/W OF SOUTHERN R/R & TPOB TH CONT SO 1190.24' TH E 60' TH N 1159.74' TH NE 802.51' TO SO R/W OLD TRINITY LANE TH W ALG SAID R/W 102.76' TH SW ALG S'LY R/W R/R 749.74' TO POB",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].property_address",
+          "lines[0].acres"
+        ]
+      }
+    }
+  ],
+  "written_at": "2026-08-22T02:50:37.164Z"
+}

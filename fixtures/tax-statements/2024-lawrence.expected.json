@@ -1,0 +1,2222 @@
+{
+  "file": "2024-lawrence.pdf",
+  "total_pages": 24,
+  "pages": [
+    {
+      "page": 1,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "35460",
+      "billing_kind": "account_number",
+      "taxpayer_name": "MARTIN L SYKES C/O ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 1142,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 2,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "215450",
+      "billing_kind": "account_number",
+      "taxpayer_name": "T M L L C",
+      "tax_year": 2024,
+      "total_tax": 155.98,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 3,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 4,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 5,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 6,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 7,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 8,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 9,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 10,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 11,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 12,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 13,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 14,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "is_continuation": true,
+      "is_statement": true
+    },
+    {
+      "page": 15,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "865720",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 202.8,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 16,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "906199",
+      "billing_kind": "account_number",
+      "taxpayer_name": "THE AMBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 185.63,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 17,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "871470",
+      "billing_kind": "account_number",
+      "taxpayer_name": "THE ALBERMALE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 358,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 18,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "909279",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 166.5,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 19,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "867220",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 5.4,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 20,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856500",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 163.2,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 21,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856490",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 55.7,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 22,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856480",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 40,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 23,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856470",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 85.2,
+      "is_continuation": false,
+      "is_statement": true
+    },
+    {
+      "page": 24,
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "14620",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 91.65,
+      "is_continuation": false,
+      "is_statement": true
+    }
+  ],
+  "groups": [
+    {
+      "key": "lawrence|al|35460|2024",
+      "pages": [
+        1
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "35460",
+      "billing_kind": "account_number",
+      "taxpayer_name": "MARTIN L SYKES C/O ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 1142,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|215450|2024",
+      "pages": [
+        2
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "215450",
+      "billing_kind": "account_number",
+      "taxpayer_name": "T M L L C",
+      "tax_year": 2024,
+      "total_tax": 155.98,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|8080|2024",
+      "pages": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "8080",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 13647.18,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|865720|2024",
+      "pages": [
+        15
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "865720",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 202.8,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|906199|2024",
+      "pages": [
+        16
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "906199",
+      "billing_kind": "account_number",
+      "taxpayer_name": "THE AMBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 185.63,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|871470|2024",
+      "pages": [
+        17
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "871470",
+      "billing_kind": "account_number",
+      "taxpayer_name": "THE ALBERMALE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 358,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|909279|2024",
+      "pages": [
+        18
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "909279",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 166.5,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|867220|2024",
+      "pages": [
+        19
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "867220",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 5.4,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|856500|2024",
+      "pages": [
+        20
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856500",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 163.2,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|856490|2024",
+      "pages": [
+        21
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856490",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 55.7,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|856480|2024",
+      "pages": [
+        22
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856480",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 40,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|856470|2024",
+      "pages": [
+        23
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "856470",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORPORATION",
+      "tax_year": 2024,
+      "total_tax": 85.2,
+      "entity_id": null,
+      "entity_evidence": null
+    },
+    {
+      "key": "lawrence|al|14620|2024",
+      "pages": [
+        24
+      ],
+      "county": "Lawrence",
+      "state": "AL",
+      "billing_key": "14620",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP",
+      "tax_year": 2024,
+      "total_tax": 91.65,
+      "entity_id": null,
+      "entity_evidence": null
+    }
+  ],
+  "statements": [
+    {
+      "pages": [
+        1
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "35460",
+        "billing_kind": "account_number",
+        "taxpayer_name": "MARTIN L SYKES C/O ALBEMARLE CORP",
+        "care_of": "ALBEMARLE CORP",
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 1142,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "35460"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-31-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959080"
+              }
+            ],
+            "appraised_value": 389800,
+            "assessed_value": null,
+            "tax_due": 1142,
+            "exemptions": "H1",
+            "legal_description": "BEG SW COR OF NW1/4 OF SE1/4 TH N APP 55",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].acres",
+          "lines[0].legal_description"
+        ]
+      }
+    },
+    {
+      "pages": [
+        2
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "215450",
+        "billing_kind": "account_number",
+        "taxpayer_name": "T M L L C",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 155.98,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "215450"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-30-0-203-024.002-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958680"
+              }
+            ],
+            "appraised_value": 17700,
+            "assessed_value": null,
+            "tax_due": 155.98,
+            "exemptions": null,
+            "legal_description": "BEG AT INT OF JESSE JACKSON PARKWAY & CO",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].property_address",
+          "lines[0].acres",
+          "care_of"
+        ]
+      }
+    },
+    {
+      "pages": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "8080",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORP",
+        "care_of": null,
+        "mailing_address": "POB 356, COURTLAND, AL 35618",
+        "total_tax": 13647.18,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "8080"
+          },
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "8080"
+          },
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "8080"
+          },
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "8080"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "05-07-25-0-000-007.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "956739"
+              }
+            ],
+            "appraised_value": 493300,
+            "assessed_value": null,
+            "tax_due": 208.5,
+            "exemptions": null,
+            "legal_description": "W 1/2 NW 1/4 AND S 30AC OF SE 1/4 NW 1/4",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "02-08-34-0-000-004.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "955992"
+              }
+            ],
+            "appraised_value": 76900,
+            "assessed_value": null,
+            "tax_due": 26.4,
+            "exemptions": null,
+            "legal_description": "BEG AT SW COR OF SEC 34; TH N 660', E 13",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "05-07-26-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "956746"
+              }
+            ],
+            "appraised_value": 502300,
+            "assessed_value": null,
+            "tax_due": 261.3,
+            "exemptions": null,
+            "legal_description": "NE1/4 OF NE1/4 SE1/4 OF NE1/4 EXCEPT W O",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "05-07-25-0-000-004.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "956734"
+              }
+            ],
+            "appraised_value": 128100,
+            "assessed_value": null,
+            "tax_due": 53.4,
+            "exemptions": null,
+            "legal_description": "BEG AT NE COR OF NE 1/4 OF NW 1/4 OF SEC",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "05-07-25-0-000-006.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "956736"
+              }
+            ],
+            "appraised_value": 57200,
+            "assessed_value": null,
+            "tax_due": 18.6,
+            "exemptions": null,
+            "legal_description": "BEG AT NW COR OF NE1/4 OF NW1/4 TH E ALG",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "05-07-25-0-000-007.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "956740"
+              }
+            ],
+            "appraised_value": 307700,
+            "assessed_value": null,
+            "tax_due": 127.8,
+            "exemptions": null,
+            "legal_description": "W 1/2 OF SW 1/4 OF SEC 25SEC 25 T4S R9W",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-02-04-0-000-007.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958077"
+              }
+            ],
+            "appraised_value": 87400,
+            "assessed_value": null,
+            "tax_due": 41.7,
+            "exemptions": null,
+            "legal_description": "BEG AT SE COR OF SEC 4 TH W 328 0' TH N",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-17-0-000-012.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958179"
+              }
+            ],
+            "appraised_value": 273800,
+            "assessed_value": null,
+            "tax_due": 82.8,
+            "exemptions": null,
+            "legal_description": "A TRACT OF LAND BEG SE COR OF SEC 17 N 2",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-19-0-200-001.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958243"
+              }
+            ],
+            "appraised_value": 44000,
+            "assessed_value": null,
+            "tax_due": 7.8,
+            "exemptions": null,
+            "legal_description": "BEG 665' N OF SE COR OF SEC 19 TH N 690'",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958413"
+              }
+            ],
+            "appraised_value": 395200,
+            "assessed_value": null,
+            "tax_due": 154.2,
+            "exemptions": null,
+            "legal_description": "BEG 120 W OF NE COR OF SEC TH W 2825 S 2",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-000-002.005-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958418"
+              }
+            ],
+            "appraised_value": 12300,
+            "assessed_value": null,
+            "tax_due": 1.2,
+            "exemptions": null,
+            "legal_description": "BEG 1050' E OF SW COR OF SE1/4 OF NW1/4",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-31-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959079"
+              }
+            ],
+            "appraised_value": 636000,
+            "assessed_value": null,
+            "tax_due": 287.2,
+            "exemptions": null,
+            "legal_description": "ALL THAT PORTION OF S1/2 OF SEC 31 WHICH",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-19-0-000-009.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958240"
+              }
+            ],
+            "appraised_value": 163700,
+            "assessed_value": null,
+            "tax_due": 72.6,
+            "exemptions": null,
+            "legal_description": "BEG 1320' N OF SE COR OF SEC 19 TH N 820",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-05-22-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "957411"
+              }
+            ],
+            "appraised_value": 1048400,
+            "assessed_value": null,
+            "tax_due": 442.2,
+            "exemptions": null,
+            "legal_description": "BEG 660' S OF & 20' W OF NE COR OF SEC 2",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-05-22-0-000-003.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "957412"
+              }
+            ],
+            "appraised_value": 720100,
+            "assessed_value": null,
+            "tax_due": 291.3,
+            "exemptions": null,
+            "legal_description": "W 1/2 OF SEC LESS A STRIP 809' WIDE OFF",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-05-15-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958313"
+              }
+            ],
+            "appraised_value": 337800,
+            "assessed_value": null,
+            "tax_due": 148.5,
+            "exemptions": null,
+            "legal_description": "BEG 1100' E OF NW COR SEC 15; TH E 1570'",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-31-0-200-016.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959100"
+              }
+            ],
+            "appraised_value": 622400,
+            "assessed_value": null,
+            "tax_due": 2109.4,
+            "exemptions": null,
+            "legal_description": "BEG AT NE COR OF SEC 31 & RUN W 675' S 1",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-02-03-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958070"
+              }
+            ],
+            "appraised_value": 572300,
+            "assessed_value": null,
+            "tax_due": 223.2,
+            "exemptions": null,
+            "legal_description": "W1/2 OF W1/2 S 3 T4S R7W",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-000-002.003-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958416"
+              }
+            ],
+            "appraised_value": 146500,
+            "assessed_value": null,
+            "tax_due": 70.3,
+            "exemptions": null,
+            "legal_description": "BEG NW COR OF NE1/4 OF SW1/4 TH S 750' S",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-32-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959102"
+              }
+            ],
+            "appraised_value": 148900,
+            "assessed_value": null,
+            "tax_due": 96.9,
+            "exemptions": null,
+            "legal_description": "BEG SE COR OF NE1/4 TH W 1310' N 1145' S",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "10-03-07-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "962328"
+              }
+            ],
+            "appraised_value": 354800,
+            "assessed_value": null,
+            "tax_due": 314.8,
+            "exemptions": null,
+            "legal_description": "NE1/4 OF SEC 7 SEC 7 T5S R7W 1=400' 2",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-05-21-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "957405"
+              }
+            ],
+            "appraised_value": 123100,
+            "assessed_value": null,
+            "tax_due": 37.2,
+            "exemptions": null,
+            "legal_description": "BEG AT THE NE COR OF SEC RUN W 305' S TO",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-02-04-0-000-003.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958073"
+              }
+            ],
+            "appraised_value": 545100,
+            "assessed_value": null,
+            "tax_due": 212.4,
+            "exemptions": null,
+            "legal_description": "BEG 1050S N OF SE COR SEC 4; TH W 3290S'",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "10-03-06-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "962325"
+              }
+            ],
+            "appraised_value": 446000,
+            "assessed_value": null,
+            "tax_due": 159.6,
+            "exemptions": null,
+            "legal_description": "W 1/2 OF NW 1/4 AND SE 1/4 OF NW 1/4 OF",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-20-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958302"
+              }
+            ],
+            "appraised_value": 1303200,
+            "assessed_value": null,
+            "tax_due": 927.4,
+            "exemptions": null,
+            "legal_description": "BEG AT NW COR OF SEC 20; TH E 3370'S S 2",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-07-26-0-000-001.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958368"
+              }
+            ],
+            "appraised_value": 577400,
+            "assessed_value": null,
+            "tax_due": 218.4,
+            "exemptions": null,
+            "legal_description": "NE 1/4 OF NW 1/4 LYING E OF JERUSALEM RD",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-30-3-102-038.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958897"
+              }
+            ],
+            "appraised_value": 202300,
+            "assessed_value": null,
+            "tax_due": 1522.02,
+            "exemptions": null,
+            "legal_description": "TOWN OF COURTLAND LOT 99 S 30 T 4S R 7W",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-19-0-000-009.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958241"
+              }
+            ],
+            "appraised_value": 91800,
+            "assessed_value": null,
+            "tax_due": 39.8,
+            "exemptions": null,
+            "legal_description": "BEG 1300' N 40' E OF SW COR OF SE 1/4 TH",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-20-0-000-002.003-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958305"
+              }
+            ],
+            "appraised_value": 15400,
+            "assessed_value": null,
+            "tax_due": 1.8,
+            "exemptions": null,
+            "legal_description": "BEG SW COR OF SEC 20 TH N 280' SE ALG RO",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-200-013.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958458"
+              }
+            ],
+            "appraised_value": 329500,
+            "assessed_value": null,
+            "tax_due": 1018.24,
+            "exemptions": null,
+            "legal_description": "BEG AT SW COR OF SW 1/4 OF SW 1/4 OF SEC",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-32-0-000-004.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959109"
+              }
+            ],
+            "appraised_value": 1539700,
+            "assessed_value": null,
+            "tax_due": 2086.4,
+            "exemptions": null,
+            "legal_description": "NW1/4 & SW1/4 X",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "10-03-06-0-000-004.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "962327"
+              }
+            ],
+            "appraised_value": 374900,
+            "assessed_value": null,
+            "tax_due": 242,
+            "exemptions": null,
+            "legal_description": "S1/2 OF SE1/4 S1/2 OF NE1/4 OF SE1/4 NW1",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-19-0-200-001.111-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958244"
+              }
+            ],
+            "appraised_value": 116200,
+            "assessed_value": null,
+            "tax_due": 48,
+            "exemptions": null,
+            "legal_description": "BEG AT SE COR OF SEC 19; TH W 1345'S N 1",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "10-03-08-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "962337"
+              }
+            ],
+            "appraised_value": 312700,
+            "assessed_value": null,
+            "tax_due": 201.7,
+            "exemptions": null,
+            "legal_description": "W 1/2 OF NW1/4 AND NE 1/4 OF NW 1/4 OF S",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "10-03-08-0-000-004.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "962339"
+              }
+            ],
+            "appraised_value": 234800,
+            "assessed_value": null,
+            "tax_due": 195.1,
+            "exemptions": null,
+            "legal_description": "E 1/2 OF SW 1/4 AND SE 1/4 OF NW 1/4 OF",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "09-06-13-0-000-005.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "960927"
+              }
+            ],
+            "appraised_value": 141600,
+            "assessed_value": null,
+            "tax_due": 111.9,
+            "exemptions": null,
+            "legal_description": "PAR BEG AT PT WHERE N ROW CEMETERY RD IN",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-02-09-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958078"
+              }
+            ],
+            "appraised_value": 149300,
+            "assessed_value": null,
+            "tax_due": 82.8,
+            "exemptions": null,
+            "legal_description": "BEG AT NE COR OF SEC TH W 3290' TH N 920",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-19-0-200-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958242"
+              }
+            ],
+            "appraised_value": 156900,
+            "assessed_value": null,
+            "tax_due": 80.66,
+            "exemptions": null,
+            "legal_description": "COM AT SE COR OF SEC 19; TH W 1345'S TO",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-20-0-000-005.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958310"
+              }
+            ],
+            "appraised_value": 66800,
+            "assessed_value": null,
+            "tax_due": 30.6,
+            "exemptions": null,
+            "legal_description": "17 AC OFF S/S OF SW 1/4 OF SE 1/4 S 20 T",
+            "property_address": null,
+            "acres": 17
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-05-16-0-000-002.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958321"
+              }
+            ],
+            "appraised_value": 330800,
+            "assessed_value": null,
+            "tax_due": 137.4,
+            "exemptions": null,
+            "legal_description": "A TRACT OF LAND BEG AT SW/C OF SEC 16 E",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-07-36-0-000-001.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958385"
+              }
+            ],
+            "appraised_value": 869500,
+            "assessed_value": null,
+            "tax_due": 391.8,
+            "exemptions": null,
+            "legal_description": "NE 1/4; E1/2 OF SE1/4; E 33 ACS OFF THE",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-000-005.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958428"
+              }
+            ],
+            "appraised_value": 31300,
+            "assessed_value": null,
+            "tax_due": 4.44,
+            "exemptions": null,
+            "legal_description": "ALL OF SE1/4 OF SW1/4 S OF R/R ROW S 29",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-200-011.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958453"
+              }
+            ],
+            "appraised_value": 90000,
+            "assessed_value": null,
+            "tax_due": 41.44,
+            "exemptions": null,
+            "legal_description": "ALL BEG AT NE COR OF NW 1/4 OF SW 1/4 TH",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-30-3-102-030.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958889"
+              }
+            ],
+            "appraised_value": 104700,
+            "assessed_value": null,
+            "tax_due": 799.78,
+            "exemptions": null,
+            "legal_description": "LOTS 100. 101. 105 106 AND 107 TOWN OF C",
+            "property_address": null,
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-32-0-000-001.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959103"
+              }
+            ],
+            "appraised_value": 56700,
+            "assessed_value": null,
+            "tax_due": 16.2,
+            "exemptions": null,
+            "legal_description": "BEG 340' OF NE COR OF SEC 32; TH NW ALG",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[1].legal_description",
+          "lines[7].legal_description",
+          "lines[9].legal_description",
+          "lines[0].legal_description",
+          "lines[3].legal_description",
+          "lines[4].legal_description",
+          "lines[6].legal_description",
+          "lines[8].legal_description",
+          "lines[10].legal_description",
+          "lines[5].legal_description",
+          "lines[11].legal_description",
+          "lines[2].legal_description"
+        ]
+      }
+    },
+    {
+      "pages": [
+        15
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "865720",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORP",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 202.8,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "865720"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-31-0-000-003.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "959081"
+              }
+            ],
+            "appraised_value": 407200,
+            "assessed_value": null,
+            "tax_due": 202.8,
+            "exemptions": null,
+            "legal_description": "ALL THAT PORTION OF S1/2 OF SEC 31 LYING",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].exemptions",
+          "lines[0].legal_description",
+          "lines[0].assessed_value"
+        ]
+      }
+    },
+    {
+      "pages": [
+        16
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "906199",
+        "billing_kind": "account_number",
+        "taxpayer_name": "THE AMBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 185.63,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "906199"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-08-27-0-000-005.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "957579"
+              }
+            ],
+            "appraised_value": 342200,
+            "assessed_value": null,
+            "tax_due": 185.63,
+            "exemptions": null,
+            "legal_description": "BEG AT NW COR OF NE 1/4 OF NE 1/4 OF SEC",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "taxpayer_name",
+          "lines[0].legal_description",
+          "lines[0].assessed_value"
+        ]
+      }
+    },
+    {
+      "pages": [
+        17
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "871470",
+        "billing_kind": "account_number",
+        "taxpayer_name": "THE ALBERMALE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 358,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "871470"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-07-26-0-000-021.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "957521"
+              }
+            ],
+            "appraised_value": 45000,
+            "assessed_value": null,
+            "tax_due": 358,
+            "exemptions": "",
+            "legal_description": "BEG AT A PT ALG S ROW OF HWY 20 2070' NW",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].exemptions",
+          "lines[0].acres"
+        ]
+      }
+    },
+    {
+      "pages": [
+        18
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "909279",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 166.5,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "909279"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-200-001.005"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "1714118"
+              }
+            ],
+            "appraised_value": 44900,
+            "assessed_value": null,
+            "tax_due": 166.5,
+            "exemptions": "",
+            "legal_description": "BEG AT INT OF N/BDY OF SEC 29 AND N/ROW",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].acres",
+          "lines[0].exemptions"
+        ]
+      }
+    },
+    {
+      "pages": [
+        19
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "867220",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 5.4,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "867220"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-09-29-0-000-004.111-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958426"
+              }
+            ],
+            "appraised_value": 27100,
+            "assessed_value": null,
+            "tax_due": 5.4,
+            "exemptions": "",
+            "legal_description": "COM AT NW COR OF SEC 29; TH E 1870'S TO",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].legal_description",
+          "lines[0].acres",
+          "lines[0].exemptions"
+        ]
+      }
+    },
+    {
+      "pages": [
+        20
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "856500",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 163.2,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "856500"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-04-18-0-000-002.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958182"
+              }
+            ],
+            "appraised_value": 419000,
+            "assessed_value": null,
+            "tax_due": 163.2,
+            "exemptions": null,
+            "legal_description": "BEG AT NW COR OF SEC 18; TH E 2770'S, S",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].legal_description",
+          "lines[0].acres"
+        ]
+      }
+    },
+    {
+      "pages": [
+        21
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "856490",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 55.7,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "856490"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "07-03-07-0-000-005.000-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "958142"
+              }
+            ],
+            "appraised_value": 117100,
+            "assessed_value": null,
+            "tax_due": 55.7,
+            "exemptions": "",
+            "legal_description": "BEG AT COR OF SEC; TH N 1050' SE ALG DRK",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].acres",
+          "lines[0].exemptions"
+        ]
+      }
+    },
+    {
+      "pages": [
+        22
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "856480",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 40,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "856480"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-06-13-0-000-001.002-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "957416"
+              }
+            ],
+            "appraised_value": 46200,
+            "assessed_value": null,
+            "tax_due": 40,
+            "exemptions": null,
+            "legal_description": "BEG AT NE COR OF SEC 13; TH S 1985'S, W",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].legal_description"
+        ]
+      }
+    },
+    {
+      "pages": [
+        23
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "856470",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORPORATION",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 85.2,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "856470"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "06-01-12-0-000-002.001-0"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "956810"
+              }
+            ],
+            "appraised_value": 121700,
+            "assessed_value": null,
+            "tax_due": 85.2,
+            "exemptions": null,
+            "legal_description": "THE SE 1/4 SEC 12 LESS LAND N A ND SW'LY",
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].legal_description"
+        ]
+      }
+    },
+    {
+      "pages": [
+        24
+      ],
+      "extraction": {
+        "county": "Lawrence",
+        "state": "AL",
+        "authority_name": "Lawrence County Revenue Commissioner",
+        "tax_year": 2024,
+        "billing_key": "14620",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORP",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 91.65,
+        "due_date": "2024-10-01",
+        "delinquent_date": "2025-01-01",
+        "header_identifiers": [
+          {
+            "label": "Account #",
+            "kind": "account_number",
+            "value": "14620"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "personal_property",
+            "identifiers": [
+              {
+                "label": "PARCEL",
+                "kind": "parcel_number",
+                "value": "00-00-00-0-000-000.000"
+              },
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "1020"
+              }
+            ],
+            "appraised_value": 19513,
+            "assessed_value": null,
+            "tax_due": 91.65,
+            "exemptions": "PP",
+            "legal_description": null,
+            "property_address": null,
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].assessed_value",
+          "lines[0].legal_description"
+        ]
+      }
+    }
+  ],
+  "written_at": "2026-08-22T02:50:00.064Z"
+}

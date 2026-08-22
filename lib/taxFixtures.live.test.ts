@@ -82,10 +82,32 @@ describe.skipIf(!live || files.length === 0)("tax fixture snapshots (live)", () 
         }
       }
       const groups = groupPages(pages);
+      // Same rule as /api/extract: a statement over 3 pages is read in
+      // 3-page parts and the lines merged (one reply cannot carry 45 lines).
       const statements: unknown[] = [];
       for (const g of groups) {
-        const bytes = await slice(buf, g.pages);
-        statements.push({ pages: g.pages, extraction: await run(bytes, TAX_STATEMENT_TOOL, TAX_STATEMENT_PROMPT) });
+        const parts: number[][] = [];
+        for (let i = 0; i < g.pages.length; i += 3) parts.push(g.pages.slice(i, i + 3));
+        const results: Array<Record<string, unknown>> = [];
+        for (const [i, part] of parts.entries()) {
+          const bytes = await slice(buf, part);
+          const text =
+            parts.length > 1
+              ? `${TAX_STATEMENT_PROMPT} These are pages of part ${i + 1} of ${parts.length} of ONE statement; record every parcel line printed in this part (the header repeats on each part).`
+              : TAX_STATEMENT_PROMPT;
+          results.push(await run(bytes, TAX_STATEMENT_TOOL, text));
+        }
+        const merged: Record<string, unknown> = { ...results[0] };
+        for (const r of results.slice(1)) {
+          for (const [k, v] of Object.entries(r)) {
+            if (k === "lines" || k === "unsure_fields" || k === "header_identifiers") continue;
+            if ((merged[k] === null || merged[k] === undefined || merged[k] === "") && v !== null && v !== undefined) merged[k] = v;
+          }
+        }
+        merged.lines = results.flatMap((r) => (Array.isArray(r.lines) ? (r.lines as unknown[]) : []));
+        merged.header_identifiers = results.flatMap((r) => (Array.isArray(r.header_identifiers) ? (r.header_identifiers as unknown[]) : []));
+        merged.unsure_fields = [...new Set(results.flatMap((r) => (Array.isArray(r.unsure_fields) ? (r.unsure_fields as unknown[]).map(String) : [])))];
+        statements.push({ pages: g.pages, extraction: merged });
       }
       const snapshot = { file: f, total_pages: total, pages, groups, statements, written_at: new Date().toISOString() };
       fs.writeFileSync(path.join(DIR, f.replace(/\.pdf$/i, ".expected.json")), JSON.stringify(snapshot, null, 2));

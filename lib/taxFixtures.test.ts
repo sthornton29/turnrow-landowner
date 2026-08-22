@@ -52,20 +52,41 @@ const entities = [
 ];
 
 describe.skipIf(!lawrence)("Lawrence County 2024 (whole-account statement)", () => {
-  it("groups the multi-page account as ONE statement", () => {
+  it("groups the 24 pages into 13 statements, the whole-account bill 8080 as ONE", () => {
     const s = lawrence!;
+    expect(s.total_pages).toBe(24);
     const groups = groupPages(s.pages);
-    const big = groups.reduce((a, g) => (g.pages.length > a.pages.length ? g : a), groups[0]);
-    expect(big.pages.length).toBeGreaterThanOrEqual(Math.max(2, s.total_pages - 1));
+    expect(groups).toHaveLength(13);
+    const big = groups.find((g) => printedIdentifier("Account", "account_number", g.billing_key)?.normalized === "8080")!;
+    expect(big.pages).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
     expect(big.billing_kind).toBe("account_number");
+    expect(big.total_tax).toBe(13647.18);
+    // Every other statement is a single page.
+    expect(groups.filter((g) => g !== big).every((g) => g.pages.length === 1)).toBe(true);
   });
-  it("reads several parcel lines that reconcile to the printed total", () => {
+  it("reads the big account's parcel lines and they reconcile to the printed total", () => {
     const s = lawrence!;
-    const st = s.statements.reduce((a, b) => (b.pages.length > a.pages.length ? b : a), s.statements[0]);
+    const st = s.statements.find((x) => x.pages.length === 12)!;
     const lines = linesOf(st);
-    expect(lines.length).toBeGreaterThan(4);
+    expect(lines.length).toBeGreaterThanOrEqual(40);
     const r = reconcile(lines.map((l) => l.tax_due), st.extraction.total_tax as number);
     expect(r.reconciled, `gap ${r.gap}`).toBe(true);
+    // Every line carries the parcel number and the PPIN the county prints.
+    for (const l of lines) {
+      const kinds = new Set(l.identifiers.map((i) => i.kind));
+      expect(kinds.has("parcel_number"), JSON.stringify(l.identifiers)).toBe(true);
+      expect(kinds.has("ppin"), JSON.stringify(l.identifiers)).toBe(true);
+    }
+  });
+  it("every single-page statement reconciles and the personal property statement stays parcel-free", () => {
+    const s = lawrence!;
+    let personal = 0;
+    for (const st of s.statements) {
+      const lines = linesOf(st);
+      expect(reconcile(lines.map((l) => l.tax_due), st.extraction.total_tax as number).reconciled, String(st.extraction.billing_key)).toBe(true);
+      for (const l of lines) if (l.line_type === "personal_property") personal++;
+    }
+    expect(personal).toBeGreaterThanOrEqual(1);
   });
   it("matches the typo'd taxpayer to the entity and keeps a personal property line parcel-free", () => {
     const s = lawrence!;

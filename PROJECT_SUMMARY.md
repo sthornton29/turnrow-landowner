@@ -751,7 +751,14 @@ missing unique (id, organization_id) on parcels):
   parcels have no PPINs yet; confirming the Colbert lines by hand once
   teaches them. The live snapshot writer needs ANTHROPIC_API_KEY in
   .env.local (the Vercel value is marked Sensitive and cannot be
-  pulled), so the fixture snapshot suite has not been generated yet.
+  pulled) until Stuart added it on 2026-08-22; the snapshots are now
+  committed (fixtures/tax-statements/*.expected.json) and the 9
+  fixture tests pass: 13 Lawrence statements with 8080 as one 12-page
+  statement of 45 lines reconciling to the cent, every line carrying
+  parcel number and PPIN, the personal property statement parcel-free,
+  Colbert and Morgan as described, due Oct 1 and delinquent Jan 1
+  everywhere (the due_date tool wording now says the START of the
+  payment window; the writer chunks statements like the route).
   NEW-STATE ONBOARDING CHECKLIST: (1) if the state's bills use a
   number not in IDENTIFIER_KINDS, add it to the check constraint in a
   migration, to IDENTIFIER_KINDS, its label, and a guessKind pattern;
