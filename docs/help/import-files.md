@@ -12,7 +12,7 @@ Upload boundary files you already have: a zipped shapefile from a surveyor, a KM
 
 ## How to use it
 
-- Drop the file in. Polygons can become a property, parcel, ag field, pasture, wetland, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
+- Drop the file in. Polygons can become a property, parcel, ag field, pasture/grassland, wetland, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
 - Each row suggests the property that contains it (a "Suggested from location" chip). Confirm or change it. Properties in the same batch save first so other rows can attach to them.
 - Rows that fail are skipped and listed so you can fix and retry them.
 

@@ -121,6 +121,7 @@ export default function EntityDocuments({
     const table: Partial<Record<DocumentEntityType, string>> = {
       parcel: "parcels", field: "fields", pasture: "pastures", wetland: "wetlands",
       timber_stand: "timber_stands", road: "roads", easement: "easements", asset: "assets",
+      cemetery: "cemeteries", maintenance_issue: "maintenance_issues",
     };
     const t = table[entityType];
     if (!t) return;

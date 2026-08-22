@@ -25,7 +25,8 @@ export type BoundaryType =
   | "parcel"
   | "property"
   | "timber_stand"
-  | "easement";
+  | "easement"
+  | "cemetery";
 
 export interface NewBoundaryPayload {
   entityType: EntityType;
@@ -50,16 +51,18 @@ export interface NewBoundaryPayload {
   program: string | null;
   restrictions: string | null;
   easementNotes: string | null;
+  cemeteryNotes?: string | null;
 }
 
 export const BOUNDARY_TYPE_LABEL: Record<BoundaryType, string> = {
   field: "Ag field",
-  pasture: "Pasture",
+  pasture: "Pasture/Grassland",
   wetland: "Wetland",
   parcel: "Parcel",
   property: "Property",
   timber_stand: "Timber stand",
   easement: "Easement",
+  cemetery: "Cemetery",
 };
 
 const inputClass =
@@ -76,6 +79,7 @@ export default function NewBoundaryDialog({
   shape,
   approxAcres,
   approxLengthFt = null,
+  areaCount = 1,
   properties,
   suggestedPropertyId = null,
   saving,
@@ -90,6 +94,9 @@ export default function NewBoundaryDialog({
   shape: "polygon" | "line"; // line only for easements
   approxAcres: number | null;
   approxLengthFt?: number | null;
+  // How many separate areas make up the boundary (per-shape acres show
+  // on the map; this figure is the total).
+  areaCount?: number;
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
   saving: boolean;
@@ -159,6 +166,7 @@ export default function NewBoundaryDialog({
       restrictions:
         isEasement && easementShowsProgram(easementType) ? str("restrictions") : null,
       easementNotes: isEasement ? str("easement_notes") : null,
+      cemeteryNotes: entityType === "cemetery" ? str("cemetery_notes") : null,
     });
   }
 
@@ -168,7 +176,9 @@ export default function NewBoundaryDialog({
         ? `About ${formatNumber(Math.round(approxLengthFt))} ft (exact length computed on save)`
         : null
       : approxAcres !== null
-        ? `About ${formatAcres(approxAcres)} acres (exact acres computed on save)`
+        ? areaCount > 1
+          ? `Total of ${areaCount} areas: ${formatAcres(approxAcres)} acres (exact acres computed on save)`
+          : `About ${formatAcres(approxAcres)} acres (exact acres computed on save)`
         : null;
 
   return (
@@ -218,6 +228,13 @@ export default function NewBoundaryDialog({
           </label>
           <input name="name" required autoFocus className={inputClass} />
         </div>
+
+        {entityType === "cemetery" ? (
+          <div>
+            <label className={labelClass}>Notes</label>
+            <input name="cemetery_notes" placeholder="Family names, church, markers (optional)" className={inputClass} />
+          </div>
+        ) : null}
 
         {entityType === "wetland" ? (
           <p className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600">

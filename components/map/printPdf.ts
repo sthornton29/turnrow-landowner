@@ -12,7 +12,8 @@ import { jsPDF } from "jspdf";
 import type { FeatureCollection } from "geojson";
 import { STAND_TYPE_COLORS } from "@/lib/assetTypes";
 import { distanceFt } from "@/lib/geo/pivot";
-import { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
+import { CEMETERY_VIOLET, CEMETERY_VIOLET_DARK, KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
+import { ISSUE_COLORS } from "@/lib/maintenance";
 import { addEasementLayers } from "./easementLayers";
 
 export interface PrintLayerFlags {
@@ -25,6 +26,8 @@ export interface PrintLayerFlags {
   road: boolean;
   easement: boolean;
   asset: boolean;
+  cemetery: boolean;
+  maintenance: boolean; // maintenance issues: their own layer set
   crops: boolean; // recolor ag fields by current-year crop
   entity: boolean; // recolor property outlines by holding entity
 }
@@ -39,6 +42,7 @@ export interface PrintLabelFlags {
   road: boolean;
   easement: boolean;
   asset: boolean;
+  cemetery: boolean;
 }
 
 export interface PrintSources {
@@ -51,6 +55,8 @@ export interface PrintSources {
   roads: FeatureCollection;
   easements: FeatureCollection;
   assets: FeatureCollection;
+  cemeteries: FeatureCollection;
+  maintenance: FeatureCollection;
   propertyLabels: FeatureCollection;
   parcelLabels: FeatureCollection;
   fieldLabels: FeatureCollection;
@@ -58,6 +64,14 @@ export interface PrintSources {
   wetlandLabels: FeatureCollection;
   timberLabels: FeatureCollection;
   easementLabels: FeatureCollection;
+  cemeteryLabels: FeatureCollection;
+}
+
+// One line of the "Maintenance issues" block under the legend.
+export interface PrintIssueLine {
+  title: string;
+  severity: string | null;
+  property: string | null;
 }
 
 export interface LegendEntry {
@@ -83,6 +97,8 @@ export interface PrintJob {
   labels: PrintLabelFlags;
   sources: PrintSources;
   legend: LegendEntry[];
+  // Open issues in the frame, listed as text beside the legend.
+  issues?: PrintIssueLine[];
   onProgress: (message: string) => void;
 }
 
@@ -166,6 +182,8 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
   src("roads", layers.road ? sources.roads : empty);
   src("easements", layers.easement ? sources.easements : empty);
   src("assets", layers.asset ? sources.assets : empty);
+  src("cemeteries", layers.cemetery ? sources.cemeteries : empty);
+  src("maintenance", layers.maintenance ? sources.maintenance : empty);
 
   // Mirrors the live map's styles; order matches too.
   map.addLayer({ id: "properties-fill", type: "fill", source: "properties",
@@ -188,6 +206,12 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
     paint: { "fill-color": WETLAND_BLUE, "fill-opacity": 0.3 } });
   map.addLayer({ id: "wetlands-line", type: "line", source: "wetlands",
     paint: { "line-color": WETLAND_BLUE, "line-width": 2 } });
+  map.addLayer({ id: "cemeteries-fill", type: "fill", source: "cemeteries",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: { "fill-color": CEMETERY_VIOLET, "fill-opacity": 0.35 } });
+  map.addLayer({ id: "cemeteries-line", type: "line", source: "cemeteries",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: { "line-color": CEMETERY_VIOLET_DARK, "line-width": 2 } });
 
   const timberColor: mapboxgl.Expression = [
     "match", ["get", "standType"],
@@ -249,6 +273,40 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
       "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
       "text-allow-overlap": true },
     paint: { "text-color": "#ffffff" } });
+  map.addLayer({ id: "cemeteries-circle", type: "circle", source: "cemeteries",
+    filter: ["==", ["geometry-type"], "Point"],
+    paint: { "circle-radius": 8, "circle-color": CEMETERY_VIOLET_DARK,
+      "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+  map.addLayer({ id: "cemeteries-letter", type: "symbol", source: "cemeteries",
+    filter: ["==", ["geometry-type"], "Point"],
+    layout: { "text-field": "C", "text-size": 8,
+      "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+      "text-allow-overlap": true },
+    paint: { "text-color": "#ffffff" } });
+
+  // Maintenance issues: warning colors carried on each feature
+  // (issueFill / issueLine from the live map's rowsToFC).
+  map.addLayer({ id: "maintenance-fill", type: "fill", source: "maintenance",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: { "fill-color": ["coalesce", ["get", "issueFill"], ISSUE_COLORS.open.fill],
+      "fill-opacity": ["case", ["==", ["get", "status"], "resolved"], 0.15, 0.35] } });
+  map.addLayer({ id: "maintenance-outline", type: "line", source: "maintenance",
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: { "line-color": ["coalesce", ["get", "issueLine"], ISSUE_COLORS.open.line], "line-width": 2 } });
+  map.addLayer({ id: "maintenance-line", type: "line", source: "maintenance",
+    filter: ["==", ["geometry-type"], "LineString"],
+    paint: { "line-color": ["coalesce", ["get", "issueLine"], ISSUE_COLORS.open.line],
+      "line-width": 3, "line-dasharray": [2, 1.5] } });
+  map.addLayer({ id: "maintenance-circle", type: "circle", source: "maintenance",
+    filter: ["==", ["geometry-type"], "Point"],
+    paint: { "circle-radius": 8, "circle-color": ["coalesce", ["get", "issueFill"], ISSUE_COLORS.open.fill],
+      "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+  map.addLayer({ id: "maintenance-letter", type: "symbol", source: "maintenance",
+    filter: ["==", ["geometry-type"], "Point"],
+    layout: { "text-field": "!", "text-size": 9,
+      "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+      "text-allow-overlap": true },
+    paint: { "text-color": "#ffffff" } });
 
   // Labels, each behind its own print toggle.
   const labelLayer = (
@@ -278,6 +336,9 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
   }
   if (layers.timber_stand && labels.timber_stand) {
     labelLayer("timber-labels", sources.timberLabels, 11.5, "#ffffff", PINE);
+  }
+  if (layers.cemetery && labels.cemetery) {
+    labelLayer("cemetery-labels", sources.cemeteryLabels, 10.5, "#f3e8ff", "#4c1d95");
   }
   if (layers.road && labels.road) {
     map.addLayer({ id: "road-labels", type: "symbol", source: "roads",
@@ -447,6 +508,48 @@ export async function generateMapPdf(job: PrintJob): Promise<void> {
   const bar = niceScaleBar(groundFtAcross);
   const barMm = (bar.feet / groundFtAcross) * m.w;
   const barX = m.x + m.w - barMm;
+
+  // Maintenance issues in the frame: a compact text list to the right
+  // of the legend columns when it fits, else on a second page.
+  const issues = job.issues ?? [];
+  if (issues.length > 0) {
+    const legendCols = Math.ceil(job.legend.length / legendRows);
+    const listX = m.x + legendCols * colWidth + 2;
+    const listW = barX - 10 - listX;
+    const lineH = 3.6;
+    const maxLines = Math.max(0, Math.floor((page.h - 14 - footerY) / lineH) - 1);
+    const line = (text: string, x: number, y: number, w: number) =>
+      pdf.text(pdf.splitTextToSize(text, w)[0] as string, x, y);
+    const row = (it: PrintIssueLine) =>
+      [it.severity ? "[" + it.severity + "]" : null, it.title, it.property ? "(" + it.property + ")" : null]
+        .filter(Boolean)
+        .join(" ");
+    if (listW >= 55 && maxLines >= 2) {
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8);
+      pdf.setTextColor(180, 83, 9);
+      pdf.text("Maintenance issues", listX, footerY);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(60, 60, 60);
+      const shown = issues.slice(0, maxLines);
+      shown.forEach((it, i) => line(row(it), listX, footerY + (i + 1) * lineH, listW));
+      if (issues.length > shown.length) {
+        pdf.text("+" + (issues.length - shown.length) + " more", listX, footerY + (shown.length + 1) * lineH);
+      }
+    } else {
+      pdf.addPage();
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(12);
+      pdf.setTextColor(180, 83, 9);
+      pdf.text("Maintenance issues", m.x, 16);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.setTextColor(60, 60, 60);
+      issues.forEach((it, i) => line(row(it), m.x, 24 + i * 5, page.w - 2 * m.x));
+      pdf.setPage(1);
+    }
+  }
   const barY = footerY + 2;
   pdf.setDrawColor(40, 40, 40);
   pdf.setLineWidth(0.5);

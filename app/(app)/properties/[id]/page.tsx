@@ -51,6 +51,7 @@ export default async function PropertyDetailPage({
     { data: stands },
     { data: roads },
     { data: assets },
+    { data: cemeteries },
   ] = await Promise.all([
     supabase
       .from("parcels")
@@ -85,6 +86,11 @@ export default async function PropertyDetailPage({
     supabase
       .from("assets")
       .select("id, name, asset_type, condition, is_active")
+      .eq("property_id", id)
+      .order("name"),
+    supabase
+      .from("cemeteries")
+      .select("id, name, notes, acres")
       .eq("property_id", id)
       .order("name"),
   ]);
@@ -363,7 +369,7 @@ export default async function PropertyDetailPage({
       {(pastures ?? []).length > 0 ? (
         <section>
           <h2 className="mb-2 text-lg font-semibold text-gray-900">
-            Pastures{" "}
+            Pastures/Grassland{" "}
             <span className="text-sm font-normal text-gray-500">
               {formatNumber((pastures ?? []).length)} · {formatAcres(pastureAcres)} ac
             </span>
@@ -388,11 +394,50 @@ export default async function PropertyDetailPage({
           <div className="mt-2">
             <MoveChildren
               table="pastures"
-              itemLabel="pasture"
+              itemLabel="pasture/grassland"
               items={(pastures ?? []).map((p) => ({
                 id: p.id,
                 label: `${p.name} (${formatAcres(p.acres)} ac)`,
               }))}
+              properties={moveTargets}
+              currentPropertyId={property.id}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {(cemeteries ?? []).length > 0 ? (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-gray-900">
+            Cemeteries{" "}
+            <span className="text-sm font-normal text-gray-500">
+              {formatNumber((cemeteries ?? []).length)}
+            </span>
+          </h2>
+          <ul className="space-y-2">
+            {(cemeteries ?? []).map((c) => (
+              <li key={c.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Link
+                    href={`/cemeteries/${c.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {c.name}
+                  </Link>
+                  <span className="text-sm text-pine-900">
+                    {c.acres !== null && c.acres !== undefined ? `${formatAcres(c.acres)} ac` : "Pin"}
+                  </span>
+                </div>
+                {c.notes ? <p className="mt-1 text-sm text-gray-600">{c.notes}</p> : null}
+                <RowEditor entityType="cemetery" row={c} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2">
+            <MoveChildren
+              table="cemeteries"
+              itemLabel="cemetery"
+              items={(cemeteries ?? []).map((c) => ({ id: c.id, label: c.name }))}
               properties={moveTargets}
               currentPropertyId={property.id}
             />

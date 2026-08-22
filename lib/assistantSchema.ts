@@ -13,9 +13,11 @@ LAND
 - properties_geo(id, name, county, state, notes, acres, fsa_numbers text[], entity_id, boundary_geojson)
 - parcels_geo(id, property_id, parcel_number, county, notes, acres, deeded_acres, source, boundary_geojson)
 - fields_geo(id, property_id, name, notes, acres, irrigated_acres, boundary_geojson)   -- "Ag Fields" in the app; dryland = acres - irrigated_acres
-- pastures_geo(id, property_id, name, notes, acres)
+- pastures_geo(id, property_id, name, notes, acres)   -- shown to users as "Pasture/Grassland"
 - wetlands_geo(id, property_id, name, notes, acres)   -- open wetlands only; forested bottomland is a timber stand
 - timber_stands_geo(id, property_id, name, stand_type 'planted_pine'|'natural_pine'|'hardwood'|'mixed'|'other', species, year_established, site_index, last_thinning_year, last_burn_year, notes, acres)
+- cemeteries_geo(id, property_id, name, notes, acres (polygons only), geom_geojson)   -- a plot or a single marker
+- maintenance_issues_geo(id, property_id nullable, field_id nullable, issue_type 'wash'|'sinkhole'|'broken_terrace'|'road_washout'|'other', label, notes, severity 'low'|'medium'|'high' nullable, status 'open'|'resolved', resolved_at, acres, geom_geojson, created_at)   -- problems needing attention, NOT land
 - roads_geo(id, property_id, name, road_type 'gravel'|'dirt'|'paved'|'field_road'|'other', notes, length_feet, miles)
 - easements_geo(id, property_id nullable, name, easement_type (powerline, pipeline, waterline_sewer, telecom_fiber, access_row, public_road_row, railroad, drainage, flowage, conservation, cemetery_access, construction_temp, solar_wind, other), relationship 'burdens_this_property'|'benefits_this_property', holder, recorded_ref, expiration_date, width_ft, elevation_ft, program, restrictions, notes, acres (polygons), length_feet, miles (lines))
 - assets_geo(id, property_id nullable, asset_type (well, irrigation_pivot, underground_pipe, riser, shop, shed, barn, grain_bin, house, fence, pond_dam, other), name, year_installed, condition, estimated_value, notes, details jsonb, parent_asset_id, is_active, geom_geojson)

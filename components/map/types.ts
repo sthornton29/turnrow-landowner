@@ -1,7 +1,9 @@
 import type {
   AssetGeo,
+  CemeteryGeo,
   EntityType,
   FieldGeo,
+  MaintenanceIssueGeo,
   ParcelGeo,
   PastureGeo,
   PropertyGeo,
@@ -27,8 +29,13 @@ export type AnyGeoRow =
   | TimberStandGeo
   | RoadGeo
   | EasementGeo
-  | AssetGeo;
+  | AssetGeo
+  | CemeteryGeo
+  | MaintenanceIssueGeo;
 
+// Layer toggles. Land-use layers are keyed by entity type; the
+// maintenance issues layer is its own set so problems can be hidden
+// without touching the land view.
 export interface LayerVisibility {
   property: boolean;
   parcel: boolean;
@@ -39,6 +46,8 @@ export interface LayerVisibility {
   road: boolean;
   easement: boolean;
   asset: boolean;
+  cemetery: boolean;
+  maintenance_issue: boolean;
 }
 
 // Pick-first draw sessions: what the Add menu chose (components/map/

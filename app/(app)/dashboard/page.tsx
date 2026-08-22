@@ -214,7 +214,7 @@ export default async function DashboardPage({
       ? [{ label: "Irrigated acres", value: formatAcres(irrigatedAcres) }]
       : []),
     ...(pastureAcres > 0.05
-      ? [{ label: "Pasture acres", value: formatAcres(pastureAcres) }]
+      ? [{ label: "Pasture/Grassland acres", value: formatAcres(pastureAcres) }]
       : []),
     ...(wetlandAcres > 0.05
       ? [{ label: "Wetland acres", value: formatAcres(wetlandAcres) }]

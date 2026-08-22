@@ -15,8 +15,21 @@ import {
   EASEMENT_TYPE_LABELS,
 } from "@/lib/easements";
 import { circleFromDetails, formatFootprint } from "@/lib/geo/circle";
+import { LAND_TYPE_LABELS } from "@/lib/landLabels";
+import {
+  GEOMETRY_KIND_LABELS,
+  ISSUE_TYPE_LABELS,
+  SEVERITY_LABELS,
+  STATUS_LABELS,
+  issueGeometryKind,
+  issueTitle,
+  severityClass,
+  statusClass,
+  toggleStatus,
+  type IssueSeverity,
+} from "@/lib/maintenance";
 import turfArea from "@turf/area";
-import type { AssetGeo, EasementGeo, EntityType, ParcelGeo, RoadGeo } from "@/types/db";
+import type { AssetGeo, EasementGeo, EntityType, MaintenanceIssueGeo, ParcelGeo, RoadGeo } from "@/types/db";
 import type { AnyGeoRow } from "./types";
 
 export const ENTITY_TABLE: Record<EntityType, string> = {
@@ -29,18 +42,22 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   road: "roads",
   easement: "easements",
   asset: "assets",
+  cemetery: "cemeteries",
+  maintenance_issue: "maintenance_issues",
 };
 
 const TYPE_LABEL: Record<EntityType, string> = {
-  property: "Property",
-  parcel: "Parcel",
-  field: "Ag field",
-  pasture: "Pasture",
-  wetland: "Wetland",
-  timber_stand: "Timber stand",
-  road: "Road",
-  easement: "Easement",
-  asset: "Asset",
+  property: LAND_TYPE_LABELS.property.singular,
+  parcel: LAND_TYPE_LABELS.parcel.singular,
+  field: LAND_TYPE_LABELS.field.singular,
+  pasture: LAND_TYPE_LABELS.pasture.singular,
+  wetland: LAND_TYPE_LABELS.wetland.singular,
+  timber_stand: LAND_TYPE_LABELS.timber_stand.singular,
+  road: LAND_TYPE_LABELS.road.singular,
+  easement: LAND_TYPE_LABELS.easement.singular,
+  asset: LAND_TYPE_LABELS.asset.singular,
+  cemetery: LAND_TYPE_LABELS.cemetery.singular,
+  maintenance_issue: LAND_TYPE_LABELS.maintenance_issue.singular,
 };
 
 export interface EditField {
@@ -122,6 +139,16 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "name", label: "Name", input: "text", required: true },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
+  cemetery: [
+    { key: "name", label: "Name", input: "text", required: true },
+    { key: "notes", label: "Notes", input: "textarea" },
+  ],
+  maintenance_issue: [
+    { key: "issue_type", label: "Issue type", input: "select", options: ISSUE_TYPE_LABELS, required: true },
+    { key: "label", label: "Label", input: "text" },
+    { key: "severity", label: "Severity", input: "select", options: { "": "None", ...SEVERITY_LABELS } },
+    { key: "notes", label: "Notes", input: "textarea" },
+  ],
 };
 
 // Shared by FeaturePanel and RowEditor: form string -> column value.
@@ -158,7 +185,11 @@ export function detailPagePath(entityType: EntityType, id: string): string {
     road: "/roads",
     easement: "/easements",
     asset: "/assets",
+    cemetery: "/cemeteries",
+    maintenance_issue: "/maintenance",
   };
+  // Issues have a list page, not a page per issue.
+  if (entityType === "maintenance_issue") return base[entityType];
   return `${base[entityType]}/${id}`;
 }
 
@@ -203,6 +234,14 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     push("Restrictions", e.restrictions);
     push("Holder", r.holder);
     push("Recorded ref", r.recorded_ref);
+  } else if (entityType === "maintenance_issue") {
+    const i = row as MaintenanceIssueGeo;
+    push("Type", i.issue_type, ISSUE_TYPE_LABELS);
+    const kind = issueGeometryKind(i.geom_geojson);
+    if (kind) rows.push(["Marked as", GEOMETRY_KIND_LABELS[kind]]);
+    if (i.acres !== null && i.acres !== undefined) rows.push(["Area", `${formatAcres(i.acres)} acres`]);
+    rows.push(["Noted", new Date(i.created_at).toLocaleDateString()]);
+    if (i.resolved_at) rows.push(["Resolved", new Date(i.resolved_at).toLocaleDateString()]);
   } else if (entityType === "asset") {
     const a = row as AssetGeo;
     push("Type", ASSET_TYPES[a.asset_type]?.label ?? a.asset_type);
@@ -341,14 +380,40 @@ export default function FeaturePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isIssue = entityType === "maintenance_issue";
+  const issue = isIssue ? (row as MaintenanceIssueGeo) : null;
   const title =
     entityType === "parcel"
       ? `Parcel ${(row as ParcelGeo).parcel_number}`
-      : ((row as { name?: string }).name ?? "");
+      : issue
+        ? issueTitle(issue)
+        : ((row as { name?: string }).name ?? "");
+
+  async function flipStatus() {
+    if (!issue) return;
+    setBusy(true);
+    setError(null);
+    const { error: err } = await supabase
+      .from("maintenance_issues")
+      .update(toggleStatus(issue))
+      .eq("id", issue.id);
+    setBusy(false);
+    if (err) {
+      setError("Could not update the issue.");
+      return;
+    }
+    onChanged();
+  }
 
   const geometryButtonLabel =
     entityType === "road"
       ? "Edit line"
+      : entityType === "cemetery" || isIssue
+        ? ((row as { geom_geojson?: { type?: string } | null }).geom_geojson?.type?.includes("Line")
+            ? "Edit line"
+            : (row as { geom_geojson?: { type?: string } | null }).geom_geojson?.type?.includes("Polygon")
+              ? "Edit boundary"
+              : "Move pin")
       : entityType === "easement"
         ? ((row as EasementGeo).geom_geojson ? "Edit line" : "Edit boundary")
         : entityType === "asset"
@@ -403,7 +468,8 @@ export default function FeaturePanel({
   const metric =
     entityType === "road" || isLineEasement
       ? `${formatNumber(Math.round((row as RoadGeo).length_feet ?? 0))} ft (${((row as RoadGeo).miles ?? 0).toFixed(2)} mi)`
-      : entityType !== "asset" && "acres" in row
+      : entityType !== "asset" && !isIssue && "acres" in row &&
+          (row as { acres: number | null }).acres !== null
         ? `${formatAcres((row as { acres: number | null }).acres)} acres`
         : null;
 
@@ -411,12 +477,26 @@ export default function FeaturePanel({
     <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[55%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-80 md:rounded-xl md:border">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-kelly-600">
+          <p className={"text-xs font-semibold uppercase tracking-wide " + (isIssue ? "text-amber-800" : "text-kelly-600")}>
             {entityType === "asset"
               ? (ASSET_TYPES[(row as AssetGeo).asset_type]?.label ?? "Asset")
-              : TYPE_LABEL[entityType]}
+              : isIssue
+                ? "Needs attention"
+                : TYPE_LABEL[entityType]}
           </p>
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          {issue ? (
+            <p className="mt-1 flex flex-wrap gap-1.5">
+              <span className={"rounded-full px-2 py-0.5 text-[11px] font-medium " + statusClass(issue.status)}>
+                {STATUS_LABELS[issue.status]}
+              </span>
+              {issue.severity ? (
+                <span className={"rounded-full px-2 py-0.5 text-[11px] font-medium " + severityClass(issue.severity as IssueSeverity)}>
+                  {SEVERITY_LABELS[issue.severity as IssueSeverity]} severity
+                </span>
+              ) : null}
+            </p>
+          ) : null}
           <Link
             href={detailPagePath(entityType, row.id)}
             className="mt-0.5 inline-block text-sm font-medium text-kelly-700 hover:underline"
@@ -514,6 +594,20 @@ export default function FeaturePanel({
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
           <div className="flex flex-wrap gap-2">
+            {issue ? (
+              <button
+                onClick={flipStatus}
+                disabled={busy}
+                className={
+                  "rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-60 " +
+                  (issue.status === "resolved"
+                    ? "border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    : "bg-amber-600 text-white hover:bg-amber-700")
+                }
+              >
+                {busy ? "Saving..." : issue.status === "resolved" ? "Reopen" : "Mark resolved"}
+              </button>
+            ) : null}
             {entityType === "asset" ? (
               <Link
                 href={`/assets/${row.id}`}

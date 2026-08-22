@@ -41,15 +41,17 @@ const TABLE: Record<string, string> = {
   timber_stand: "timber_stands",
   road: "roads",
   asset: "assets",
+  cemetery: "cemeteries",
 };
 
 const POLYGON_OPTIONS: Array<[EntityType, string]> = [
   ["property", "Property"],
   ["parcel", "Parcel"],
   ["field", "Ag field"],
-  ["pasture", "Pasture"],
+  ["pasture", "Pasture/Grassland"],
   ["wetland", "Wetland (open)"],
   ["timber_stand", "Timber stand"],
+  ["cemetery", "Cemetery"],
 ];
 
 export default function ImportClient({

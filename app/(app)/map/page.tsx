@@ -15,6 +15,8 @@ const ENTITY_TYPES: EntityType[] = [
   "road",
   "easement",
   "asset",
+  "cemetery",
+  "maintenance_issue",
 ];
 
 // /map?focus=asset:<id> selects and zooms to that entity after load.

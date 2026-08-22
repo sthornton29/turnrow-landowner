@@ -326,4 +326,44 @@ export type EntityType =
   | "timber_stand"
   | "road"
   | "easement"
-  | "asset";
+  | "asset"
+  | "cemetery"
+  | "maintenance_issue";
+
+// Cemeteries (migration 0032): a small land-use plot or a single marker
+// inside farmland. Polygon or Point; acres only for polygons.
+export interface CemeteryGeo {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  name: string;
+  notes: string | null;
+  acres: number | null;
+  geom_geojson: Geometry | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Maintenance issues (migration 0032): problems that need attention,
+// their own layer. A pin, a line, or an area; open or resolved.
+export type MaintenanceIssueType = "wash" | "sinkhole" | "broken_terrace" | "road_washout" | "other";
+export type MaintenanceSeverity = "low" | "medium" | "high";
+export type MaintenanceStatus = "open" | "resolved";
+
+export interface MaintenanceIssueGeo {
+  id: string;
+  organization_id: string;
+  property_id: string | null;
+  field_id: string | null;
+  issue_type: MaintenanceIssueType;
+  label: string | null;
+  notes: string | null;
+  severity: MaintenanceSeverity | null;
+  status: MaintenanceStatus;
+  resolved_at: string | null;
+  acres: number | null;
+  geom_geojson: Geometry | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}

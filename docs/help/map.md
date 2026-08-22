@@ -4,7 +4,7 @@ route: /map
 group: Map
 order: 1
 updated: 2026-08-20
-keywords: map, satellite, layers, legend, parcels, ag fields, pastures, wetlands, timber, roads, easements, assets, click, panel, zoom, fullscreen, crops, by entity, labels
+keywords: map, satellite, layers, legend, parcels, ag fields, pastures, grassland, cemeteries, wetlands, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
 ---
 ## What this page is for
 
@@ -12,16 +12,19 @@ The Map is the home page: your properties on satellite imagery with every bounda
 
 ## Layers and legend
 
-The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures, wetlands, timber, roads, easements, and assets. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+
+- **Cemeteries** are a muted violet: a traced plot, or a "C" marker for a single pin.
 
 - **Timber types** get their own legend when stands are on screen (planted pine, natural pine, hardwood, mixed, other).
 - **Easements** show a legend by family: utility, access and transport, drainage and flowage, conservation, and other. Railroads get a tie pattern, conservation easements a hatch.
 - **Crops** appears when a connected tenant has shared plantings; it recolors ag fields by this year's crop.
 - **By entity** appears when land sits in more than one entity; it recolors property outlines by owner.
+- **Maintenance issues** are amber, red when marked high severity, and gray once resolved; a pin shows an exclamation mark. See the Maintenance issues topic.
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. Where things overlap, assets win, then roads, ag fields, timber, parcels, and properties.
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
 
 ## Other controls
 

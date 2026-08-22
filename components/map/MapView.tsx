@@ -23,6 +23,8 @@ import {
   toMultiLineString,
   toMultiPolygon,
 } from "@/lib/geo/normalize";
+import { drawAreaReadout, type DrawAreaReadout } from "@/lib/geo/drawArea";
+import { LAND_TYPE_LABELS } from "@/lib/landLabels";
 import {
   ASSET_TYPES,
   STAND_TYPE_COLORS,
@@ -52,6 +54,8 @@ import { formatNumber } from "@/lib/format";
 import { addEasementLayers } from "./easementLayers";
 import {
   ASSET_LIGHT_BLUE,
+  CEMETERY_VIOLET,
+  CEMETERY_VIOLET_DARK,
   KELLY,
   MINT,
   PASTURE_TAN,
@@ -60,6 +64,8 @@ import {
   applyDraftColor,
   draftColorFor,
 } from "./drawColors";
+import { ISSUE_COLORS, issueColor, issueTitle } from "@/lib/maintenance";
+import NewIssueDialog, { type NewIssuePayload } from "./NewIssueDialog";
 import DrawTypePicker, { type DrawType } from "./DrawTypePicker";
 import AssetPlacePicker, { type AssetPlacement } from "./AssetPlacePicker";
 export { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
@@ -92,6 +98,8 @@ import {
 import type { FarmActivityInfo } from "./FeaturePanel";
 import type {
   AssetGeo,
+  CemeteryGeo,
+  MaintenanceIssueGeo,
   EntityType,
   FieldGeo,
   ParcelGeo,
@@ -127,7 +135,7 @@ import type { AnyGeoRow, LayerVisibility, MapMode, SelectedFeature } from "./typ
 
 const POLYGON_TYPES: EntityType[] = [
   "property", "parcel", "field", "pasture", "wetland", "timber_stand",
-  "easement",
+  "easement", "cemetery", "maintenance_issue",
 ];
 
 // A pick-first draw session: what the Add menu chose before the first
@@ -164,14 +172,16 @@ interface PrintItemInfo {
 
 const PRINT_TYPE_LABELS: Record<EntityType, string> = {
   property: "Property boundary",
-  parcel: "Parcels",
-  field: "Ag fields",
-  pasture: "Pastures",
-  wetland: "Wetlands",
-  timber_stand: "Timber stands",
-  road: "Roads",
-  easement: "Easements",
-  asset: "Assets",
+  parcel: LAND_TYPE_LABELS.parcel.plural,
+  field: LAND_TYPE_LABELS.field.plural,
+  pasture: LAND_TYPE_LABELS.pasture.plural,
+  wetland: LAND_TYPE_LABELS.wetland.plural,
+  timber_stand: LAND_TYPE_LABELS.timber_stand.plural,
+  road: LAND_TYPE_LABELS.road.plural,
+  easement: LAND_TYPE_LABELS.easement.plural,
+  asset: LAND_TYPE_LABELS.asset.plural,
+  cemetery: LAND_TYPE_LABELS.cemetery.plural,
+  maintenance_issue: LAND_TYPE_LABELS.maintenance_issue.plural,
 };
 
 // Tri-state checkbox for the Choose items drawer: checked = fully
@@ -208,6 +218,8 @@ const LAYER_DEFAULTS: LayerVisibility = {
   road: true,
   easement: true,
   asset: true,
+  cemetery: true,
+  maintenance_issue: true,
 };
 const LAYER_STORAGE_KEY = "turnrow.map.layers.v1";
 
@@ -229,9 +241,21 @@ function geomOf(row: AnyGeoRow): Geometry | null {
 }
 
 function nameOf(row: AnyGeoRow, entityType: EntityType): string {
+  if (entityType === "maintenance_issue") return issueTitle(row as MaintenanceIssueGeo);
   return entityType === "parcel"
     ? (row as ParcelGeo).parcel_number
     : ((row as { name?: string }).name ?? "");
+}
+
+// A marker point at the center of a polygon (cemetery plots and issue
+// areas keep their letter marker at low zoom, like shaped assets).
+function centerMarker(g: Geometry, props: Record<string, unknown>): Feature | null {
+  if (g.type !== "Polygon" && g.type !== "MultiPolygon") return null;
+  const mp = toMultiPolygon(g);
+  const center = mp ? labelPointOf(mp) : null;
+  return center
+    ? { type: "Feature", geometry: { type: "Point", coordinates: center }, properties: { ...props, marker: true } }
+    : null;
 }
 
 export function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
@@ -256,7 +280,22 @@ export function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureColl
       props.easementType = (row as EasementGeo).easement_type ?? "other";
       props.easementCategory = easementCategory((row as EasementGeo).easement_type);
     }
+    if (entityType === "cemetery") props.letter = "C";
+    if (entityType === "maintenance_issue") {
+      const i = row as MaintenanceIssueGeo;
+      const c = issueColor(i);
+      props.letter = "!";
+      props.status = i.status;
+      props.severity = i.severity ?? "";
+      props.issueType = i.issue_type;
+      props.issueFill = c.fill;
+      props.issueLine = c.line;
+    }
     features.push({ type: "Feature", geometry: g, properties: props });
+    if (entityType === "cemetery" || entityType === "maintenance_issue") {
+      const m = centerMarker(g, props);
+      if (m) features.push(m);
+    }
     // Shaped assets (pivot coverage, outline footprints, circles) keep
     // their letter marker at the center for low-zoom recognition
     // (clickable like the polygon).
@@ -361,6 +400,8 @@ export default function MapView({
   const [roads, setRoads] = useState<RoadGeo[]>([]);
   const [easements, setEasements] = useState<EasementGeo[]>([]);
   const [assets, setAssets] = useState<AssetGeo[]>([]);
+  const [cemeteries, setCemeteries] = useState<CemeteryGeo[]>([]);
+  const [issues, setIssues] = useState<MaintenanceIssueGeo[]>([]);
   const [loading, setLoading] = useState(true);
   const [cropsOn, setCropsOn] = useState(false);
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
@@ -425,6 +466,37 @@ export default function MapView({
   const [drawingShape, setDrawingShape] = useState(false);
   const drawingShapeRef = useRef(setDrawingShape);
   drawingShapeRef.current = setDrawingShape;
+  // Per-shape acreage while drawing a boundary: the shape in progress,
+  // each completed area, and the total (lib/geo/drawArea.ts). Refreshed
+  // on every draw render; completed areas also get an on-map label.
+  const [areaReadout, setAreaReadout] = useState<DrawAreaReadout | null>(null);
+  const refreshAreaReadoutRef = useRef<() => void>(() => {});
+  refreshAreaReadoutRef.current = () => {
+    const map = mapRef.current;
+    const draw = drawRef.current;
+    if (!map || !draw) return;
+    if (drawKindRef.current !== "boundary" || editTargetRef.current || boundaryOpRef.current) {
+      setAreaReadout(null);
+      (map.getSource("draw-area-labels") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+    const features = draw.getAll().features.map((f) => ({ id: f.id, geometry: f.geometry }));
+    const readout = drawAreaReadout(features, completedDrawIdsRef.current);
+    setAreaReadout(readout);
+    const labels: Feature[] = [];
+    readout.completed.forEach((s, i) => {
+      const f = draw.get(s.id);
+      const mp = f ? toMultiPolygon(f.geometry) : null;
+      const pt = mp ? labelPointOf(mp) : null;
+      if (!pt) return;
+      labels.push({
+        type: "Feature",
+        properties: { label: `Area ${i + 1} · ${formatAcres(s.acres)} ac` },
+        geometry: { type: "Point", coordinates: pt },
+      });
+    });
+    (map.getSource("draw-area-labels") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: labels });
+  };
 
   // Parametric pivot coverage editor: the geometry is always derived
   // from the params (base circle/arc + manually drawn add/cut
@@ -493,11 +565,12 @@ export default function MapView({
   const [printLayers, setPrintLayers] = useState<PrintLayerFlags>({
     property: true, parcel: false, field: true, pasture: true, wetland: true,
     timber_stand: true, road: true, easement: true, asset: true,
+    cemetery: true, maintenance: true,
     crops: false, entity: false,
   });
   const [printLabels, setPrintLabels] = useState<PrintLabelFlags>({
     property: true, parcel: false, field: true, pasture: true, wetland: true,
-    timber_stand: true, road: true, easement: true, asset: true,
+    timber_stand: true, road: true, easement: true, asset: true, cemetery: true,
   });
   const [printTitle, setPrintTitle] = useState("");
   const [printSubtitle, setPrintSubtitle] = useState("");
@@ -519,7 +592,7 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, pas, w, t, r, ue, a, mappings, farmData, connections, ents] = await Promise.all([
+    const [p, pa, f, pas, w, t, r, ue, a, mappings, farmData, connections, ents, cem, iss] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
@@ -533,8 +606,12 @@ export default function MapView({
       supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
       supabase.from("farm_connections").select("id, label"),
       supabase.from("entities").select("id, name").order("name"),
+      supabase.from("cemeteries_geo").select("*").order("name"),
+      supabase.from("maintenance_issues_geo").select("*").order("created_at", { ascending: false }),
     ]);
     setEntities((ents.data as Array<{ id: string; name: string }>) ?? []);
+    setCemeteries((cem.data as CemeteryGeo[]) ?? []);
+    setIssues((iss.data as MaintenanceIssueGeo[]) ?? []);
     setProperties((p.data as PropertyGeo[]) ?? []);
     setParcels((pa.data as ParcelGeo[]) ?? []);
     setFields((f.data as FieldGeo[]) ?? []);
@@ -605,8 +682,10 @@ export default function MapView({
       road: roads,
       easement: easements,
       asset: assets,
+      cemetery: cemeteries,
+      maintenance_issue: issues,
     }),
-    [properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets]
+    [properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, cemeteries, issues]
   );
 
   const selectedRow: AnyGeoRow | null = useMemo(() => {
@@ -638,11 +717,14 @@ export default function MapView({
     // Priority: assets, then roads, then ag fields > pastures > timber >
     // parcels > properties
     const groups: string[][] = [
+      ["maintenance-circle", "maintenance-line", "maintenance-fill"],
       ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
+      ["cemeteries-circle"],
       ["roads-hit"],
       ["easements-hit", "easements-fill", "easements-hatch-base"],
       ["fields-fill"],
       ["pastures-fill"],
+      ["cemeteries-fill"],
       ["wetlands-fill"],
       ["timber-fill"],
       ["parcels-fill"],
@@ -720,9 +802,9 @@ export default function MapView({
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
         "properties", "parcels", "fields", "pastures", "wetlands", "timber",
-        "roads", "easements", "assets",
+        "roads", "easements", "assets", "cemeteries", "maintenance",
         "property-labels", "parcel-labels", "field-labels", "pasture-labels",
-        "wetland-labels", "timber-labels", "easement-labels",
+        "wetland-labels", "timber-labels", "easement-labels", "cemetery-labels",
       ]) {
         map.addSource(id, { type: "geojson", data: empty });
       }
@@ -765,6 +847,14 @@ export default function MapView({
         paint: { "fill-color": WETLAND_BLUE, "fill-opacity": 0.3 } });
       map.addLayer({ id: "wetlands-line", type: "line", source: "wetlands",
         paint: { "line-color": WETLAND_BLUE, "line-width": 2 } });
+
+      // Cemeteries: muted violet plot (the "C" marker sits on top, below)
+      map.addLayer({ id: "cemeteries-fill", type: "fill", source: "cemeteries",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "fill-color": CEMETERY_VIOLET, "fill-opacity": 0.35 } });
+      map.addLayer({ id: "cemeteries-line", type: "line", source: "cemeteries",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "line-color": CEMETERY_VIOLET_DARK, "line-width": 2 } });
 
       // Ag fields: kelly green
       map.addLayer({ id: "fields-fill", type: "fill", source: "fields",
@@ -813,7 +903,7 @@ export default function MapView({
         paint: { "line-color": ASSET_LIGHT_BLUE, "line-width": 2, "line-dasharray": [2, 2] } });
 
       // Selection highlights
-      for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber"]) {
+      for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber", "cemeteries"]) {
         map.addLayer({ id: `${src}-selected`, type: "line", source: src,
           paint: { "line-color": "#ffffff", "line-width": 4.5 },
           filter: ["==", ["get", "id"], ""] });
@@ -826,6 +916,9 @@ export default function MapView({
         filter: ["==", ["get", "id"], ""] });
       map.addLayer({ id: "assets-selected-line", type: "line", source: "assets",
         paint: { "line-color": "#ffffff", "line-width": 4.5 },
+        filter: ["all", ["!=", ["geometry-type"], "Point"], ["==", ["get", "id"], ""]] });
+      map.addLayer({ id: "maintenance-selected", type: "line", source: "maintenance",
+        paint: { "line-color": "#ffffff", "line-width": 5, "line-opacity": 0.9 },
         filter: ["all", ["!=", ["geometry-type"], "Point"], ["==", ["get", "id"], ""]] });
 
       // Labels
@@ -854,6 +947,10 @@ export default function MapView({
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.3 } });
+      map.addLayer({ id: "cemetery-labels", type: "symbol", source: "cemetery-labels",
+        layout: { "text-field": ["get", "name"], "text-size": 10.5,
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#f3e8ff", "text-halo-color": "#4c1d95", "text-halo-width": 1.2 } });
       map.addLayer({ id: "parcel-labels", type: "symbol", source: "parcel-labels",
         layout: { "text-field": ["get", "name"], "text-size": 10,
           "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
@@ -884,6 +981,58 @@ export default function MapView({
           "text-offset": [0, 1.6],
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
+
+      // Cemetery markers: violet circle + "C" (pins, and the center of plots)
+      map.addLayer({ id: "cemeteries-circle", type: "circle", source: "cemeteries",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 10, "circle-color": CEMETERY_VIOLET_DARK,
+          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+      map.addLayer({ id: "cemeteries-letter", type: "symbol", source: "cemeteries",
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: { "text-field": "C", "text-size": 9,
+          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff" } });
+      map.addLayer({ id: "cemeteries-name", type: "symbol", source: "cemeteries",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["!", ["has", "marker"]]], minzoom: 12,
+        layout: { "text-field": ["get", "name"], "text-size": 10,
+          "text-offset": [0, 1.6],
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#f3e8ff", "text-halo-color": "#4c1d95", "text-halo-width": 1.2 } });
+
+      // Maintenance issues on top of everything: warning colors from
+      // each feature (amber open, red high, gray resolved), dashed
+      // lines, "!" markers for pins and at the center of areas.
+      const issueFill: mapboxgl.Expression = ["coalesce", ["get", "issueFill"], ISSUE_COLORS.open.fill];
+      const issueLine: mapboxgl.Expression = ["coalesce", ["get", "issueLine"], ISSUE_COLORS.open.line];
+      map.addLayer({ id: "maintenance-fill", type: "fill", source: "maintenance",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "fill-color": issueFill,
+          "fill-opacity": ["case", ["==", ["get", "status"], "resolved"], 0.15, 0.35] } });
+      map.addLayer({ id: "maintenance-outline", type: "line", source: "maintenance",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "line-color": issueLine, "line-width": 2 } });
+      map.addLayer({ id: "maintenance-line", type: "line", source: "maintenance",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round" },
+        paint: { "line-color": issueLine, "line-width": 3.5, "line-dasharray": [2, 1.5] } });
+      map.addLayer({ id: "maintenance-circle", type: "circle", source: "maintenance",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 10, "circle-color": issueFill,
+          "circle-opacity": ["case", ["==", ["get", "status"], "resolved"], 0.6, 1],
+          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+      map.addLayer({ id: "maintenance-letter", type: "symbol", source: "maintenance",
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: { "text-field": "!", "text-size": 11,
+          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff" } });
+      map.addLayer({ id: "maintenance-name", type: "symbol", source: "maintenance",
+        filter: ["==", ["geometry-type"], "Point"], minzoom: 13,
+        layout: { "text-field": ["get", "name"], "text-size": 10,
+          "text-offset": [0, 1.6],
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#fffbeb", "text-halo-color": "#78350f", "text-halo-width": 1.2 } });
 
       // Print-mode ghosts: items excluded from the print render here
       // (heavy transparency + slash pattern) instead of their normal
@@ -923,6 +1072,24 @@ export default function MapView({
         paint: { "circle-radius": 9, "circle-color": "#9ca3af",
           "circle-opacity": 0.35, "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.5, "circle-stroke-opacity": 0.5 } });
+
+      // Acre labels on completed areas of the boundary being drawn.
+      map.addSource("draw-area-labels", { type: "geojson", data: empty });
+      map.addLayer({
+        id: "draw-area-labels",
+        type: "symbol",
+        source: "draw-area-labels",
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 12,
+          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
+        },
+        paint: { "text-color": "#14532d", "text-halo-color": "#ffffff", "text-halo-width": 1.6 },
+      });
+      for (const ev of ["draw.render", "draw.update", "draw.selectionchange", "draw.delete"]) {
+        map.on(ev, () => refreshAreaReadoutRef.current());
+      }
 
       map.on("move", () => {
         if (printOpenRef.current) setPrintViewVersion((v) => v + 1);
@@ -982,6 +1149,8 @@ export default function MapView({
       "wetlands-fill", "timber-fill", "roads-hit", "easements-fill",
       "easements-hatch-base", "easements-hit",
       "assets-circle", "assets-line", "assets-fill",
+      "cemeteries-fill", "cemeteries-circle",
+      "maintenance-fill", "maintenance-line", "maintenance-circle",
     ]) {
       map.on("mouseenter", layer, () => {
         if (modeRef.current === "view") map.getCanvas().style.cursor = "pointer";
@@ -1057,6 +1226,9 @@ export default function MapView({
     setData("roads", rowsToFC(inc(roads, "road"), "road"));
     setData("easements", rowsToFC(inc(easements, "easement"), "easement"));
     setData("assets", rowsToFC(inc(assets, "asset"), "asset"));
+    setData("cemeteries", rowsToFC(inc(cemeteries, "cemetery"), "cemetery"));
+    setData("maintenance", rowsToFC(inc(issues, "maintenance_issue"), "maintenance_issue"));
+    setData("cemetery-labels", rowsToLabelFC(inc(cemeteries, "cemetery"), "cemetery"));
     setData("property-labels", rowsToLabelFC(inc(properties, "property"), "property"));
     setData("parcel-labels", rowsToLabelFC(inc(parcels, "parcel"), "parcel"));
     setData("field-labels", rowsToLabelFC(inc(fields, "field"), "field"));
@@ -1090,13 +1262,14 @@ export default function MapView({
         ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
         ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
         ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
+        ...cemeteries.map(geomOf), ...issues.map(geomOf),
       ]);
       if (box) {
         map.fitBounds(box, { padding: 60, duration: 0 });
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, farmActivity, entities, printOpen, printExcluded, visibility, rowLists]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, visibility, rowLists]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -1184,6 +1357,8 @@ export default function MapView({
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
       ["easement", [...easementLayerIdsRef.current, "easement-labels"]],
       ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
+      ["cemetery", ["cemeteries-fill", "cemeteries-line", "cemeteries-circle", "cemeteries-letter", "cemeteries-name", "cemetery-labels"]],
+      ["maintenance_issue", ["maintenance-fill", "maintenance-outline", "maintenance-line", "maintenance-circle", "maintenance-letter", "maintenance-name"]],
     ];
     for (const [key, layers] of groups) {
       for (const layer of layers) {
@@ -1200,17 +1375,30 @@ export default function MapView({
     if (!map || !mapLoaded) return;
     const bySource: Record<string, string> = {
       properties: "", parcels: "", fields: "", pastures: "", wetlands: "",
-      timber: "", roads: "", easements: "", assets: "",
+      timber: "", roads: "", easements: "", assets: "", cemeteries: "", maintenance: "",
     };
     if (selected) {
       const srcName: Record<EntityType, string> = {
         property: "properties", parcel: "parcels", field: "fields",
         pasture: "pastures", wetland: "wetlands", timber_stand: "timber",
         road: "roads", easement: "easements", asset: "assets",
+        cemetery: "cemeteries", maintenance_issue: "maintenance",
       };
       bySource[srcName[selected.entityType]] = selected.id;
     }
-    for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber"]) {
+    if (map.getLayer("maintenance-selected")) {
+      map.setFilter("maintenance-selected",
+        ["all", ["!=", ["geometry-type"], "Point"], ["==", ["get", "id"], bySource.maintenance]]);
+    }
+    for (const [layer, key] of [["maintenance-circle", "maintenance"], ["cemeteries-circle", "cemeteries"]] as const) {
+      if (map.getLayer(layer)) {
+        map.setPaintProperty(layer, "circle-stroke-color",
+          ["case", ["==", ["get", "id"], bySource[key]], KELLY, "#ffffff"]);
+        map.setPaintProperty(layer, "circle-stroke-width",
+          ["case", ["==", ["get", "id"], bySource[key]], 3.5, 2]);
+      }
+    }
+    for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber", "cemeteries"]) {
       if (map.getLayer(`${src}-selected`)) {
         map.setFilter(`${src}-selected`, ["==", ["get", "id"], bySource[src]]);
       }
@@ -1260,6 +1448,8 @@ export default function MapView({
     setPlaceAssetType(null);
     setDrawSession(null);
     setEditIsLine(false);
+    setAreaReadout(null);
+    (mapRef.current?.getSource("draw-area-labels") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: [] });
     if (mapRef.current) applyDraftColor(mapRef.current, null);
   }
 
@@ -1925,7 +2115,15 @@ export default function MapView({
     const map = mapRef.current;
     if (!draw || !map) return;
     setPickerOpen(null);
-    const isLine = session.kind === "line";
+    // Pins (a cemetery marker, a sinkhole): the crosshair, no drawing.
+    if (session.kind === "pin" || (session.kind === "issue" && session.shape === "point")) {
+      setDrawSession(session);
+      setCrosshairPos(null);
+      setMode("place");
+      setEditHint("Pan the map or drag the crosshair onto the spot, then press Place here.");
+      return;
+    }
+    const isLine = session.kind === "line" || (session.kind === "issue" && session.shape === "line");
     drawKindRef.current = isLine ? "line" : "boundary";
     setDrawSession(session);
     setMode("draw");
@@ -1973,13 +2171,18 @@ export default function MapView({
 
     setEditTargetType(selected.entityType);
     const isPoint = g?.type === "Point" || g?.type === "MultiPoint";
+    const pinCapable =
+      selected.entityType === "asset" ||
+      selected.entityType === "cemetery" ||
+      selected.entityType === "maintenance_issue";
     const isLineTarget =
       selected.entityType === "road" ||
-      ((selected.entityType === "asset" || selected.entityType === "easement") &&
+      ((selected.entityType === "asset" || selected.entityType === "easement" ||
+        selected.entityType === "maintenance_issue") &&
         (g?.type === "LineString" || g?.type === "MultiLineString"));
     setEditIsLine(isLineTarget);
 
-    if (selected.entityType === "asset" && (isPoint || !g)) {
+    if (pinCapable && (isPoint || !g)) {
       // Move a pin (or place one for an asset with no location): crosshair mode
       if (g?.type === "Point") {
         map.flyTo({ center: g.coordinates as [number, number], zoom: Math.max(map.getZoom(), 15) });
@@ -2028,7 +2231,7 @@ export default function MapView({
     let g: Geometry | null = null;
     const isLineTarget =
       target.entityType === "road" ||
-      (target.entityType === "asset" &&
+      ((target.entityType === "asset" || target.entityType === "maintenance_issue") &&
         all.some((f) => f.geometry.type.includes("Line")));
     if (isLineTarget) {
       const parts: MultiLineString["coordinates"] = [];
@@ -2156,8 +2359,14 @@ export default function MapView({
   }
 
   async function saveNewBoundary(payload: NewBoundaryPayload) {
-    // Line easements arrive as a pending line; everything else a polygon.
-    const geometry: Geometry | null = pendingPoly ?? pendingLine;
+    // Line easements arrive as a pending line, a cemetery marker as a
+    // pending point; everything else a polygon.
+    const geometry: Geometry | null =
+      pendingPoly ??
+      pendingLine ??
+      (pendingPoint && payload.entityType === "cemetery"
+        ? { type: "Point", coordinates: pendingPoint }
+        : null);
     if (!geometry) return;
     setSaving(true);
     setSaveError(null);
@@ -2172,6 +2381,7 @@ export default function MapView({
     } else {
       base.name = payload.name;
       base.property_id = payload.propertyId;
+      if (payload.entityType === "cemetery") base.notes = payload.cemeteryNotes ?? null;
       if (payload.entityType === "timber_stand") {
         // Stand details captured inline in the save dialog: the stand
         // saves complete in one step.
@@ -2198,6 +2408,57 @@ export default function MapView({
     }
     const sel = await insertAndSetGeometry(
       ENTITY_TABLE[payload.entityType], base, payload.entityType, geometry
+    );
+    setSaving(false);
+    if (sel) {
+      resetDrawState();
+      await loadData();
+      setSelected(sel);
+    }
+  }
+
+  // A maintenance issue: the pin, line, or area drawn in this session.
+  async function saveNewIssue(payload: NewIssuePayload) {
+    const geometry: Geometry | null =
+      pendingPoly ??
+      pendingLine ??
+      (pendingPoint ? { type: "Point", coordinates: pendingPoint } : null);
+    if (!geometry) return;
+    setSaving(true);
+    setSaveError(null);
+    // The ag field the issue sits in, when its property has one under it.
+    let fieldId: string | null = null;
+    if (payload.propertyId) {
+      const center =
+        geometry.type === "Point"
+          ? (geometry.coordinates as [number, number])
+          : (() => {
+              const mp = toMultiPolygon(geometry);
+              return mp ? labelPointOf(mp) : null;
+            })();
+      if (center) {
+        fieldId = suggestPropertyId(
+          { type: "Point", coordinates: center },
+          fields
+            .filter((f) => f.property_id === payload.propertyId)
+            .map((f) => ({ id: f.id, boundary: f.boundary_geojson }))
+        );
+      }
+    }
+    const sel = await insertAndSetGeometry(
+      "maintenance_issues",
+      {
+        organization_id: orgId,
+        property_id: payload.propertyId,
+        field_id: fieldId,
+        issue_type: payload.issueType,
+        label: payload.label,
+        notes: payload.notes,
+        severity: payload.severity,
+        status: "open",
+      },
+      "maintenance_issue",
+      geometry
     );
     setSaving(false);
     if (sel) {
@@ -2289,6 +2550,8 @@ export default function MapView({
       road: visibility.road,
       easement: visibility.easement,
       asset: visibility.asset,
+      cemetery: visibility.cemetery,
+      maintenance: visibility.maintenance_issue,
       crops: cropsOn,
       entity: entityColorsOn,
     });
@@ -2429,8 +2692,30 @@ export default function MapView({
     [printExcluded]
   );
 
+  // Open issues whose geometry touches the framed extent, for the PDF's
+  // "Maintenance issues" list (excluded items drop out like the rest).
+  function printIssuesInFrame(
+    frame: [[number, number], [number, number]]
+  ): Array<{ title: string; severity: string | null; property: string | null }> {
+    const [[w, s], [e, n]] = frame;
+    const propName = new Map(properties.map((p) => [p.id, p.name]));
+    return printInc(issues, "maintenance_issue")
+      .filter((i) => i.status === "open")
+      .filter((i) => {
+        const box = bboxOf([i.geom_geojson]);
+        return box && box[0] <= e && box[2] >= w && box[1] <= n && box[3] >= s;
+      })
+      .map((i) => ({
+        title: issueTitle(i),
+        severity: i.severity,
+        property: i.property_id ? (propName.get(i.property_id) ?? null) : null,
+      }));
+  }
+
   function buildPrintLegend(flags: PrintLayerFlags): LegendEntry[] {
     const out: LegendEntry[] = [];
+    const incCemeteries = printInc(cemeteries, "cemetery");
+    const incIssues = printInc(issues, "maintenance_issue");
     const incParcels = printInc(parcels, "parcel");
     const incFields = printInc(fields, "field");
     const incPastures = printInc(pastures, "pasture");
@@ -2460,7 +2745,7 @@ export default function MapView({
       }
     }
     if (flags.pasture && incPastures.length > 0) {
-      out.push({ label: "Pastures", color: PASTURE_TAN, kind: "fill" });
+      out.push({ label: LAND_TYPE_LABELS.pasture.plural, color: PASTURE_TAN, kind: "fill" });
     }
     if (flags.wetland && incWetlands.length > 0) {
       out.push({ label: "Wetlands", color: WETLAND_BLUE, kind: "fill" });
@@ -2511,6 +2796,20 @@ export default function MapView({
         out.push({ label: "Pivot coverage", color: "#38bdf8", kind: "fill" });
       }
     }
+    if (flags.cemetery && incCemeteries.length > 0) {
+      out.push({ label: "Cemeteries", color: CEMETERY_VIOLET_DARK, kind: "fill" });
+    }
+    if (flags.maintenance && incIssues.length > 0) {
+      if (incIssues.some((i) => i.status === "open" && i.severity !== "high")) {
+        out.push({ label: "Open issue", color: ISSUE_COLORS.open.fill, kind: "point" });
+      }
+      if (incIssues.some((i) => i.status === "open" && i.severity === "high")) {
+        out.push({ label: "High severity issue", color: ISSUE_COLORS.high.fill, kind: "point" });
+      }
+      if (incIssues.some((i) => i.status === "resolved")) {
+        out.push({ label: "Resolved issue", color: ISSUE_COLORS.resolved.fill, kind: "point" });
+      }
+    }
     return out;
   }
 
@@ -2540,6 +2839,9 @@ export default function MapView({
           roads: rowsToFC(printInc(roads, "road"), "road"),
           easements: rowsToFC(printInc(easements, "easement"), "easement"),
           assets: rowsToFC(printInc(assets, "asset"), "asset"),
+          cemeteries: rowsToFC(printInc(cemeteries, "cemetery"), "cemetery"),
+          maintenance: rowsToFC(printInc(issues, "maintenance_issue"), "maintenance_issue"),
+          cemeteryLabels: rowsToLabelFC(printInc(cemeteries, "cemetery"), "cemetery"),
           propertyLabels: rowsToLabelFC(printInc(properties, "property"), "property"),
           parcelLabels: rowsToLabelFC(printInc(parcels, "parcel"), "parcel"),
           fieldLabels: rowsToLabelFC(printInc(fields, "field"), "field"),
@@ -2549,6 +2851,9 @@ export default function MapView({
           easementLabels: rowsToLabelFC(printInc(easements, "easement"), "easement"),
         },
         legend: buildPrintLegend(printLayers),
+        issues: printLayers.maintenance
+          ? printIssuesInFrame([[sw.lng, sw.lat], [ne.lng, ne.lat]])
+          : [],
         onProgress: setPrintBusy,
       });
       setPrintOpen(false);
@@ -2568,6 +2873,7 @@ export default function MapView({
       ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
       ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
       ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
+      ...cemeteries.map(geomOf), ...issues.map(geomOf),
     ]);
     if (box) map.fitBounds(box, { padding: 60 });
   }
@@ -2911,11 +3217,13 @@ export default function MapView({
                   ["parcel", "Parcels", true],
                   ["field", "Ag fields", true],
                   ["timber_stand", "Timber stands", true],
-                  ["pasture", "Pastures", true],
+                  ["pasture", LAND_TYPE_LABELS.pasture.plural, true],
                   ["wetland", "Wetlands", true],
                   ["road", "Roads", true],
                   ["easement", "Easements", true],
                   ["asset", "Assets", true],
+                  ["cemetery", "Cemeteries", true],
+                  ["maintenance", "Maintenance issues", false],
                 ] as Array<[keyof PrintLabelFlags, string, boolean]>
               ).map(([key, label, hasLabels]) => (
                 <div key={key} className="flex items-center gap-2 text-sm text-gray-800">
@@ -3463,6 +3771,29 @@ export default function MapView({
         </div>
       ) : null}
 
+      {/* Per-shape acreage while drawing a boundary: the shape in
+          progress is never folded into the completed areas; the total
+          appears only once there is more than one shape. */}
+      {mode === "draw" && areaReadout && (areaReadout.active || areaReadout.completed.length > 0) ? (
+        <div className="pointer-events-none absolute inset-x-0 top-16 z-10 mx-auto w-fit max-w-[92%] rounded-lg bg-white/95 px-3 py-2 text-xs text-pine-900 shadow-md md:top-3">
+          <p className="font-semibold">
+            {areaReadout.active
+              ? `Drawing: ${formatAcres(areaReadout.active.acres)} acres`
+              : areaReadout.completed.length > 0
+                ? "Tap to start the next area"
+                : ""}
+          </p>
+          {areaReadout.completed.length > 0 ? (
+            <p className="text-gray-600">
+              {areaReadout.completed.map((s, i) => `Area ${i + 1}: ${formatAcres(s.acres)} acres`).join(", ")}
+            </p>
+          ) : null}
+          {areaReadout.completed.length + (areaReadout.active ? 1 : 0) > 1 ? (
+            <p className="mt-0.5 font-bold">Total: {formatAcres(areaReadout.total)} acres</p>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Empty state */}
       {!loading && !hasAnything && mode === "view" ? (
         <div className="absolute inset-x-0 top-16 z-10 mx-auto w-fit max-w-[90%] rounded-lg bg-white/95 px-4 py-3 text-center shadow-lg md:top-3">
@@ -3484,7 +3815,33 @@ export default function MapView({
 
       {/* Save dialogs: the session's type is fixed, so each form opens
           already set to it with its inline fields. */}
-      {mode === "draw" && drawSession && drawSession.kind !== "asset_outline" &&
+      {drawSession?.kind === "issue" && (pendingPoly || pendingLine || pendingPoint) && !pendingExtraDraw ? (
+        <NewIssueDialog
+          issueType={drawSession.issueType}
+          shape={drawSession.shape}
+          approxAcres={pendingPoly ? approxAcres(pendingPoly) : null}
+          properties={properties}
+          suggestedPropertyId={pendingPoly ? suggestedForPoly : pendingLine ? suggestedForLine : suggestedForPoint}
+          saving={saving}
+          error={saveError}
+          onSave={saveNewIssue}
+          onCancel={pendingPoly ? cancelBoundarySession : resetDrawState}
+        />
+      ) : null}
+      {drawSession?.kind === "pin" && pendingPoint && mode === "place" ? (
+        <NewBoundaryDialog
+          fixedType="cemetery"
+          shape="polygon"
+          approxAcres={null}
+          properties={properties}
+          suggestedPropertyId={suggestedForPoint}
+          saving={saving}
+          error={saveError}
+          onSave={saveNewBoundary}
+          onCancel={resetDrawState}
+        />
+      ) : null}
+      {mode === "draw" && drawSession && drawSession.kind !== "asset_outline" && drawSession.kind !== "issue" && drawSession.kind !== "pin" &&
       (drawSession.entityType === "easement"
         ? pendingPoly || pendingLine
         : drawSession.kind === "boundary" && pendingPoly) ? (
@@ -3492,6 +3849,7 @@ export default function MapView({
           fixedType={drawSession.entityType as BoundaryType}
           shape={drawSession.kind === "line" ? "line" : "polygon"}
           approxAcres={pendingPoly ? approxAcres(pendingPoly) : null}
+          areaCount={pendingPoly ? pendingPoly.coordinates.length : 1}
           approxLengthFt={pendingLine ? approxLengthFt(pendingLine) : null}
           properties={properties}
           suggestedPropertyId={pendingPoly ? suggestedForPoly : suggestedForLine}
@@ -3527,7 +3885,7 @@ export default function MapView({
           onCancel={cancelBoundarySession}
         />
       ) : null}
-      {pendingPoint && mode === "place" ? (
+      {pendingPoint && mode === "place" && !drawSession ? (
         <NewAssetDialog
           properties={properties}
           suggestedPropertyId={suggestedForPoint}

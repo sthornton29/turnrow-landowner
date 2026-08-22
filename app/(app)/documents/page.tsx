@@ -13,6 +13,7 @@ export default async function DocumentsPage() {
   const [
     docs, properties, parcels, fields, pastures, wetlands, stands, roads,
     easements, assets, leases, sales, entities, tenants, taxStatements, links,
+    cemeteries, issues,
   ] = await Promise.all([
     supabase.from("documents").select("*").order("created_at", { ascending: false }),
     supabase.from("properties").select("id, name, entity_id, county, state").order("name"),
@@ -32,6 +33,8 @@ export default async function DocumentsPage() {
       .from("tax_statements")
       .select("id, tax_year, county, account_number, taxpayer_name_printed, tax_statement_lines(parcel_id, line_no)"),
     supabase.from("document_properties").select("document_id, property_id"),
+    supabase.from("cemeteries").select("id, name, property_id"),
+    supabase.from("maintenance_issues").select("id, label, issue_type, property_id"),
   ]);
 
   type Row = { id: string; name?: string | null; property_id?: string | null };
@@ -60,12 +63,19 @@ export default async function DocumentsPage() {
     (r) => `/parcels/${r.id}`
   );
   push("field", fields.data as Row[], (r) => `Ag field ${r.name ?? ""}`, (r) => `/fields/${r.id}`);
-  push("pasture", pastures.data as Row[], (r) => `Pasture ${r.name ?? ""}`, (r) => `/pastures/${r.id}`);
+  push("pasture", pastures.data as Row[], (r) => `Pasture/Grassland ${r.name ?? ""}`, (r) => `/pastures/${r.id}`);
   push("wetland", wetlands.data as Row[], (r) => `Wetland ${r.name ?? ""}`, (r) => `/wetlands/${r.id}`);
   push("timber_stand", stands.data as Row[], (r) => `Stand ${r.name ?? ""}`, (r) => `/timber/${r.id}`);
   push("road", roads.data as Row[], (r) => `Road ${r.name ?? ""}`, (r) => `/roads/${r.id}`);
   push("easement", easements.data as Row[], (r) => `Easement ${r.name ?? ""}`, (r) => `/easements/${r.id}`);
   push("asset", assets.data as Row[], (r) => `Asset ${r.name ?? ""}`, (r) => `/assets/${r.id}`);
+  push("cemetery", cemeteries.data as Row[], (r) => `Cemetery ${r.name ?? ""}`, (r) => `/cemeteries/${r.id}`);
+  push(
+    "maintenance_issue",
+    (issues.data ?? []).map((i) => ({ id: i.id, name: i.label ?? i.issue_type, property_id: i.property_id })),
+    (r) => `Maintenance issue ${r.name ?? ""}`,
+    () => "/maintenance"
+  );
   push("lease", leases.data as Row[], (r) => `Lease ${r.name ?? ""}`, (r) => `/leases/${r.id}`);
   push(
     "timber_sale",

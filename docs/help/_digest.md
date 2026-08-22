@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-22, version 0.1.0, build 26f6202. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-22, version 0.1.0, build 9a31b98. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -337,7 +337,7 @@ Upload boundary files you already have: a zipped shapefile from a surveyor, a KM
 
 ## How to use it
 
-- Drop the file in. Polygons can become a property, parcel, ag field, pasture, wetland, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
+- Drop the file in. Polygons can become a property, parcel, ag field, pasture/grassland, wetland, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
 - Each row suggests the property that contains it (a "Suggested from location" chip). Confirm or change it. Properties in the same batch save first so other rows can attach to them.
 - Rows that fail are skipped and listed so you can fix and retry them.
 
@@ -438,6 +438,28 @@ When a tenant is connected and has mapped fields to this lease's land, a panel s
 - **The RMA price is blank.** Price discovery for that crop and state has not started yet; the card says when it opens.
 - **The tenant's price is for a different crop.** Prices match crops strictly; a mismatched crop shows under its own row and never fills another crop's price.
 
+# Maintenance issues  (page: /maintenance)
+
+## What this page is for
+
+A lightweight to-do list for the land. Every problem you mark on the map (a bad wash, a sinkhole, a broken terrace, a road washout, or anything else with its own label) shows here until you mark it resolved, grouped by property and then by ag field.
+
+## Adding an issue
+
+On the Map, tap **+ Add**, then **Draw**, then **Maintenance issue** at the bottom of the picker. Pick the type, then how to mark it: a **Pin** for a spot (a sinkhole), a **Line** for something that runs along the ground (a failed terrace section), or an **Area** you trace (a wash, a washout). The save form takes an optional label, notes, and a severity (low, medium, high); "Other" needs a label. The property fills in from where you drew.
+
+Issues are their own layer in warning colors (amber, red when high severity) so they read as problems, never as land. The Layers box has a separate **Maintenance issues** toggle, so you can hide them while working on boundaries and bring them back later.
+
+## Marking resolved
+
+Tap the issue on the map and press **Mark resolved**, or press the button beside it on this page. Resolved issues turn gray on the map and move under Resolved here; **Reopen** brings one back.
+
+## Common questions
+
+- **Does an issue belong to a field?** When it lands inside an ag field the list groups it under that field; otherwise it sits directly under the property.
+- **Do issues print?** Yes. The map PDF draws them in their warning colors with their own legend rows and lists the open ones in the frame beside the legend.
+- **Who can see them?** Everyone in your organization, like the rest of the map.
+
 # The map  (page: /map)
 
 ## What this page is for
@@ -446,16 +468,19 @@ The Map is the home page: your properties on satellite imagery with every bounda
 
 ## Layers and legend
 
-The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures, wetlands, timber, roads, easements, and assets. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+
+- **Cemeteries** are a muted violet: a traced plot, or a "C" marker for a single pin.
 
 - **Timber types** get their own legend when stands are on screen (planted pine, natural pine, hardwood, mixed, other).
 - **Easements** show a legend by family: utility, access and transport, drainage and flowage, conservation, and other. Railroads get a tie pattern, conservation easements a hatch.
 - **Crops** appears when a connected tenant has shared plantings; it recolors ag fields by this year's crop.
 - **By entity** appears when land sits in more than one entity; it recolors property outlines by owner.
+- **Maintenance issues** are amber, red when marked high severity, and gray once resolved; a pin shows an exclamation mark. See the Maintenance issues topic.
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. Where things overlap, assets win, then roads, ag fields, timber, parcels, and properties.
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
 
 ## Other controls
 
@@ -474,7 +499,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 
 ## Pick first, then draw
 
-Tap **+ Add** then **Draw**. A picker asks what you are drawing: Property boundary, Parcel, Ag field, Timber stand, Pasture, Wetland, Road, Easement (then Line or Area), Fence, or Underground pipe. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+Tap **+ Add** then **Draw**. A picker asks what you are drawing: Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery (then Draw the plot or Drop a pin), Road, Easement (then Line or Area), Fence, or Underground pipe, and at the bottom, under Needs attention, a Maintenance issue. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
 
 ## Drawing a shape
 
@@ -486,6 +511,14 @@ Tap **+ Add** then **Draw**. A picker asks what you are drawing: Property bounda
 ## Several areas in one record
 
 After the first area is finished, the save form offers **+ Add area** and **Cut area out**. Add draws another polygon that merges in (areas do not need to touch). Cut draws a hole (a pond, a house lot). The form stays as you left it while you draw more.
+
+## Cemeteries
+
+A family or church plot is usually small. Trace its edge when you know it (the plot shows acres like any land type) or drop a single pin on the marker. Either way it gets its own violet look and a "C" marker so it stays findable when zoomed out.
+
+## Maintenance issues
+
+Problems that need fixing are not land, so they have their own layer. Pick **Maintenance issue**, then the type (wash, sinkhole, broken terrace, road washout, or other with a label), then how to mark it: a **Pin** for a spot, a **Line** along a terrace or ditch, or an **Area** you trace. Give it a severity if you like. Issues draw in amber (red for high severity) and gray once resolved; tap one and press **Mark resolved**, or work the list on the Maintenance page. The Layers box hides or shows them separately from everything else.
 
 ## Editing later
 
@@ -555,7 +588,7 @@ Generate renders the framed area at print resolution and downloads a Letter PDF 
 
 A **property** is a piece of land you think of as one place (the home place, the river farm). Each has a boundary, county and state, optional FSA farm numbers, and notes. **Parcels** are the county's tax parcels inside it, each with a parcel number, its own boundary, and deeded acres when the county supplied them. Tax statements match to parcels, so keeping parcel numbers accurate pays off at tax time.
 
-The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures, wetlands, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
+The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures/grassland, wetlands, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
 
 ## Entities
 
@@ -563,7 +596,7 @@ Under Properties then **Entities**, create the owners of record: an individual, 
 
 ## Moving things between properties
 
-Every parcel, ag field, pasture, wetland, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
+Every parcel, ag field, pasture/grassland, wetland, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
 
 ## Acres
 

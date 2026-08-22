@@ -18,6 +18,12 @@ export const WETLAND_BLUE = "#6487a8";
 // Asset lines/footprints and the pivot coverage blues.
 export const ASSET_LIGHT_BLUE = "#bae6fd";
 export const PIVOT_BLUE = "#38bdf8";
+// Cemeteries: a muted stone violet, apart from every land, crop, timber,
+// water, and entity color on the map.
+export const CEMETERY_VIOLET = "#c4b5fd";
+export const CEMETERY_VIOLET_DARK = "#6d28d9";
+// Maintenance issues: warning colors only (never used for land).
+export const ISSUE_AMBER = "#f59e0b";
 
 // Draft color while drawing, keyed by what the session will save.
 export function draftColorFor(key: string): string {
@@ -33,6 +39,8 @@ export function draftColorFor(key: string): string {
     case "underground_pipe":
     case "asset": return ASSET_LIGHT_BLUE;
     case "easement": return EASEMENT_CATEGORY_COLORS.utility;
+    case "cemetery": return CEMETERY_VIOLET;
+    case "maintenance_issue": return ISSUE_AMBER;
     default: return "#fbb03b"; // mapbox-gl-draw's default orange
   }
 }

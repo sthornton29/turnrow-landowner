@@ -10,7 +10,7 @@ keywords: property, parcel, entity, llc, trust, fsa farm number, deeded acres, g
 
 A **property** is a piece of land you think of as one place (the home place, the river farm). Each has a boundary, county and state, optional FSA farm numbers, and notes. **Parcels** are the county's tax parcels inside it, each with a parcel number, its own boundary, and deeded acres when the county supplied them. Tax statements match to parcels, so keeping parcel numbers accurate pays off at tax time.
 
-The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures, wetlands, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
+The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures/grassland, wetlands, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
 
 ## Entities
 
@@ -18,7 +18,7 @@ Under Properties then **Entities**, create the owners of record: an individual, 
 
 ## Moving things between properties
 
-Every parcel, ag field, pasture, wetland, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
+Every parcel, ag field, pasture/grassland, wetland, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
 
 ## Acres
 

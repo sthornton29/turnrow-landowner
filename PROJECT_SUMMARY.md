@@ -28,6 +28,15 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
+00000. Run 0032_cemeteries_maintenance.sql in Supabase BEFORE this deploy
+   goes live (2026-08-22; NOT YET RUN at the time of writing): the
+   cemeteries and maintenance_issues tables with their _geo views,
+   set_geometry extended with 'cemetery' and 'maintenance_issue', and
+   the documents entity_type check gaining both. The map loads both
+   views on every open and the new Maintenance page reads the table;
+   a deploy without it breaks the map. No data migration: the
+   "Pasture/Grassland" rename is display only.
+
 0000. Run 0031_farm_entities.sql in Supabase BEFORE this deploy goes
    live (2026-08-22; NOT YET RUN at the time of writing): tenant
    farming entities from the farm API (farm_connections.entities,
@@ -2002,6 +2011,72 @@ Functions and views:
     operation price selection, pre-entity data unchanged). A
     pre-entity farm API leaves every new column null and nothing new
     renders.
+  - MAPPING CHANGES (2026-08-22, migration 0032). (1) DISTINCT PER-SHAPE
+    AREA WHILE DRAWING: lib/geo/drawArea.ts (unit tested)
+    drawAreaReadout(features, completedIds) reads mapbox-gl-draw's
+    features against the session's completed ids and returns the
+    ACTIVE shape's acres (the in-progress polygon once it has three
+    distinct vertices), each completed area's acres, and a total; the
+    map listens to draw.render/update/selectionchange/delete during a
+    boundary session and shows a pointer-events-none chip ("Drawing: X
+    acres" or "Tap to start the next area", then "Area 1: Y acres,
+    Area 2: Z acres", and a bold "Total: T acres" ONLY with more than
+    one shape), plus an "Area n · Y ac" symbol at each completed area's
+    label point (draw-area-labels source, removed when the session
+    ends); the save form reads "Total of N areas: X acres (exact acres
+    computed on save)" when N > 1, else "About X acres". Nothing is
+    ever conflated: the active shape's figure never includes completed
+    shapes. (2) "PASTURE/GRASSLAND": display relabel only (stored
+    value 'pasture', table pastures, and set_geometry branch
+    unchanged) through lib/landLabels.ts LAND_TYPE_LABELS (singular /
+    plural per land type, unit tested; FeaturePanel TYPE_LABEL and the
+    print labels read from it), the draw picker ("Grazing ground, hay,
+    grassland"), LayerToggle ("Pastures/Grassland"), legends, pages,
+    documents labels, import options, the Ask schema note, and the
+    help topics. (3) CEMETERIES: a land-use category (table cemeteries,
+    property_id required, name, notes, geom Point | MultiPoint |
+    Polygon | MultiPolygon with generated acres for polygons, view
+    cemeteries_geo geom_geojson, RLS, documents entity_type
+    'cemetery'): picker "Cemetery" with Draw the plot or Drop a pin
+    (crosshair place mode), stone violet fill #c4b5fd / outline
+    #6d28d9 with a "C" circle marker for pins and a center marker for
+    polygons so small plots stay findable, its own layer toggle,
+    legend row, print layers and label, summary page
+    /cemeteries/[id] ("Marked by a pin" when no polygon), a Cemeteries
+    section on the property page, documents, import option, Ask
+    schema. (4) MAINTENANCE ISSUES: their own layer set, not a land
+    type (table maintenance_issues: property_id and field_id nullable
+    (set from the spot), issue_type wash | sinkhole | broken_terrace |
+    road_washout | other, label (required for other), notes, severity
+    low | medium | high, status open | resolved with resolved_at, geom
+    Point | Line | Polygon (+Multi), generated acres, created_by, view
+    maintenance_issues_geo, RLS; set_geometry 'maintenance_issue').
+    lib/maintenance.ts (unit tested): ISSUE_TYPES and labels,
+    SEVERITY_LABELS, colors by status and severity (open amber
+    #f59e0b / #b45309, high severity red #dc2626 / #991b1b, resolved
+    gray #9ca3af dimmed), issueGeometryKind point | line | area,
+    toggleStatus (stamps or clears resolved_at), issueValid,
+    groupOpenIssues (property, then field, severity first). Map: a
+    separated amber "Needs attention" group at the bottom of the draw
+    picker leads to the five types, then Pin / Line / Area (the natural
+    shape highlighted: sinkhole pin, terrace line, wash area);
+    NewIssueDialog (type preselected, label, severity buttons, notes,
+    property suggested from location); issue layers drawn on top
+    (fill, outline, dashed line, "!" circle marker, name), a separate
+    "Maintenance issues" layer toggle (default on) independent of land
+    use; FeaturePanel shows "Needs attention", status and severity
+    chips, type, marked as, area, created and resolved dates, Mark
+    resolved / Reopen, Move pin / Edit line / Edit boundary, Delete.
+    /maintenance ("Maintenance" in the nav after Assets): open issues
+    grouped by property then field with severity chips, Mark resolved,
+    Map links (?focus=maintenance_issue:<id>), property filter, a
+    collapsed Resolved section. Print: maintenance flag (on when any
+    open issue is in frame), legend rows Open issue / High severity
+    issue / Resolved issue, and a "Maintenance issues" text block of
+    the open issues in frame beside the legend (overflowing to a
+    second page). Scoping: org RLS like every land table (role-blind
+    by design, as the rest of the map). Help: map.md and drawing.md
+    updated, new maintenance.md.
   - FARM DATA IS DATA FIRST: the Farm Data nav item lands on
     /farm-activity; with no connections yet it redirects to /farms so
     the share-code entry stays front and center. The activity page
@@ -2299,3 +2374,12 @@ Functions and views:
   from their leased land, and lease Tenant Data prices scoped to the
   tenant's entity when linked, labeled either way. Degrades to nothing
   new against a pre-entity API. Described above.
+- Post-Phase 6q (DONE, 2026-08-22, migration 0032): MAPPING CHANGES:
+  distinct per-shape area while drawing (active shape, each completed
+  area on the map, a separate total), the Pasture/Grassland relabel
+  through one land-label registry, Cemeteries as a mappable category
+  (polygon or pin), and the Maintenance issues layer (washes,
+  sinkholes, broken terraces, road washouts, other; pin, line, or
+  area; severity and open/resolved; warning colors; the Maintenance
+  to-do page; print section). Unit tests for the draw-area readout,
+  the relabel, and the issue model. Described above.

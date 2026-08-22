@@ -11,6 +11,7 @@ const NAV = [
   { href: "/properties", label: "Properties" },
   { href: "/timber", label: "Timber" },
   { href: "/assets", label: "Assets" },
+  { href: "/maintenance", label: "Maintenance" },
   { href: "/leases", label: "Leases" },
   { href: "/taxes", label: "Property Taxes" },
   { href: "/income", label: "Income" },

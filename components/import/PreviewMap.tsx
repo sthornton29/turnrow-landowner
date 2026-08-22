@@ -24,6 +24,8 @@ const COLOR: Record<EntityType, string> = {
   road: "#e5e7eb",
   easement: "#dc2626",
   asset: "#bae6fd",
+  cemetery: "#c4b5fd",
+  maintenance_issue: "#f59e0b",
 };
 
 // Read-only satellite map showing parsed features colored by assigned type.
