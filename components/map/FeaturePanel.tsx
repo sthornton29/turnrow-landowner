@@ -340,7 +340,10 @@ export interface FarmActivityInfo {
   color: string;
   varieties: string[];
   planting_date: string | null;
-  harvested: boolean;
+  // Harvest state from the farm software's own classification: a yield
+  // is ACTUAL only on complete; in_progress shows "Harvesting" and the
+  // projected yield (yieldText carries the "projected" label then).
+  state: "complete" | "in_progress" | "growing";
   yieldText: string | null;
   yieldShared: boolean;
   source: string;
@@ -576,10 +579,14 @@ export default function FeaturePanel({
                   ) : null}
                   <p className="text-xs text-gray-600">
                     {a.planting_date ? `Planted ${a.planting_date} · ` : ""}
-                    {a.harvested ? "Harvested" : "Growing"}
+                    {a.state === "complete"
+                      ? "Harvested"
+                      : a.state === "in_progress"
+                        ? "Harvesting"
+                        : "Growing"}
                     {a.yieldText
                       ? ` · ${a.yieldText}`
-                      : a.harvested && !a.yieldShared
+                      : a.state === "complete" && !a.yieldShared
                         ? " · yield not shared"
                         : ""}
                   </p>

@@ -1,6 +1,24 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-21, evening (description matching second pass:
+Last updated: 2026-08-25 (harvest completion: the farm software's
+partner API now sends harvest_status per field x crop on /production
+(the same complete / in_progress / unharvested classification its own
+Yields page shows; farm-side addendum deployed 2026-08-25), migration
+0033 stores it, and a yield presents as ACTUAL only when the field x
+crop is harvest-complete: per-field actual = production / HARVESTED
+acres, rollup actuals aggregate ONLY complete fields (weighted by
+harvested acres) with "X of Y ac complete" beside a partial-season
+figure, in-progress fields show a Harvesting chip plus the tenant's
+PROJECTED yield (labeled) everywhere yields display, and the lease
+Tenant Data "Use" helper offers an actual only when every mapped field
+is complete (partial harvest offers the labeled projected value); also
+the map's "What are you drawing?" picker cards now contain their text:
+titles wrap with a break opportunity at "/", hints clamp to one line
+with the full text on hover or touch long-press, and the desktop panel
+scrolls under a height cap. 2026-08-22: per-shape area readout while
+drawing, Pasture/Grassland relabel, Cemeteries, Maintenance issues
+layer (migration 0032); tenant farming entities (migration 0031).
+Earlier, 2026-08-21 evening (description matching second pass:
 every tract read from the text as well as the AI, a land index for
 offline section lookup, parcel fit against stated acres, persisted
 evidence with Retry and why, learned property aliases, migration
@@ -27,6 +45,21 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 "?" drawer, how-to chat, and Contact support)
 
 ## DEPLOY CHECKLIST (this release)
+
+000000. Run 0033_harvest_status.sql in Supabase BEFORE this deploy goes
+   live (2026-08-25; NOT YET RUN at the time of writing): adds
+   farm_field_data.harvest_status ('complete' | 'in_progress' |
+   'unharvested', nullable). The sync writes it on its next run and
+   FAILS without the column; every yield display falls back to the old
+   harvested-acres inference while the column is null. The farm-side
+   partner API addendum (harvest_status on /production, grain-tracker)
+   deployed 2026-08-25 and must be live FIRST (it is additive; this
+   side degrades gracefully without it, but the fix is inert until
+   statuses arrive). After the deploy press Refresh now on the
+   connection (or wait for the 6-hour cron) so statuses sync; then
+   during an in-progress harvest, complete fields show true actuals,
+   in-progress fields show Harvesting + PROJECTED, and rollups no
+   longer sag.
 
 00000. Run 0032_cemeteries_maintenance.sql in Supabase BEFORE this deploy
    goes live (2026-08-22; NOT YET RUN at the time of writing): the
@@ -156,7 +189,10 @@ and Postgres row level security guarantees each org sees only its own data.
   lib/ (owner names, spatial reference, property matching, GIS where
   clauses, lease land matching, timber scan raster pipeline, price
   expressions, RMA parsing, lease pricing, crop matching, tenant data
-  aggregation, lease logic, income projections, pivot geometry,
+  aggregation, harvest completion (rollup actuals over complete fields
+  only with completeAcres/cropAcres, tenant-data all-complete gating,
+  the sync round trip of harvest_status, the pre-status legacy
+  fallback), lease logic, income projections, pivot geometry,
   easement catalog (every type styled and categorized, legend
   presence, legacy-row migration), circle footprints (area, rim-drag
   round trip, details round trip, diameter sync, sq ft vs acres
@@ -833,10 +869,34 @@ farm API shares no boundaries, matching is by name + acres):
   remote_field_id, crop_year, crop): planted_acres, irrigated_acres +
   dryland_acres (migration 0014; the partner /plantings payload carries
   the practice split), planting_date,
-  varieties jsonb, harvested_acres, production_units (null when the farmer
+  varieties jsonb, harvested_acres, harvest_status (migration 0033:
+  'complete' | 'in_progress' | 'unharvested' from the partner
+  /production payload, the same classification the tenant's own Yields
+  page shows; null on pre-status rows, which fall back to the old
+  harvested-acres inference), production_units (null when the farmer
   did not share yields), production_unit, yield_shared, raw payload jsonb.
   Upserted on every sync; the app always renders from this table so farm
   data keeps working when the farm software is unreachable.
+  THE HARVEST COMPLETION RULE (2026-08-25, lib/farmDisplay.ts
+  harvestState / yieldPerAcre, the single source every display uses): a
+  yield presents as ACTUAL only when harvest_status is complete, and a
+  per-field actual is production / HARVESTED acres (which the farm side
+  sets equal to planted acres on completion and 0 mid-harvest, since it
+  tracks loads, not acres-to-date; never divide before complete).
+  In-progress fields show a Harvesting chip and the tenant's PROJECTED
+  yield from farm_projected_yields, labeled, everywhere: Farm Data
+  field tables, ag field pages, the map click panel, the Ask farm tool
+  (harvest_status in its rows). Rollups (lib/farmRollup.ts): the actual
+  figure aggregates ONLY complete fields weighted by harvested acres,
+  and when a crop mixes complete and in-progress fields the chip reads
+  "X of Y ac complete" beside the actuals-only number (CropYield
+  completeAcres/cropAcres); never a silent blend. harvestedAcres /
+  progress bars count only complete acres; the dashboard card says
+  "harvest-complete" and adds "N ac being harvested". The lease Tenant
+  Data panel (lib/tenantData.ts) shows an ACTUAL row only when EVERY
+  mapped field is complete for the crop; partial harvest stays on the
+  labeled projected path, which is what the Use helper then fills
+  (kind tenant_projected).
 
 Phase 6 server pieces:
 
@@ -845,9 +905,12 @@ Phase 6 server pieces:
   recognized and mapped to a friendly "your farmer ended this share"
   state (connection status revoked, data retained).
 - lib/farmSync.ts: syncConnection decrypts the token, pulls handshake +
-  current-year plantings/production, upserts farm_field_data, refreshes
-  mappings, records last_error on failure. Used by connect, the manual
-  Refresh now button, and the cron.
+  current-year plantings/production, upserts farm_field_data (via the
+  pure buildFarmFieldRow, unit tested in farmSync.test.ts so the
+  harvest_status flag round-trips exactly as the partner API sent it,
+  null on a pre-addendum payload), refreshes mappings, records
+  last_error on failure. Used by connect, the manual Refresh now
+  button, and the cron.
 - /api/farm/connect: POST a TRW-XXXX-XXXX-XXXX code; redeems it (one-time
   on the farm side), encrypts the returned token, creates the connection,
   runs the first sync.
@@ -1050,8 +1113,11 @@ right source, always reviewed (amber until saved) and never auto-saved:
   resolved through confirmed field_mappings; property-level links cover
   all mapped fields on the property): crop (with a "not in this year's
   crops" chip when unmatched), planted acres on leased ground, yield
-  labeled PROJECTED (tenant projected, acre-weighted) or ACTUAL (once
-  harvested; actuals win), avg price with PROJECTED/FINAL badge and
+  labeled PROJECTED (tenant projected, acre-weighted) or ACTUAL (only
+  once EVERY mapped field's harvest is complete for the crop, per
+  migration 0033; mid-harvest the crop stays on the labeled projected
+  path so Use never fills a partial actual), avg price with
+  PROJECTED/FINAL badge and
   as-of date. PRACTICE SPLIT: when the farm data carries the
   irrigated/dryland breakout (plantings acres + projected-yields
   practices arrays), the panel shows one row per crop x practice and
@@ -1542,8 +1608,19 @@ Functions and views:
     Irrigation pivot. PICK FIRST, THEN DRAW: Draw opens a type picker
     (components/map/DrawTypePicker.tsx, a two-column grid with color
     swatches, bottom sheet on phones): Property boundary, Parcel, Ag
-    field, Timber stand, Pasture, Wetland, Road, Easement (then a
-    second tap: Line or Area), Fence, Underground pipe. Picking fixes
+    field, Timber stand, Pasture/Grassland, Wetland, Cemetery, Road,
+    Easement (then a second tap: Line or Area), Fence, Underground
+    pipe, plus the NEEDS ATTENTION maintenance entry. CARD LAYOUT
+    (2026-08-25, the shared PickerCard used by every step): text is
+    CONTAINED in its card; titles wrap to a second line (a zero-width
+    break after "/" lets "Pasture/Grassland" wrap between its words,
+    break-words backs up any future long name, grid rows equalize
+    height with content pinned to the top), hints clamp to ONE line
+    with an ellipsis and the full text on desktop hover (title
+    tooltip) or a 450 ms touch long-press bubble (the long-press never
+    also picks the card); the phone bottom sheet scrolls within 75% of
+    the viewport and the desktop panel carries its own max-height so
+    short windows scroll instead of clipping the bottom cards. Picking fixes
     the type for the session: the right tool loads (polygon vs line),
     the mapbox-gl-draw draft layers are recolored to that type's map
     color (components/map/drawColors.ts captures the theme's original
@@ -2102,15 +2179,20 @@ Functions and views:
     bucket for properties without entity_id and byTenant named
     operation_name || label with unmappedAcres; each Rollup carries
     plantedAcres, harvestedAcres, plantings, cropMix sorted desc,
-    yieldByCrop (acres-weighted ACTUAL production / harvested acres
-    when any row has production, else PROJECTED from
-    farm_projected_yields weighted by planted acres, else null),
+    yieldByCrop (ACTUAL = production / harvested acres over
+    harvest-COMPLETE rows ONLY, migration 0033, with
+    completeAcres/cropAcres for the "X of Y ac complete" note; with no
+    complete field, PROJECTED from farm_projected_yields weighted by
+    planted acres, else null),
     prices for crops in the mix labeled by tenant, sharedYields /
     sharedPrices, propertyCount, connectionIds; propertyRollups(input,
     { entityId | connectionId }) and scopedRollup for the drill-in).
     A card: name, acres in crops, crop-mix stacked bar (cropColor)
-    plus text, harvest progress bar "x of y acres harvested", yield
-    chips (actual / projected) or quiet "Yields not shared", price
+    plus text, harvest progress bar "x of y acres harvested"
+    (harvest-COMPLETE acres only, migration 0033), yield
+    chips (actual / projected; a partial-season actual adds "X of Y ac
+    complete" and aggregates only complete fields) or quiet "Yields
+    not shared", price
     chips with PROJECTED / FINAL badge or "Prices not shared"; the
     whole card links to ?entity=<id> or ?connection=<id>. With at
     most one entity bucket and one connection the two sections
@@ -2121,8 +2203,9 @@ Functions and views:
     level 2 (property too): three-level breadcrumb, the property's
     card, the field table for that property. The existing field-level
     table (grouped by property: field, crop with varieties, planted
-    acres, planting date, Growing / Harvested chip, yield per acre or
-    "Not shared") stays beneath every level, scoped by the same
+    acres, planting date, Growing / Harvesting / Harvested chip, actual
+    yield per acre on complete fields or the PROJECTED yield labeled on
+    the rest, or "Not shared") stays beneath every level, scoped by the same
     filters, and the totals line matches the cards by construction
     (same rows summed). Tenant prices card only at the summary level
     with more than one connection. Unmapped plantings count on the
@@ -2137,9 +2220,11 @@ Functions and views:
     soybeans kelly, wheat amber, canola light green, other purple; chosen
     to read over satellite imagery). The field/property click panel gains
     a Farm activity section: crop, varieties, planted date, harvest
-    status, yield when shared.
-  - Dashboard: harvest progress card during harvest (acres harvested of
-    acres planted with a progress bar, linking to /farm-activity).
+    status (Growing / Harvesting / Harvested), actual yield when
+    complete and shared, else the projected yield labeled.
+  - Dashboard: harvest progress card during harvest (harvest-complete
+    acres of acres planted with a progress bar plus "N ac being
+    harvested" when fields are mid-harvest, linking to /farm-activity).
   - /leases/[id]: the Tenant Data panel (described under lease price
     methods above) shows per-crop planted acres, yields (PROJECTED or
     ACTUAL), and prices (PROJECTED or FINAL) from connected farm data

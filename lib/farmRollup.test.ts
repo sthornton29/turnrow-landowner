@@ -267,3 +267,55 @@ describe("tenants are the farming entities (migration 0031)", () => {
     expect(propertyRollups(multi, { connectionId: "acme", remoteEntityId: "e2" }).map((p) => [p.name, p.plantedAcres])).toEqual([["River Place", 50]]);
   });
 });
+
+describe("harvest completion (migration 0033)", () => {
+  // One connection, one crop, one field harvest-complete and one still
+  // being cut: the mixed case that used to drag actuals down.
+  const mixed: RollupInput = {
+    ...base,
+    plantings: [
+      planting({ farm_connection_id: "acme", remote_field_id: "a1", crop: "Corn", planted_acres: 100, harvest_status: "complete", harvested_acres: 100, production_units: 20000, production_unit: "bu" }),
+      planting({ farm_connection_id: "acme", remote_field_id: "a3", crop: "Corn", planted_acres: 60, harvest_status: "in_progress", harvested_acres: 0, production_units: 5000, production_unit: "bu" }),
+    ],
+  };
+
+  it("aggregates the actual over complete fields only, with the acres beside it", () => {
+    const acme = rollups(mixed).byTenant.find((r) => r.key === tenantKey("acme", null))!;
+    const corn = acme.yieldByCrop.find((y) => y.crop === "Corn")!;
+    expect(corn.basis).toBe("actual");
+    // 20000 / 100 harvested acres; the in-progress field's 5000 bu over
+    // 60 planted acres never blends in (it would read 156 bu/ac).
+    expect(corn.yieldPerAcre).toBeCloseTo(200, 6);
+    expect(corn.completeAcres).toBe(100);
+    expect(corn.cropAcres).toBe(160);
+  });
+
+  it("counts only complete acres as harvested progress", () => {
+    const acme = rollups(mixed).byTenant.find((r) => r.key === tenantKey("acme", null))!;
+    expect(acme.harvestedAcres).toBe(100);
+    expect(acme.plantedAcres).toBe(160);
+  });
+
+  it("shows the projected figure while no field is complete, never a partial actual", () => {
+    const inProgress: RollupInput = {
+      ...mixed,
+      plantings: mixed.plantings.map((p) => ({ ...p, harvest_status: "in_progress" as const, harvested_acres: 0 })),
+      projectedYields: [
+        { farm_connection_id: "acme", remote_field_id: "a1", crop: "Corn", planted_acres: 100, yield_per_acre: 190, unit: "bu_per_ac", basis: "expected" },
+        { farm_connection_id: "acme", remote_field_id: "a3", crop: "Corn", planted_acres: 60, yield_per_acre: 150, unit: "bu_per_ac", basis: "expected" },
+      ],
+    };
+    const corn = rollups(inProgress).byTenant.find((r) => r.key === tenantKey("acme", null))!
+      .yieldByCrop.find((y) => y.crop === "Corn")!;
+    expect(corn.basis).toBe("projected");
+    expect(corn.yieldPerAcre).toBeCloseTo((190 * 100 + 150 * 60) / 160, 6);
+    expect(rollups(inProgress).byTenant[0].harvestedAcres).toBe(0);
+  });
+
+  it("keeps the old inference for rows synced before the farm API sent statuses", () => {
+    // base's corn rows carry no harvest_status; harvested acres > 0
+    // still reads complete, so pre-addendum data renders unchanged.
+    const acme = rollups(base).byTenant.find((r) => r.key === tenantKey("acme", null))!;
+    expect(acme.yieldByCrop.find((y) => y.crop === "Corn")!.yieldPerAcre).toBeCloseTo(24000 / 130, 6);
+  });
+});

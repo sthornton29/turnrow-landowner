@@ -110,7 +110,13 @@ export interface RemoteProduction {
   crop: string | null;
   crop_year: number;
   planted_acres: number | null;
+  // Follows harvest_status: equal to planted acres when complete, else 0.
+  // The farm side cannot know acres-harvested-to-date mid-field, so never
+  // divide by this until harvest_status is "complete".
   harvested_acres: number | null;
+  // The same classification the tenant's Yields page shows. Absent on a
+  // pre-addendum farm API.
+  harvest_status?: "complete" | "in_progress" | "unharvested" | null;
   production_units: number | null; // null when yields are not shared
   unit: "bu" | "lbs" | null;
   entity_id?: string | null;

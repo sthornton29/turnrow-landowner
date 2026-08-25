@@ -4,7 +4,8 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import { loadIncomeInputs, projectedLeaseYears } from "@/lib/income";
 import {
-  harvestStatus,
+  harvestState,
+  harvestStateLabel,
   yieldPerAcre,
   yieldUnitLabel,
   type FarmFieldDataRow,
@@ -87,6 +88,27 @@ export default async function FieldSummaryPage({
     mappedKeys.has(`${d.farm_connection_id}|${d.remote_field_id}`)
   );
   const currentActivity = activity.filter((d) => d.crop_year === currentYear);
+
+  // The tenant's projected yields for this field's remote mappings, for
+  // rows whose harvest is not complete yet (shown labeled PROJECTED).
+  const { data: projRows } =
+    activity.length > 0
+      ? await supabase
+          .from("farm_projected_yields")
+          .select("farm_connection_id, remote_field_id, crop_year, crop, yield_per_acre, unit")
+      : { data: [] };
+  const projByKey = new Map(
+    ((projRows ?? []) as Array<{
+      farm_connection_id: string;
+      remote_field_id: string;
+      crop_year: number;
+      crop: string;
+      yield_per_acre: number | null;
+      unit: string | null;
+    }>)
+      .filter((p) => mappedKeys.has(`${p.farm_connection_id}|${p.remote_field_id}`))
+      .map((p) => [`${p.farm_connection_id}|${p.remote_field_id}|${p.crop_year}|${p.crop}`, p])
+  );
   const tenantIrrigated = currentActivity.reduce(
     (s, d) => s + (d.irrigated_acres ?? 0),
     0
@@ -196,7 +218,17 @@ export default async function FieldSummaryPage({
               </thead>
               <tbody>
                 {activity.slice(0, 8).map((d) => {
+                  const state = harvestState(d);
                   const perAcre = yieldPerAcre(d);
+                  // Not complete yet: the projected yield, labeled.
+                  const proj =
+                    perAcre === null
+                      ? projByKey.get(
+                          `${d.farm_connection_id}|${d.remote_field_id}|${d.crop_year}|${d.crop}`
+                        )
+                      : undefined;
+                  const projPerAcre =
+                    proj && proj.yield_per_acre !== null ? Number(proj.yield_per_acre) : null;
                   return (
                     <tr key={d.id} className="border-b border-gray-100 last:border-0">
                       <td className="px-3 py-2">{d.crop_year}</td>
@@ -207,13 +239,19 @@ export default async function FieldSummaryPage({
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatAcres(d.planted_acres)}
                       </td>
-                      <td className="px-3 py-2">
-                        {harvestStatus(d) === "harvested" ? "Harvested" : "Growing"}
-                      </td>
+                      <td className="px-3 py-2">{harvestStateLabel(state)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {perAcre !== null
-                          ? `${formatNumber(Math.round(perAcre * 10) / 10)} ${yieldUnitLabel(d.production_unit)}`
-                          : ""}
+                        {perAcre !== null ? (
+                          `${formatNumber(Math.round(perAcre * 10) / 10)} ${yieldUnitLabel(d.production_unit)}`
+                        ) : projPerAcre !== null ? (
+                          <span className="text-gray-700">
+                            {formatNumber(Math.round(projPerAcre * 10) / 10)}{" "}
+                            {proj?.unit === "lbs_per_ac" ? "lbs/ac" : "bu/ac"}{" "}
+                            <span className="text-[10px] font-medium uppercase text-amber-700">projected</span>
+                          </span>
+                        ) : (
+                          ""
+                        )}
                       </td>
                     </tr>
                   );

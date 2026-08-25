@@ -4,7 +4,8 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   cropColor,
-  harvestStatus,
+  harvestState,
+  harvestStateLabel,
   yieldPerAcre,
   yieldUnitLabel,
   type FarmFieldDataRow,
@@ -189,7 +190,20 @@ export default async function FarmActivityPage({
   // only when the farm software shares it.
   const anyOperatingEntity = rows.some((r) => !!r.data.remote_entity_name);
   const totalPlanted = rows.reduce((s, r) => s + Number(r.data.planted_acres ?? 0), 0);
-  const totalHarvested = rows.reduce((s, r) => s + Number(r.data.harvested_acres ?? 0), 0);
+  // Harvested = harvest-complete acres only; an in-progress field's
+  // harvested acres are unknown (the farm side sends 0).
+  const totalHarvested = rows.reduce(
+    (s, r) => s + (harvestState(r.data) === "complete" ? Number(r.data.harvested_acres ?? 0) : 0),
+    0
+  );
+  // Projected yield per remote field x crop, for the in-progress and
+  // growing rows in the field tables (labeled projected).
+  const projByFieldKey = new Map(
+    ((projectedYields ?? []) as ProjectedYieldRow[]).map((p) => [
+      `${p.farm_connection_id}|${p.remote_field_id}|${p.crop}`,
+      p,
+    ])
+  );
 
   // ---- summary band state
   const summary = rollups(rollupInput);
@@ -555,11 +569,21 @@ export default async function FarmActivityPage({
                 </thead>
                 <tbody>
                   {groupRows.map((r) => {
-                    const status = harvestStatus(r.data);
+                    const state = harvestState(r.data);
                     const perAcre = yieldPerAcre(r.data);
                     const connection = connectionById.get(r.data.farm_connection_id);
                     const yieldsShared =
                       r.data.yield_shared || Boolean(connection?.scopes?.yields);
+                    // In-progress and growing fields show the tenant's
+                    // projected yield (labeled), never a partial actual.
+                    const proj =
+                      perAcre === null
+                        ? projByFieldKey.get(
+                            `${r.data.farm_connection_id}|${r.data.remote_field_id}|${r.data.crop}`
+                          )
+                        : undefined;
+                    const projPerAcre =
+                      proj && proj.yield_per_acre !== null ? Number(proj.yield_per_acre) : null;
                     return (
                       <tr key={r.data.id} className="border-b border-gray-100 last:border-0">
                         <td className="px-4 py-2 font-medium text-gray-900">{r.fieldName}</td>
@@ -580,20 +604,30 @@ export default async function FarmActivityPage({
                           <span
                             className={
                               "rounded-full px-2 py-0.5 text-xs font-medium " +
-                              (status === "harvested"
+                              (state === "complete"
                                 ? "bg-kelly-50 text-pine-900"
-                                : "bg-gray-100 text-gray-600")
+                                : state === "in_progress"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-gray-100 text-gray-600")
                             }
                           >
-                            {status === "harvested" ? "Harvested" : "Growing"}
+                            {harvestStateLabel(state)}
                           </span>
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums">
-                          {perAcre !== null
-                            ? `${formatNumber(Math.round(perAcre * 10) / 10)} ${yieldUnitLabel(r.data.production_unit)}`
-                            : status === "harvested" && !yieldsShared
-                              ? "Not shared"
-                              : ""}
+                          {perAcre !== null ? (
+                            `${formatNumber(Math.round(perAcre * 10) / 10)} ${yieldUnitLabel(r.data.production_unit)}`
+                          ) : projPerAcre !== null ? (
+                            <span className="text-gray-700">
+                              {formatNumber(Math.round(projPerAcre * 10) / 10)}{" "}
+                              {proj?.unit === "lbs_per_ac" ? "lbs/ac" : "bu/ac"}{" "}
+                              <span className="text-[10px] font-medium uppercase text-amber-700">projected</span>
+                            </span>
+                          ) : state === "complete" && !yieldsShared ? (
+                            "Not shared"
+                          ) : (
+                            ""
+                          )}
                         </td>
                       </tr>
                     );
@@ -660,6 +694,15 @@ function Chips({ rollup, compact = false }: { rollup: Rollup; compact?: boolean 
             <span className="font-medium">{y.crop}</span>{" "}
             <span className="tabular-nums">{formatNumber(Math.round((y.yieldPerAcre ?? 0) * 10) / 10)}</span> {y.unit}{" "}
             <span className="text-pine-900/70">{y.basis}</span>
+            {/* A mid-harvest actual covers only the finished fields; say so. */}
+            {y.basis === "actual" &&
+            y.completeAcres !== null &&
+            y.cropAcres !== null &&
+            y.completeAcres < y.cropAcres - 0.05 ? (
+              <span className="text-pine-900/70">
+                {" "}· {formatAcres(y.completeAcres)} of {formatAcres(y.cropAcres)} ac complete
+              </span>
+            ) : null}
           </span>
         ))
       ) : (

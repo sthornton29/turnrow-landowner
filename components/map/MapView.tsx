@@ -89,7 +89,7 @@ import turfArea from "@turf/area";
 import {
   cropColor,
   cropLegend,
-  harvestStatus,
+  harvestState,
   yieldPerAcre,
   yieldUnitLabel,
   type FarmFieldDataRow,
@@ -592,7 +592,7 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, pas, w, t, r, ue, a, mappings, farmData, connections, ents, cem, iss] = await Promise.all([
+    const [p, pa, f, pas, w, t, r, ue, a, mappings, farmData, projYields, connections, ents, cem, iss] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
@@ -604,6 +604,10 @@ export default function MapView({
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
       supabase.from("field_mappings").select("*").eq("status", "confirmed"),
       supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
+      supabase
+        .from("farm_projected_yields")
+        .select("farm_connection_id, remote_field_id, crop, yield_per_acre, unit")
+        .eq("crop_year", currentYear),
       supabase.from("farm_connections").select("id, label"),
       supabase.from("entities").select("id, name").order("name"),
       supabase.from("cemeteries_geo").select("*").order("name"),
@@ -632,6 +636,24 @@ export default function MapView({
         m,
       ])
     );
+    // The tenant's projected yields, for fields whose harvest is not
+    // complete (shown labeled "projected" in the click panel).
+    const projTextByKey = new Map(
+      (
+        (projYields.data as Array<{
+          farm_connection_id: string;
+          remote_field_id: string;
+          crop: string;
+          yield_per_acre: number | null;
+          unit: string | null;
+        }>) ?? []
+      )
+        .filter((p) => p.yield_per_acre !== null)
+        .map((p) => [
+          `${p.farm_connection_id}|${p.remote_field_id}|${p.crop}`,
+          `${Math.round(Number(p.yield_per_acre) * 10) / 10} ${p.unit === "lbs_per_ac" ? "lbs/ac" : "bu/ac"} projected`,
+        ])
+    );
     const byField: Record<string, FarmActivityInfo[]> = {};
     const byProperty: Record<string, FarmActivityInfo[]> = {};
     const crops: string[] = [];
@@ -644,11 +666,15 @@ export default function MapView({
         color: cropColor(row.crop),
         varieties: (row.varieties ?? []).map((v) => v.variety),
         planting_date: row.planting_date,
-        harvested: harvestStatus(row) === "harvested",
+        state: harvestState(row),
+        // A yield reads ACTUAL only when harvest is complete; otherwise
+        // the tenant's projection, labeled, or nothing.
         yieldText:
           perAcre !== null
             ? `${Math.round(perAcre * 10) / 10} ${yieldUnitLabel(row.production_unit)}`
-            : null,
+            : (projTextByKey.get(
+                `${row.farm_connection_id}|${row.remote_field_id}|${row.crop}`
+              ) ?? null),
         yieldShared: row.yield_shared,
         source: connectionLabel.get(row.farm_connection_id) ?? "Farm connection",
         entity: row.remote_entity_name ?? null,

@@ -15,6 +15,8 @@ import {
   getPlantings,
   getProduction,
   getProjectedYields,
+  type RemotePlanting,
+  type RemoteProduction,
 } from "@/lib/farmApi";
 import { suggestLocalField } from "@/lib/farmDisplay";
 import { normalizeOwnerName } from "@/lib/ownerNames";
@@ -158,6 +160,35 @@ export async function syncTenantsFromEntities(
   return { created, linked };
 }
 
+// The synced columns for one planting and its production row. Pure and
+// exported so the harvest completion flag's round trip is unit tested
+// (farmSync.test.ts): harvest_status stores exactly what the partner API
+// sent, and null when a pre-addendum farm API sends none.
+export function buildFarmFieldRow(
+  planting: RemotePlanting,
+  prod: RemoteProduction | null,
+  yieldShared: boolean
+) {
+  return {
+    remote_field_id: planting.field_id,
+    crop_year: planting.crop_year,
+    crop: planting.crop ?? "",
+    planted_acres: planting.planted_acres ?? null,
+    irrigated_acres: planting.irrigated_acres ?? null,
+    dryland_acres: planting.dryland_acres ?? null,
+    planting_date: planting.planting_date ?? null,
+    varieties: planting.varieties ?? [],
+    harvested_acres: prod?.harvested_acres ?? null,
+    harvest_status: prod?.harvest_status ?? null,
+    production_units: prod?.production_units ?? null,
+    production_unit: prod?.unit ?? null,
+    yield_shared: yieldShared,
+    remote_entity_id: planting.entity_id ?? prod?.entity_id ?? null,
+    remote_entity_name: planting.entity ?? prod?.entity ?? null,
+    payload: { planting, production: prod ?? null },
+  };
+}
+
 export async function syncConnection(
   supabase: AnyClient,
   connection: ConnectionRow
@@ -190,21 +221,8 @@ export async function syncConnection(
         {
           organization_id: connection.organization_id,
           farm_connection_id: connection.id,
-          remote_field_id: planting.field_id,
+          ...buildFarmFieldRow(planting, prod ?? null, Boolean(handshake.scopes?.yields)),
           crop_year: year,
-          crop,
-          planted_acres: planting.planted_acres ?? null,
-          irrigated_acres: planting.irrigated_acres ?? null,
-          dryland_acres: planting.dryland_acres ?? null,
-          planting_date: planting.planting_date ?? null,
-          varieties: planting.varieties ?? [],
-          harvested_acres: prod?.harvested_acres ?? null,
-          production_units: prod?.production_units ?? null,
-          production_unit: prod?.unit ?? null,
-          yield_shared: Boolean(handshake.scopes?.yields),
-          remote_entity_id: planting.entity_id ?? prod?.entity_id ?? null,
-          remote_entity_name: planting.entity ?? prod?.entity ?? null,
-          payload: { planting, production: prod ?? null },
           synced_at: new Date().toISOString(),
         },
         { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }

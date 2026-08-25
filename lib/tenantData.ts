@@ -5,7 +5,7 @@
 // tenantData.test.ts.
 
 import { canonicalCrop, matchCrop, sameCrop } from "@/lib/crops";
-import type { FarmFieldDataRow } from "@/lib/farmDisplay";
+import { harvestState, type FarmFieldDataRow } from "@/lib/farmDisplay";
 import {
   priceScopeLabel,
   selectPriceRows,
@@ -154,13 +154,18 @@ export function buildTenantCropRows(args: {
     }
     const matchedLeaseCrop = matchCrop(crop, leaseCrops);
 
-    // Actual yield once harvested with shared production. Actuals carry
-    // no practice breakout on the partner API, so this is always ONE
-    // blended row; we never fabricate a split.
+    // Actual yield ONLY once every field's harvest is complete for this
+    // crop (production over harvested acres). Mid-harvest, a partial
+    // figure would read artificially low, so the crop stays on the
+    // projected path (labeled PROJECTED) until the last field finishes.
+    // Actuals carry no practice breakout on the partner API, so this is
+    // always ONE blended row; we never fabricate a split.
+    const allComplete =
+      rows.length > 0 && rows.every((r) => harvestState(r) === "complete");
     const harvested = rows.filter(
       (r) => r.production_units !== null && (r.harvested_acres ?? 0) > 0
     );
-    if (harvested.length > 0) {
+    if (allComplete && harvested.length > 0) {
       const units = harvested.reduce((s, r) => s + (r.production_units ?? 0), 0);
       const acres = harvested.reduce((s, r) => s + (r.harvested_acres ?? 0), 0);
       if (acres > 0 && units > 0) {

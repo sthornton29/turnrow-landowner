@@ -1,4 +1,4 @@
-import type { FarmFieldDataRow, FieldMappingRow } from "@/lib/farmDisplay";
+import { harvestState, type FarmFieldDataRow, type FieldMappingRow } from "@/lib/farmDisplay";
 
 // Summary rollups for the Farm Data page: acres in crops, crop mix,
 // harvest progress, and (where the tenant shares them) yields and
@@ -63,6 +63,12 @@ export interface CropYield {
   yieldPerAcre: number | null;
   unit: string | null; // "bu/ac" | "lbs/ac"
   basis: "actual" | "projected" | null;
+  // Actual basis only: the acres behind the figure (harvest-complete
+  // fields with shared production) and the crop's total planted acres.
+  // When completeAcres < cropAcres the UI shows "X of Y ac complete"
+  // beside the number; the figure never blends in-progress fields.
+  completeAcres: number | null;
+  cropAcres: number | null;
 }
 
 // A tenant as the farm data names it: the farming entity of one
@@ -215,7 +221,9 @@ function build(
   for (const it of rows) {
     const a = num(it.row.planted_acres);
     planted += a;
-    harvested += num(it.row.harvested_acres);
+    // Progress counts only harvest-complete fields; an in-progress
+    // field's harvested acres are unknown (the farm side sends 0).
+    if (harvestState(it.row) === "complete") harvested += num(it.row.harvested_acres);
     if (it.propertyId) props.add(it.propertyId);
     else unmapped += a;
     conns.add(it.row.farm_connection_id);
@@ -230,26 +238,42 @@ function build(
   const sharedYields = involved.some((c) => c.scopes?.yields || c.scopes?.projected_yields);
   const sharedPrices = involved.some((c) => c.scopes?.projected_prices);
 
-  // Yields per crop: actual (acres-weighted production / harvested
-  // acres) when any row carries production, else the tenant's
-  // projected yields weighted by planted acres, else null.
+  // Yields per crop: the ACTUAL figure aggregates ONLY harvest-complete
+  // fields (production weighted by their harvested acres); in-progress
+  // fields never blend in (their partial production would drag it
+  // down). With no complete field, the tenant's projected yields
+  // weighted by planted acres, else null. completeAcres/cropAcres let
+  // the UI say "X of Y ac complete" beside a partial-season actual.
   const projByKey = new Map(
     input.projectedYields.map((p) => [`${p.farm_connection_id}|${p.remote_field_id}|${p.crop}`, p])
   );
   const yieldByCrop: CropYield[] = cropMix.map(({ crop }) => {
     const cropRows = rows.filter((r) => (r.row.crop || "Unknown") === crop);
+    const cropAcres = cropRows.reduce((s, r) => s + num(r.row.planted_acres), 0);
     let prodUnits = 0;
     let prodAcres = 0;
     let prodUnit: string | null = null;
     for (const r of cropRows) {
-      if (r.row.production_units !== null && r.row.production_units !== undefined && num(r.row.harvested_acres) > 0) {
+      if (
+        harvestState(r.row) === "complete" &&
+        r.row.production_units !== null &&
+        r.row.production_units !== undefined &&
+        num(r.row.harvested_acres) > 0
+      ) {
         prodUnits += num(r.row.production_units);
         prodAcres += num(r.row.harvested_acres);
         prodUnit = prodUnit ?? unitLabel(r.row.production_unit) ?? "bu/ac";
       }
     }
     if (prodAcres > 0) {
-      return { crop, yieldPerAcre: prodUnits / prodAcres, unit: prodUnit, basis: "actual" };
+      return {
+        crop,
+        yieldPerAcre: prodUnits / prodAcres,
+        unit: prodUnit,
+        basis: "actual" as const,
+        completeAcres: prodAcres,
+        cropAcres,
+      };
     }
     let wSum = 0;
     let wAcres = 0;
@@ -263,8 +287,9 @@ function build(
       wAcres += acres;
       pUnit = pUnit ?? unitLabel(p.unit);
     }
-    if (wAcres > 0) return { crop, yieldPerAcre: wSum / wAcres, unit: pUnit ?? "bu/ac", basis: "projected" };
-    return { crop, yieldPerAcre: null, unit: null, basis: null };
+    if (wAcres > 0)
+      return { crop, yieldPerAcre: wSum / wAcres, unit: pUnit ?? "bu/ac", basis: "projected" as const, completeAcres: null, cropAcres: null };
+    return { crop, yieldPerAcre: null, unit: null, basis: null, completeAcres: null, cropAcres: null };
   });
 
   const cropSet = new Set(cropMix.map((c) => c.crop));

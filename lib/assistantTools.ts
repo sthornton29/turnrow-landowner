@@ -422,9 +422,11 @@ const farmActivity: ToolImpl = async (supabase, input) => {
     all<{
       farm_connection_id: string; remote_field_id: string; crop_year: number; crop: string;
       planted_acres: number | null; irrigated_acres: number | null; dryland_acres: number | null;
-      planting_date: string | null; harvested_acres: number | null; production_units: number | null;
+      planting_date: string | null; harvested_acres: number | null;
+      harvest_status: "complete" | "in_progress" | "unharvested" | null;
+      production_units: number | null;
       production_unit: string | null; yield_shared: boolean;
-    }>(supabase.from("farm_field_data").select("farm_connection_id, remote_field_id, crop_year, crop, planted_acres, irrigated_acres, dryland_acres, planting_date, harvested_acres, production_units, production_unit, yield_shared").eq("crop_year", year)),
+    }>(supabase.from("farm_field_data").select("farm_connection_id, remote_field_id, crop_year, crop, planted_acres, irrigated_acres, dryland_acres, planting_date, harvested_acres, harvest_status, production_units, production_unit, yield_shared").eq("crop_year", year)),
     all<{ farm_connection_id: string; remote_field_id: string; remote_name: string | null; local_field_id: string | null; local_property_id: string | null; status: string }>(
       supabase.from("field_mappings").select("farm_connection_id, remote_field_id, remote_name, local_field_id, local_property_id, status").eq("status", "confirmed")
     ),
@@ -443,11 +445,21 @@ const farmActivity: ToolImpl = async (supabase, input) => {
     const m = mapping.get(mapKey(d.farm_connection_id, d.remote_field_id));
     const local = m?.local_field_id ? fieldById.get(m.local_field_id) : null;
     const propertyId = local?.property_id ?? m?.local_property_id ?? null;
+    // The farm software's own classification; pre-status rows fall back
+    // to the old harvested-acres inference.
+    const harvestStatus =
+      d.harvest_status ?? (num(d.harvested_acres) > 0 ? "complete" : "unharvested");
+    // An ACTUAL yield exists only once harvest is complete: production
+    // over harvested acres. Mid-harvest production never divides.
     const yieldPerAcre =
-      d.yield_shared && d.production_units !== null && num(d.harvested_acres) > 0
+      harvestStatus === "complete" &&
+      d.yield_shared &&
+      d.production_units !== null &&
+      num(d.harvested_acres) > 0
         ? r1(num(d.production_units) / num(d.harvested_acres))
         : null;
     return {
+      harvest_status: harvestStatus,
       tenant: connName.get(d.farm_connection_id) ?? "Tenant",
       field: local?.name ?? m?.remote_name ?? d.remote_field_id,
       property: propertyId ? (propName.get(propertyId) ?? null) : null,
@@ -476,7 +488,7 @@ const farmActivity: ToolImpl = async (supabase, input) => {
     connections: connections.map((c) => ({ name: c.operation_name ?? c.label, status: c.status, last_synced_at: c.last_synced_at })),
     by_crop: byCrop,
     fields: rows,
-    note: "Yields show only when the farmer chose to share them. Unmapped fields are shared by the tenant but not yet matched to your land.",
+    note: "Yields show only when the farmer chose to share them, and yield_per_acre is an ACTUAL only when harvest_status is complete; in-progress fields report production to date but no yield. Unmapped fields are shared by the tenant but not yet matched to your land.",
   };
 };
 

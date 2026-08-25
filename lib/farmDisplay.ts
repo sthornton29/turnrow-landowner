@@ -14,6 +14,11 @@ export interface FarmFieldDataRow {
   planting_date: string | null;
   varieties: Array<{ variety: string; acres: number }>;
   harvested_acres: number | null;
+  // From the partner API's /production harvest_status (migration 0033):
+  // the same complete / in_progress / unharvested classification the
+  // tenant's own Yields page shows. Null on rows synced before the farm
+  // side sent it (harvestState falls back to the old inference).
+  harvest_status?: "complete" | "in_progress" | "unharvested" | null;
   production_units: number | null;
   production_unit: string | null;
   yield_shared: boolean;
@@ -81,12 +86,33 @@ export function cropLegend(
 
 // ---------------------------------------------------------------- harvest
 
-export function harvestStatus(row: FarmFieldDataRow): "harvested" | "growing" {
-  return (row.harvested_acres ?? 0) > 0 ? "harvested" : "growing";
+// The one rule for a field x crop's harvest state, used by every yield
+// display: complete (harvest done, production is the actual), in_progress
+// (being cut; partial production must never present as an actual), or
+// growing (nothing harvested yet). Rows synced before the farm API sent
+// harvest_status fall back to the old inference: any harvested acres
+// means done.
+export type HarvestState = "complete" | "in_progress" | "growing";
+
+export function harvestState(row: FarmFieldDataRow): HarvestState {
+  const s = row.harvest_status ?? null;
+  if (s === "complete") return "complete";
+  if (s === "in_progress") return "in_progress";
+  if (s === "unharvested") return "growing";
+  return (row.harvested_acres ?? 0) > 0 ? "complete" : "growing";
 }
 
+export function harvestStateLabel(state: HarvestState): string {
+  return state === "complete" ? "Harvested" : state === "in_progress" ? "Harvesting" : "Growing";
+}
+
+// ACTUAL yield per acre: production over HARVESTED acres, and only once
+// the field x crop is harvest-complete. An in-progress field returns
+// null here (its partial production would read artificially low); show
+// its harvest state and the projected yield instead.
 export function yieldPerAcre(row: FarmFieldDataRow): number | null {
   if (
+    harvestState(row) !== "complete" ||
     row.production_units === null ||
     !row.harvested_acres ||
     row.harvested_acres <= 0

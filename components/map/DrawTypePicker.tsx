@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { EASEMENT_CATEGORY_COLORS } from "@/lib/easements";
 import {
   ISSUE_DEFAULT_KIND,
@@ -66,6 +66,130 @@ const SHAPE_OPTIONS: Array<{ key: IssueGeometryKind; label: string; hint: string
   { key: "area", label: "Area", hint: "Trace the washed or damaged ground" },
 ];
 
+// Add a zero-width break opportunity after each "/" so a label like
+// "Pasture/Grassland" wraps between its words instead of escaping the
+// card (browsers do not break lines at a slash on their own). The label
+// text itself is unchanged.
+function breakableLabel(label: string): string {
+  return label.replaceAll("/", "/​");
+}
+
+// One picker card. The title wraps to a second line when it needs to
+// (grid rows equalize height, content pinned to the top); the hint
+// clamps to ONE line with an ellipsis, with the full text on hover
+// (title tooltip) or touch long-press (the bubble). A long-press never
+// also picks the card.
+function PickerCard({
+  onClick,
+  leading,
+  label,
+  hint,
+  className = "border-gray-300 hover:bg-kelly-50",
+}: {
+  onClick: () => void;
+  leading?: ReactNode;
+  label: string;
+  hint: string;
+  className?: string;
+}) {
+  const [hintOpen, setHintOpen] = useState(false);
+  const pressTimer = useRef<number | null>(null);
+  const hideTimer = useRef<number | null>(null);
+  const suppressClick = useRef(false);
+
+  const beginPress = () => {
+    if (hideTimer.current) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      suppressClick.current = true;
+      setHintOpen(true);
+    }, 450);
+  };
+  const endPress = () => {
+    if (pressTimer.current) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    // Leave the bubble up briefly after the finger lifts so it can be read.
+    if (hintOpen && !hideTimer.current) {
+      hideTimer.current = window.setTimeout(() => {
+        hideTimer.current = null;
+        setHintOpen(false);
+      }, 2200);
+    }
+  };
+
+  return (
+    <button
+      onClick={() => {
+        // A long-press opened the hint; that gesture is not a pick.
+        if (suppressClick.current) {
+          suppressClick.current = false;
+          return;
+        }
+        onClick();
+      }}
+      onTouchStart={beginPress}
+      onTouchEnd={endPress}
+      onTouchMove={endPress}
+      onTouchCancel={endPress}
+      onContextMenu={(e) => {
+        // The long-press hint replaces the browser callout on touch.
+        if (hintOpen || pressTimer.current) e.preventDefault();
+      }}
+      className={
+        "relative flex select-none items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left " +
+        className
+      }
+    >
+      {leading}
+      <span className="min-w-0 flex-1">
+        <span className="block break-words text-sm font-semibold leading-snug text-gray-900">
+          {breakableLabel(label)}
+        </span>
+        <span className="block truncate text-xs text-gray-500" title={hint}>
+          {hint}
+        </span>
+      </span>
+      {hintOpen ? (
+        <span className="pointer-events-none absolute inset-x-0 bottom-full z-10 mb-1.5 whitespace-normal rounded-lg bg-gray-900 px-2.5 py-1.5 text-xs font-normal leading-snug text-white shadow-lg">
+          {hint}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function FillOrLineSwatch({ color, swatch }: { color: string; swatch: "fill" | "line" }) {
+  return (
+    <span
+      className={
+        // Rows align to the top so wrapped titles read cleanly; the thin
+        // line swatch nudges down to sit centered on the first line.
+        "shrink-0 rounded-[3px] border " + (swatch === "fill" ? "h-5 w-5" : "mt-1.5 h-1.5 w-5")
+      }
+      style={{
+        background: swatch === "fill" ? color + "66" : color,
+        borderColor: color === "#ffffff" ? PINE : color,
+      }}
+    />
+  );
+}
+
+function IssueBang() {
+  return (
+    <span
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+      style={{ background: ISSUE_AMBER }}
+    >
+      !
+    </span>
+  );
+}
+
 export default function DrawTypePicker({
   onPick,
   onCancel,
@@ -110,7 +234,10 @@ export default function DrawTypePicker({
   );
 
   return (
-    <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[75%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:left-3 md:top-3 md:bottom-auto md:w-80 md:rounded-xl md:border">
+    // Phone: bottom sheet capped at 75% of the viewport, scrolling
+    // inside. Desktop: floating panel with its own height cap so a short
+    // window scrolls the list instead of clipping the bottom cards.
+    <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[75%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:left-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-1.5rem)] md:w-80 md:rounded-xl md:border">
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">{heading}</h2>
@@ -129,77 +256,60 @@ export default function DrawTypePicker({
 
       {step === "easement" ? (
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
+          <PickerCard
             onClick={() => onPick({ kind: "line", entityType: "easement", shape: "line" })}
-            className="rounded-xl border border-gray-300 px-3 py-3 text-left hover:bg-kelly-50"
-          >
-            <span className="block text-sm font-semibold text-gray-900">Line</span>
-            <span className="block text-xs text-gray-500">Centerline; shows length, width is a note</span>
-          </button>
-          <button
+            label="Line"
+            hint="Centerline; shows length, width is a note"
+          />
+          <PickerCard
             onClick={() => onPick({ kind: "boundary", entityType: "easement", shape: "polygon" })}
-            className="rounded-xl border border-gray-300 px-3 py-3 text-left hover:bg-kelly-50"
-          >
-            <span className="block text-sm font-semibold text-gray-900">Area</span>
-            <span className="block text-xs text-gray-500">Strip, pool, or tract; shows acres</span>
-          </button>
+            label="Area"
+            hint="Strip, pool, or tract; shows acres"
+          />
           {back}
         </div>
       ) : step === "cemetery" ? (
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
+          <PickerCard
             onClick={() => onPick({ kind: "boundary", entityType: "cemetery" })}
-            className="rounded-xl border border-gray-300 px-3 py-3 text-left hover:bg-kelly-50"
-          >
-            <span className="block text-sm font-semibold text-gray-900">Draw the plot</span>
-            <span className="block text-xs text-gray-500">Trace the fence or the edge; shows acres</span>
-          </button>
-          <button
+            label="Draw the plot"
+            hint="Trace the fence or the edge; shows acres"
+          />
+          <PickerCard
             onClick={() => onPick({ kind: "pin", entityType: "cemetery" })}
-            className="rounded-xl border border-gray-300 px-3 py-3 text-left hover:bg-kelly-50"
-          >
-            <span className="block text-sm font-semibold text-gray-900">Drop a pin</span>
-            <span className="block text-xs text-gray-500">One marker; the crosshair</span>
-          </button>
+            label="Drop a pin"
+            hint="One marker; the crosshair"
+          />
           {back}
         </div>
       ) : step === "issue" ? (
         issueType ? (
           <div className="mt-3 grid grid-cols-3 gap-2">
             {SHAPE_OPTIONS.map((o) => (
-              <button
+              <PickerCard
                 key={o.key}
                 onClick={() => onPick({ kind: "issue", entityType: "maintenance_issue", issueType, shape: o.key })}
+                label={o.label}
+                hint={o.hint}
                 className={
-                  "rounded-xl border px-3 py-3 text-left hover:bg-amber-50 " +
+                  "hover:bg-amber-50 " +
                   (ISSUE_DEFAULT_KIND[issueType] === o.key ? "border-amber-400 bg-amber-50" : "border-gray-300")
                 }
-              >
-                <span className="block text-sm font-semibold text-gray-900">{o.label}</span>
-                <span className="block text-xs text-gray-500">{o.hint}</span>
-              </button>
+              />
             ))}
             <div className="col-span-3">{back}</div>
           </div>
         ) : (
           <div className="mt-3 grid grid-cols-2 gap-2">
             {ISSUE_TYPES.map((t) => (
-              <button
+              <PickerCard
                 key={t}
                 onClick={() => setIssueType(t)}
-                className="flex items-center gap-2.5 rounded-xl border border-amber-300 px-3 py-2.5 text-left hover:bg-amber-50"
-              >
-                <span
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                  style={{ background: ISSUE_AMBER }}
-                >
-                  !
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-gray-900">{ISSUE_TYPE_LABELS[t]}</span>
-                  <span className="block truncate text-xs text-gray-500">{ISSUE_TYPE_HINTS[t]}</span>
-                </span>
-              </button>
+                leading={<IssueBang />}
+                label={ISSUE_TYPE_LABELS[t]}
+                hint={ISSUE_TYPE_HINTS[t]}
+                className="border-amber-300 hover:bg-amber-50"
+              />
             ))}
             {back}
           </div>
@@ -208,7 +318,7 @@ export default function DrawTypePicker({
         <>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {CHOICES.map((c) => (
-              <button
+              <PickerCard
                 key={c.key}
                 onClick={() =>
                   c.pick === "easement"
@@ -217,42 +327,21 @@ export default function DrawTypePicker({
                       ? setStep("cemetery")
                       : onPick(c.pick)
                 }
-                className="flex items-center gap-2.5 rounded-xl border border-gray-300 px-3 py-2.5 text-left hover:bg-kelly-50"
-              >
-                <span
-                  className={
-                    "shrink-0 rounded-[3px] border " +
-                    (c.swatch === "fill" ? "h-5 w-5" : "h-1.5 w-5")
-                  }
-                  style={{
-                    background: c.swatch === "fill" ? c.color + "66" : c.color,
-                    borderColor: c.color === "#ffffff" ? PINE : c.color,
-                  }}
-                />
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-gray-900">{c.label}</span>
-                  <span className="block truncate text-xs text-gray-500">{c.hint}</span>
-                </span>
-              </button>
+                leading={<FillOrLineSwatch color={c.color} swatch={c.swatch} />}
+                label={c.label}
+                hint={c.hint}
+              />
             ))}
           </div>
           <div className="mt-3 border-t border-gray-200 pt-3">
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-800">Needs attention</p>
-            <button
+            <PickerCard
               onClick={() => setStep("issue")}
-              className="flex w-full items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50/60 px-3 py-2.5 text-left hover:bg-amber-50"
-            >
-              <span
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                style={{ background: ISSUE_AMBER }}
-              >
-                !
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-gray-900">Maintenance issue</span>
-                <span className="block truncate text-xs text-gray-500">Wash, sinkhole, broken terrace, road washout, other</span>
-              </span>
-            </button>
+              leading={<IssueBang />}
+              label="Maintenance issue"
+              hint="Wash, sinkhole, broken terrace, road washout, other"
+              className="w-full border-amber-300 bg-amber-50/60 hover:bg-amber-50"
+            />
           </div>
         </>
       )}

@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-22, version 0.1.0, build 9a31b98. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-25, version 0.1.0, build ea8fe26. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -239,9 +239,13 @@ Everything connected tenants have shared, by crop year, at three levels.
 
 **The summary at the top** rolls the year up by entity (how your land is held) and by tenant (each farm connection). Each card shows the acres in crops, the crop mix (acres per crop, with a colored bar), harvest progress (acres harvested of acres planted), and, when the farmer shares them, a projected or actual yield per crop and their crop prices. A "No entity" card covers land not assigned to an entity. An organization with one entity and one tenant sees a single card instead of two sections.
 
-**Tap a card** to drill in. The page narrows to that entity or tenant and lists its properties as rows with the same numbers. Tap a property to see its fields: the crop on each mapped field, varieties, planting date, whether it is harvested, and yield when shared. Breadcrumbs at the top step back up, and the filters follow along (drilling in sets the entity, connection, or property filter; clearing a filter returns to the summary).
+**Tap a card** to drill in. The page narrows to that entity or tenant and lists its properties as rows with the same numbers. Tap a property to see its fields: the crop on each mapped field, varieties, planting date, its harvest status (Growing, Harvesting, or Harvested), and yield when shared. Breadcrumbs at the top step back up, and the filters follow along (drilling in sets the entity, connection, or property filter; clearing a filter returns to the summary).
 
 The card totals are sums of the field rows beneath them, so they always agree.
+
+## Actual vs projected during harvest
+
+A yield reads ACTUAL only once the field's harvest is complete, matching how your tenant's own software treats it. A field still being cut shows Harvesting and the projected yield instead, because dividing a partial harvest over the whole field would read artificially low. A crop's actual on a summary card averages only the finished fields, with "X of Y ac complete" beside it while others are still going; it never quietly blends in unfinished fields.
 
 The Map's Crops layer colors ag fields by the same data for the current year.
 

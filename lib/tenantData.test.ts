@@ -240,6 +240,50 @@ describe("buildTenantCropRows", () => {
   });
 });
 
+describe("harvest completion gating (migration 0033)", () => {
+  it("stays on the projected path, labeled, while any field is still harvesting", () => {
+    const rows = buildTenantCropRows({
+      ...base,
+      farmData: [
+        planting({ remote_field_id: "f1", planted_acres: 60, harvest_status: "complete", harvested_acres: 60, production_units: 12000, production_unit: "bu" }),
+        planting({ remote_field_id: "f2", planted_acres: 40, harvest_status: "in_progress", harvested_acres: 0, production_units: 3000, production_unit: "bu" }),
+      ],
+      projectedYields: [projYield({ remote_field_id: "f2", planted_acres: 40, yield_per_acre: 130 })],
+      prices: [],
+    });
+    // The "use actual" helper is gated by basis: mid-harvest it can only
+    // offer the projected number, never a partial actual.
+    expect(rows[0].plantedAcres).toBe(100);
+    expect(rows[0].yieldCell).toMatchObject({ basis: "projected", value: 130 });
+  });
+
+  it("turns actual once every field is complete: production over harvested acres", () => {
+    const rows = buildTenantCropRows({
+      ...base,
+      farmData: [
+        planting({ remote_field_id: "f1", planted_acres: 60, harvest_status: "complete", harvested_acres: 60, production_units: 12000, production_unit: "bu" }),
+        planting({ remote_field_id: "f2", planted_acres: 40, harvest_status: "complete", harvested_acres: 40, production_units: 5200, production_unit: "bu" }),
+      ],
+      projectedYields: [],
+      prices: [],
+    });
+    // (12000 + 5200) / (60 + 40)
+    expect(rows[0].yieldCell).toMatchObject({ basis: "actual", value: 172 });
+  });
+
+  it("never computes a partial actual from a lone in-progress field", () => {
+    const rows = buildTenantCropRows({
+      ...base,
+      farmData: [
+        planting({ harvest_status: "in_progress", harvested_acres: 0, production_units: 4000, production_unit: "bu" }),
+      ],
+      projectedYields: [],
+      prices: [],
+    });
+    expect(rows[0].yieldCell).toBeNull();
+  });
+});
+
 describe("tenant farming entity prices (migration 0031)", () => {
   const op = { farm_connection_id: "conn1", crop_year: 2026, crop: "Wheat", projected_avg_price: 5.5, unit: "usd_per_bu", is_final: false, as_of: "2026-08-01", remote_entity_id: null, remote_entity_name: null };
   const ent = { ...op, projected_avg_price: 6.1, remote_entity_id: "ent-a", remote_entity_name: "Albemarle Farms" };

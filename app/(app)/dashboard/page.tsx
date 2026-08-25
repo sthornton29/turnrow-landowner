@@ -86,7 +86,7 @@ export default async function DashboardPage({
       .not("parcel_id", "is", null),
     supabase
       .from("farm_field_data")
-      .select("planted_acres, harvested_acres")
+      .select("planted_acres, harvested_acres, harvest_status")
       .eq("crop_year", new Date().getFullYear()),
   ]);
 
@@ -195,10 +195,25 @@ export default async function DashboardPage({
         ? "border-amber-100 bg-amber-50 text-amber-900"
         : "border-gray-100 bg-white text-gray-900";
 
-  // Harvest progress card (shown during harvest: acres are being cut)
+  // Harvest progress card (shown during harvest: acres are being cut).
+  // Harvested counts only harvest-COMPLETE fields; fields mid-harvest
+  // (harvest_status in_progress) show as their own acres line. Rows
+  // synced before the farm API sent statuses fall back to the old
+  // harvested-acres inference.
   const farmPlanted = (farmData ?? []).reduce((s, d) => s + (d.planted_acres ?? 0), 0);
-  const farmHarvested = (farmData ?? []).reduce((s, d) => s + (d.harvested_acres ?? 0), 0);
-  const showHarvestCard = farmHarvested > 0 && farmPlanted > 0;
+  const farmHarvested = (farmData ?? []).reduce(
+    (s, d) =>
+      s +
+      ((d.harvest_status ?? ((d.harvested_acres ?? 0) > 0 ? "complete" : null)) === "complete"
+        ? (d.harvested_acres ?? 0)
+        : 0),
+    0
+  );
+  const farmInProgress = (farmData ?? []).reduce(
+    (s, d) => s + (d.harvest_status === "in_progress" ? (d.planted_acres ?? 0) : 0),
+    0
+  );
+  const showHarvestCard = (farmHarvested > 0 || farmInProgress > 0) && farmPlanted > 0;
   const harvestPct = showHarvestCard
     ? Math.min(Math.round((farmHarvested / farmPlanted) * 100), 100)
     : 0;
@@ -289,7 +304,12 @@ export default async function DashboardPage({
               <span className="font-semibold tabular-nums text-gray-900">
                 {formatAcres(farmPlanted)}
               </span>{" "}
-              connected acres harvested ({harvestPct}%)
+              connected acres harvest-complete ({harvestPct}%)
+              {farmInProgress > 0 ? (
+                <span className="text-gray-600">
+                  {" "}· {formatAcres(farmInProgress)} ac being harvested
+                </span>
+              ) : null}
             </p>
             <div className="h-2 overflow-hidden rounded-full bg-gray-100">
               <div
