@@ -7,6 +7,7 @@ import {
   ROAD_TYPE_LABELS,
   STAND_TYPE_LABELS,
 } from "@/lib/assetTypes";
+import { easementTypeLabel } from "@/lib/easements";
 import { formatDollars } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import type { AssetType } from "@/types/db";
@@ -52,6 +53,7 @@ export default async function PropertyDetailPage({
     { data: roads },
     { data: assets },
     { data: cemeteries },
+    { data: easementRows },
   ] = await Promise.all([
     supabase
       .from("parcels")
@@ -91,6 +93,15 @@ export default async function PropertyDetailPage({
     supabase
       .from("cemeteries")
       .select("id, name, notes, acres")
+      .eq("property_id", id)
+      .order("name"),
+    // The view carries both geometries' measures: miles for line
+    // easements, acres for area easements (the other is null).
+    supabase
+      .from("easements_geo")
+      .select(
+        "id, name, easement_type, relationship, holder, recorded_ref, expiration_date, width_ft, elevation_ft, program, restrictions, notes, acres, miles"
+      )
       .eq("property_id", id)
       .order("name"),
   ]);
@@ -544,6 +555,56 @@ export default async function PropertyDetailPage({
             currentPropertyId={property.id}
           />
         </div>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-lg font-semibold text-gray-900">
+          Easements{" "}
+          <span className="text-sm font-normal text-gray-500">
+            {formatNumber((easementRows ?? []).length)}
+          </span>
+        </h2>
+        {(easementRows ?? []).length === 0 ? (
+          <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
+            No easements recorded on this property yet. Draw one on the map
+            (Add, then Easement).
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {(easementRows ?? []).map((e) => (
+              <li key={e.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Link
+                    href={`/easements/${e.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {e.name}
+                  </Link>
+                  <span className="text-sm text-pine-900">
+                    {e.miles != null
+                      ? `${e.miles.toFixed(2)} mi`
+                      : e.acres != null
+                        ? `${formatAcres(e.acres)} ac`
+                        : ""}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500">
+                  {[
+                    easementTypeLabel(e.easement_type),
+                    e.holder,
+                    e.relationship === "benefits_this_property"
+                      ? "benefits this property"
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                {e.notes ? <p className="mt-1 text-sm text-gray-600">{e.notes}</p> : null}
+                <RowEditor entityType="easement" row={e} />
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section>

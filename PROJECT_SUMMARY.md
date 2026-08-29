@@ -18,7 +18,16 @@ and lib/geo/drawArea.ts hardened against the null placeholder vertex
 a brand-new draw shape renders with (it threw on every polygon draw
 start; regression test added). Help topics for map, drawing, assets,
 maintenance, easements, and timber updated to the one-step flow. No
-migration.)
+migration. Same day, LINE EASEMENTS MADE VISIBLE: MapView's geomOf
+returned the polygon key's null for every line easement (easement rows
+carry BOTH geometry keys, one null), so a line easement saved fine but
+NEVER rendered on the map; it now returns whichever geometry is set,
+which flows through rowsToFC to the live map, the print renderer, the
+click panel, and editing. The bug hid because every easement before
+2026-08-29 was a polygon. And the property page gained the EASEMENTS
+section the help topic already promised (easements_geo by property_id:
+name linking to /easements/[id], miles for lines / acres for areas,
+type label, holder, a benefits-this-property note, RowEditor).)
 Earlier, 2026-08-25: harvest completion (the farm software's
 partner API now sends harvest_status per field x crop on /production
 (the same complete / in_progress / unharvested classification its own

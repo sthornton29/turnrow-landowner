@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-29, version 0.1.0, build 447ea00. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-29, version 0.1.0, build 969e2cc. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 

@@ -234,9 +234,13 @@ function loadLayerVisibility(): LayerVisibility {
 }
 
 function geomOf(row: AnyGeoRow): Geometry | null {
-  if ("boundary_geojson" in row) return row.boundary_geojson;
-  if ("geom_geojson" in row) return row.geom_geojson;
-  return null;
+  // Easement rows carry BOTH geometry keys (line OR polygon per
+  // easement, the other null): return whichever is SET. Checking key
+  // presence alone returned the polygon key's null for every line
+  // easement, so line easements never rendered.
+  const b = "boundary_geojson" in row ? row.boundary_geojson : null;
+  const g = "geom_geojson" in row ? row.geom_geojson : null;
+  return b ?? g ?? null;
 }
 
 function nameOf(row: AnyGeoRow, entityType: EntityType): string {
