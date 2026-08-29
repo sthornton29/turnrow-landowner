@@ -41,6 +41,14 @@ describe("drawAreaReadout", () => {
     expect(r.active!.acres).toBeCloseTo(r.completed[0].acres, 0);
     expect(r.total).toBeCloseTo(r.completed[0].acres + r.active!.acres, 6);
   });
+  it("survives the null placeholder vertex a brand-new shape renders with", () => {
+    // mapbox-gl-draw's first render after draw_polygon starts, before
+    // the first point goes down.
+    const fresh = { type: "Polygon", coordinates: [[null]] } as unknown as Geometry;
+    const r = drawAreaReadout([{ id: "live", geometry: fresh }], new Set());
+    expect(r.active).toBeNull();
+    expect(r.total).toBe(0);
+  });
   it("gives a line no area", () => {
     const line: Geometry = { type: "LineString", coordinates: [[-87.3, 34.65], [-87.29, 34.66]] };
     expect(shapeAcres(line)).toBe(0);

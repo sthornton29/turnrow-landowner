@@ -50,5 +50,5 @@ export interface LayerVisibility {
   maintenance_issue: boolean;
 }
 
-// Pick-first draw sessions: what the Add menu chose (components/map/
-// DrawTypePicker.tsx) fixes the draw tool, draft color, and save form.
+// Pick-first draw sessions: what the Add picker chose (components/map/
+// AddPicker.tsx) fixes the draw tool, draft color, and save form.

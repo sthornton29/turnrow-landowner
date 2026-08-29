@@ -3,7 +3,7 @@ title: The map
 route: /map
 group: Map
 order: 1
-updated: 2026-08-20
+updated: 2026-08-29
 keywords: map, satellite, layers, legend, parcels, ag fields, pastures, grassland, cemeteries, wetlands, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
 ---
 ## What this page is for
@@ -31,7 +31,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 - **Zoom all** fits everything you own on screen.
 - **Fullscreen** hides the app frame; on a phone the panels stay usable.
 - **Print** (top right) makes a PDF of the framed area. See the Printing topic.
-- **+ Add** starts drawing or placing. See the Drawing and Assets topics.
+- **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics.
 
 ## Common questions
 

@@ -3,12 +3,12 @@ title: Drawing boundaries, roads, and easements
 route: /map
 group: Map
 order: 2
-updated: 2026-08-20
-keywords: draw, boundary, polygon, line, add, property boundary, parcel, ag field, timber stand, pasture, grassland, cemetery, wetland, road, fence, pipe, easement, maintenance issue, wash, sinkhole, terrace, washout, multi-area, add area, cut area, discard shape, cancel, escape, edit boundary, split
+updated: 2026-08-29
+keywords: draw, boundary, polygon, line, add, filter, property boundary, parcel, ag field, timber stand, pasture, grassland, cemetery, wetland, road, fence, pipe, easement, maintenance issue, wash, sinkhole, terrace, washout, multi-area, add area, cut area, discard shape, cancel, escape, edit boundary, split
 ---
 ## Pick first, then draw
 
-Tap **+ Add** then **Draw**. A picker asks what you are drawing: Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery (then Draw the plot or Drop a pin), Road, Easement (then Line or Area), Fence, or Underground pipe, and at the bottom, under Needs attention, a Maintenance issue. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
 
 ## Drawing a shape
 
@@ -36,5 +36,5 @@ Tap a feature and choose **Edit boundary** or **Edit line**. Drag the points, or
 ## Common questions
 
 - **Line or area for an easement?** A line when you know the centerline (a powerline, an access lane); it shows length, and width is a note. An area when you know the strip, the flowage pool, or the conservation tract; it shows acres.
-- **Where did Pipe and Fence go?** They are in the Draw picker. Your own buried irrigation pipe is an asset; a pipeline company's corridor is an easement.
+- **Where did Pipe and Fence go?** Fence is under Lines and corridors and Underground pipe under Assets; both draw as lines. Your own buried irrigation pipe is an asset; a pipeline company's corridor is an easement.
 - **The wrong type is selected.** Cancel the session and pick again. The type cannot change mid-session on purpose.

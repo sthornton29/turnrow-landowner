@@ -66,8 +66,7 @@ import {
 } from "./drawColors";
 import { ISSUE_COLORS, issueColor, issueTitle } from "@/lib/maintenance";
 import NewIssueDialog, { type NewIssuePayload } from "./NewIssueDialog";
-import DrawTypePicker, { type DrawType } from "./DrawTypePicker";
-import AssetPlacePicker, { type AssetPlacement } from "./AssetPlacePicker";
+import AddPicker, { type AssetPlacement, type DrawType } from "./AddPicker";
 export { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
 import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
@@ -426,7 +425,6 @@ export default function MapView({
     }
   }, [visibility]);
   const [fullscreen, setFullscreen] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   // Draw/save state. drawKind is the tool (polygon or line); the
   // session says what it becomes (fixed before drawing).
@@ -434,7 +432,7 @@ export default function MapView({
   const [drawSession, setDrawSession] = useState<DrawSession | null>(null);
   const drawSessionRef = useRef<DrawSession | null>(null);
   drawSessionRef.current = drawSession;
-  const [pickerOpen, setPickerOpen] = useState<"draw" | "asset" | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Pin placement for a type chosen up front (null = legacy any-type).
   const [placeAssetType, setPlaceAssetType] = useState<AssetType | null>(null);
   // Crosshair is placing a NEW circle footprint's center for this type.
@@ -2117,17 +2115,18 @@ export default function MapView({
     setSelected(sel);
   };
 
-  // Add menu: Draw and Asset open a picker FIRST; the pivot goes
-  // straight to crosshair placement (its type is implied).
-  function startAdd(kind: "draw" | "asset" | "pivot") {
-    setAddMenuOpen(false);
+  // Add: ONE step to the unified picker; every addable thing is in it.
+  function startAdd() {
     setSelected(null);
     setSaveError(null);
     editTargetRef.current = null;
-    if (kind === "draw" || kind === "asset") {
-      setPickerOpen(kind);
-      return;
-    }
+    setPickerOpen(true);
+  }
+
+  // Irrigation pivot from the picker: straight to crosshair placement
+  // (its type is implied).
+  function startPivotPlacement() {
+    setPickerOpen(false);
     placeForPivotRef.current = true;
     setCrosshairPos(null);
     setMode("place");
@@ -2140,7 +2139,7 @@ export default function MapView({
     const draw = drawRef.current;
     const map = mapRef.current;
     if (!draw || !map) return;
-    setPickerOpen(null);
+    setPickerOpen(false);
     // Pins (a cemetery marker, a sinkhole): the crosshair, no drawing.
     if (session.kind === "pin" || (session.kind === "issue" && session.shape === "point")) {
       setDrawSession(session);
@@ -2170,7 +2169,7 @@ export default function MapView({
   // draw in the asset look), or circle (crosshair center, then the
   // parametric editor).
   function beginAssetPlacement(assetType: AssetType, placement: AssetPlacement) {
-    setPickerOpen(null);
+    setPickerOpen(false);
     if (placement === "outline") {
       beginDrawSession({ kind: "asset_outline", assetType });
       return;
@@ -3324,8 +3323,11 @@ export default function MapView({
         </div>
       ) : null}
 
-      {/* Left control column */}
-      <div className="absolute left-3 top-3 z-20 flex w-36 flex-col gap-2">
+      {/* Left control column. 11.5rem is sized so every layer name in
+          the toggle box fits on one line at 13px, measured against a
+          future "Government payments" (131px in Segoe UI); see
+          LayerToggle.tsx. */}
+      <div className="absolute left-3 top-3 z-20 flex w-[11.5rem] flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
         {visibility.easement && easements.length > 0 ? (
           <div className="rounded-lg bg-white/95 p-2 shadow-md">
@@ -3452,33 +3454,12 @@ export default function MapView({
           </div>
         ) : null}
         {mode === "view" ? (
-          <div className="relative">
-            <button
-              onClick={() => setAddMenuOpen((o) => !o)}
-              className="w-full rounded-lg bg-kelly-500 px-3 py-2 text-sm font-semibold text-white shadow-md hover:bg-kelly-600"
-            >
-              + Add
-            </button>
-            {addMenuOpen ? (
-              <div className="absolute left-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-lg bg-white shadow-lg">
-                {(
-                  [
-                    ["draw", "Draw (boundary, road, easement)"],
-                    ["asset", "Asset (pin, outline, circle)"],
-                    ["pivot", "Irrigation pivot (coverage)"],
-                  ] as Array<["draw" | "asset" | "pivot", string]>
-                ).map(([kind, label]) => (
-                  <button
-                    key={kind}
-                    onClick={() => startAdd(kind)}
-                    className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-kelly-50"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <button
+            onClick={startAdd}
+            className="w-full rounded-lg bg-kelly-500 px-3 py-2 text-sm font-semibold text-white shadow-md hover:bg-kelly-600"
+          >
+            + Add
+          </button>
         ) : null}
         <div className="flex gap-2">
           <button
@@ -3831,12 +3812,14 @@ export default function MapView({
         </div>
       ) : null}
 
-      {/* Pick-first pickers */}
-      {pickerOpen === "draw" ? (
-        <DrawTypePicker onPick={beginDrawSession} onCancel={() => setPickerOpen(null)} />
-      ) : null}
-      {pickerOpen === "asset" ? (
-        <AssetPlacePicker onPick={beginAssetPlacement} onCancel={() => setPickerOpen(null)} />
+      {/* The one Add picker: every addable thing, grouped, one step. */}
+      {pickerOpen ? (
+        <AddPicker
+          onPickDraw={beginDrawSession}
+          onPickAsset={beginAssetPlacement}
+          onPickPivot={startPivotPlacement}
+          onCancel={() => setPickerOpen(false)}
+        />
       ) : null}
 
       {/* Save dialogs: the session's type is fixed, so each form opens

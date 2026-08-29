@@ -4,6 +4,10 @@ import type { LayerVisibility } from "./types";
 
 // Land-use layers first; maintenance issues are their own set below a
 // rule so problems can be hidden without touching the land view.
+// SIZING ASSUMPTION: every layer name must fit ON ONE LINE at 13px in
+// the 11.5rem left column (MapView.tsx), which leaves ~136px for the
+// label; "Pastures/Grassland" (108px) and a future "Government
+// payments" (131px) are the yardstick. Check new names against it.
 const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
   { key: "property", label: "Properties" },
   { key: "parcel", label: "Parcels" },
@@ -27,7 +31,7 @@ export default function LayerToggle({
   const row = (key: keyof LayerVisibility, label: string, accent = "accent-kelly-500") => (
     <label
       key={key}
-      className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm text-gray-800 hover:bg-gray-50"
+      className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-0.5 text-[13px] text-gray-800 hover:bg-gray-50"
     >
       <input
         type="checkbox"

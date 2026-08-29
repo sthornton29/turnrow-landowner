@@ -20,7 +20,9 @@ function distinctVertices(geometry: Geometry): number {
   const ring: Position[] | undefined =
     geometry.type === "Polygon" ? geometry.coordinates[0] : geometry.type === "MultiPolygon" ? geometry.coordinates[0]?.[0] : undefined;
   if (!ring) return 0;
-  const seen = new Set(ring.map((p) => `${p[0]},${p[1]}`));
+  // A brand-new in-progress shape can carry a null placeholder vertex
+  // on its first render (before the first point goes down); skip those.
+  const seen = new Set(ring.filter((p) => Array.isArray(p)).map((p) => `${p[0]},${p[1]}`));
   return seen.size;
 }
 

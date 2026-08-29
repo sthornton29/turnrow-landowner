@@ -3,7 +3,7 @@ title: Maintenance issues
 route: /maintenance
 group: Map
 order: 5
-updated: 2026-08-22
+updated: 2026-08-29
 keywords: maintenance, issues, wash, gully, sinkhole, terrace, broken terrace, washout, road washout, problem, repair, to-do, resolved, severity, pin, area, line
 ---
 ## What this page is for
@@ -12,7 +12,7 @@ A lightweight to-do list for the land. Every problem you mark on the map (a bad 
 
 ## Adding an issue
 
-On the Map, tap **+ Add**, then **Draw**, then **Maintenance issue** at the bottom of the picker. Pick the type, then how to mark it: a **Pin** for a spot (a sinkhole), a **Line** for something that runs along the ground (a failed terrace section), or an **Area** you trace (a wash, a washout). The save form takes an optional label, notes, and a severity (low, medium, high); "Other" needs a label. The property fills in from where you drew.
+On the Map, tap **+ Add**, then **Maintenance issue** under **Needs attention** at the bottom of the picker. Pick the type, then how to mark it: a **Pin** for a spot (a sinkhole), a **Line** for something that runs along the ground (a failed terrace section), or an **Area** you trace (a wash, a washout). The save form takes an optional label, notes, and a severity (low, medium, high); "Other" needs a label. The property fills in from where you drew.
 
 Issues are their own layer in warning colors (amber, red when high severity) so they read as problems, never as land. The Layers box has a separate **Maintenance issues** toggle, so you can hide them while working on boundaries and bring them back later.
 

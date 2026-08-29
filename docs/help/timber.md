@@ -3,7 +3,7 @@ title: Timber stands
 route: /timber
 group: Timber
 order: 1
-updated: 2026-08-20
+updated: 2026-08-29
 keywords: timber, stand, planted pine, natural pine, hardwood, mixed, species, year established, site index, thinning, burn, split, colors, legend, acres by type
 ---
 ## What a stand is
@@ -12,7 +12,7 @@ A timber stand is an area managed as one unit: planted pine of one age, a hardwo
 
 ## Adding stands
 
-- On the Map: + Add, Draw, Timber stand. The save form asks the stand type (required) and prefills Loblolly pine for pine picks.
+- On the Map: + Add, then Timber stand. The save form asks the stand type (required) and prefills Loblolly pine for pine picks.
 - From Timber Scan: let the app propose stands from satellite and crop data, then accept the ones that look right (see Timber Scan).
 - From a file: shapefile or KML through Import.
 

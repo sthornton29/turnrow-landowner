@@ -3,7 +3,7 @@ title: Easements
 route: /easements
 group: Properties
 order: 3
-updated: 2026-08-20
+updated: 2026-08-29
 keywords: easement, powerline, pipeline, waterline, sewer, telecom, fiber, access, ingress, egress, right of way, railroad, drainage, flowage, tva, corps, conservation, land trust, wre, ale, cemetery, construction, solar, wind, burdens, benefits, expiration, holder, recorded, book page, width, elevation, mineral rights
 ---
 ## What counts as an easement
@@ -12,7 +12,7 @@ A recorded right someone else holds over your land, or one you hold over a neigh
 
 ## Recording one
 
-Draw it from the Map: + Add, Draw, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+Draw it from the Map: + Add, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
 
 ## On the map and in print
 

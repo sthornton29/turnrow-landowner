@@ -1,6 +1,25 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-25 (harvest completion: the farm software's
+Last updated: 2026-08-29 (one-step Add: the map's + Add button now
+opens ONE unified picker directly (components/map/AddPicker.tsx; the
+old Draw / Asset / Pivot intermediate menu and the separate
+DrawTypePicker / AssetPlacePicker components are gone): grouped
+sections for Land and boundaries, Lines and corridors, Assets (the
+Pin / Draw outline / Circle placement sub-step comes AFTER the type;
+Underground pipe draws directly, Irrigation pivot goes straight to
+the crosshair), and Needs attention, with a type-to-filter box (Enter
+picks the first match), a centered 3-column modal on desktop and a
+full-height 2-column sheet on phones; every card title fits ON ONE
+LINE (whitespace-nowrap, no word breaking; the sizing assumption is
+commented in PickerCard), the map layers toggle column widened to
+11.5rem with 13px rows so every layer name fits one line (a future
+"Government payments" is the yardstick, commented in LayerToggle.tsx),
+and lib/geo/drawArea.ts hardened against the null placeholder vertex
+a brand-new draw shape renders with (it threw on every polygon draw
+start; regression test added). Help topics for map, drawing, assets,
+maintenance, easements, and timber updated to the one-step flow. No
+migration.)
+Earlier, 2026-08-25: harvest completion (the farm software's
 partner API now sends harvest_status per field x crop on /production
 (the same complete / in_progress / unharvested classification its own
 Yields page shows; farm-side addendum deployed 2026-08-25), migration
@@ -11,11 +30,8 @@ harvested acres) with "X of Y ac complete" beside a partial-season
 figure, in-progress fields show a Harvesting chip plus the tenant's
 PROJECTED yield (labeled) everywhere yields display, and the lease
 Tenant Data "Use" helper offers an actual only when every mapped field
-is complete (partial harvest offers the labeled projected value); also
-the map's "What are you drawing?" picker cards now contain their text:
-titles wrap with a break opportunity at "/", hints clamp to one line
-with the full text on hover or touch long-press, and the desktop panel
-scrolls under a height cap. 2026-08-22: per-shape area readout while
+is complete (partial harvest offers the labeled projected value).
+2026-08-22: per-shape area readout while
 drawing, Pasture/Grassland relabel, Cemeteries, Maintenance issues
 layer (migration 0032); tenant farming entities (migration 0031).
 Earlier, 2026-08-21 evening (description matching second pass:
@@ -338,8 +354,8 @@ Tables:
   legend list only categories present in view (plus a Railroad row
   when one exists); the click panel, /easements/[id], and RowEditor
   show the exact type and every field (length for lines, acres for
-  polygons). Drawn via the pick-first flow (Add > Draw > Easement >
-  Line or Area) with the save form already set to Easement: type
+  polygons). Drawn via the pick-first flow (Add > Easement > Line or
+  Area) with the save form already set to Easement: type
   select, relationship toggle with a "drawn outside your boundary is
   expected" hint for benefits, holder, recorded ref, expiration, width
   (lines only), flowage elevation (flowage only), program and
@@ -1604,23 +1620,39 @@ Functions and views:
     Click
     priority assets > roads > fields > timber > parcels > properties, with
     the same detail panel pattern (right card desktop, bottom sheet
-    mobile). The Add menu offers three entries: DRAW, ASSET, and
-    Irrigation pivot. PICK FIRST, THEN DRAW: Draw opens a type picker
-    (components/map/DrawTypePicker.tsx, a two-column grid with color
-    swatches, bottom sheet on phones): Property boundary, Parcel, Ag
-    field, Timber stand, Pasture/Grassland, Wetland, Cemetery, Road,
-    Easement (then a second tap: Line or Area), Fence, Underground
-    pipe, plus the NEEDS ATTENTION maintenance entry. CARD LAYOUT
-    (2026-08-25, the shared PickerCard used by every step): text is
-    CONTAINED in its card; titles wrap to a second line (a zero-width
-    break after "/" lets "Pasture/Grassland" wrap between its words,
-    break-words backs up any future long name, grid rows equalize
-    height with content pinned to the top), hints clamp to ONE line
-    with an ellipsis and the full text on desktop hover (title
-    tooltip) or a 450 ms touch long-press bubble (the long-press never
-    also picks the card); the phone bottom sheet scrolls within 75% of
-    the viewport and the desktop panel carries its own max-height so
-    short windows scroll instead of clipping the bottom cards. Picking fixes
+    mobile). ONE-STEP ADD (2026-08-29): + Add opens the unified
+    picker DIRECTLY (components/map/AddPicker.tsx; no intermediate
+    menu). One scrollable panel holds every addable thing in grouped
+    sections: LAND AND BOUNDARIES (Property boundary, Parcel, Ag
+    field, Timber stand, Pasture/Grassland, Wetland, Cemetery with a
+    plot-or-pin sub-step), LINES AND CORRIDORS (Road, Easement with a
+    Line-or-Area sub-step, Fence), ASSETS (every asset type; point
+    types get the Pin / Draw outline / Circle placement sub-step
+    AFTER the type is picked, Underground pipe starts its line draw
+    directly, Irrigation pivot goes straight to crosshair placement),
+    and NEEDS ATTENTION (Maintenance issue: type, then pin/line/area).
+    A type-to-filter box at the top matches label and hint, hides
+    empty sections, and Enter picks the first visible card; it
+    autofocuses on desktop only (a phone would pop the keyboard over
+    the sheet). Desktop: a centered 42rem modal with a dimmed
+    backdrop (backdrop click closes) and 3 columns per section so the
+    whole set is visible with minimal scrolling. Phone: a full-height
+    bottom sheet (below a top strip, above the nav) with 2 columns.
+    Escape or the close button returns to the map from any step; the
+    sub-steps keep their Back link. ONE-LINE TITLES (2026-08-29): no
+    word breaking anywhere in the picker; titles are whitespace-nowrap
+    at 13px semibold (14px from md up), sized so the longest current
+    labels ("Property boundary", "Pasture/Grassland", "Underground
+    pipe") fit a 2-column grid at a 360px viewport; the sizing
+    assumption is commented in PickerCard so future type names get
+    checked against it. Hints clamp to ONE line with an ellipsis and
+    the full text on desktop hover (title tooltip) or a 450 ms touch
+    long-press bubble (the long-press never also picks the card).
+    Likewise the LAYERS toggle box: the left control column is
+    11.5rem with 13px rows so every layer name ("Pastures/Grassland",
+    "Maintenance issues", a future "Government payments") fits one
+    line; the yardstick is commented in LayerToggle.tsx. PICK FIRST,
+    THEN DRAW: picking fixes
     the type for the session: the right tool loads (polygon vs line),
     the mapbox-gl-draw draft layers are recolored to that type's map
     color (components/map/drawColors.ts captures the theme's original
@@ -1632,8 +1664,7 @@ Functions and views:
     new session. Multi-area sessions, the persistent (css-hidden) form
     state, Discard shape vs session Cancel, and Escape all carry over
     unchanged; the file import's per-feature type assignment is
-    untouched. ASSET opens a placement picker
-    (components/map/AssetPlacePicker.tsx): asset type select plus Pin
+    untouched. A point asset's placement sub-step offers Pin
     (crosshair placement: pan to line up, DRAG the crosshair itself
     anywhere on the map, or My location via GPS; Place here confirms
     wherever it sits; moving a pin reuses the same mode), Draw
@@ -1641,9 +1672,10 @@ Functions and views:
     ponds), or Circle (center by crosshair, then a parametric
     mini-editor: draggable white center handle, blue rim handle, a
     typed Diameter input, live sq ft / acres; Save asks name +
-    property suggested from the center). Grain bins lead with Circle
-    ("Suggested", preselected); every other type starts on Pin with
-    Circle available last. CIRCLE FOOTPRINTS are parametric like
+    property suggested from the center). Grain bins (ROUND_ASSET_TYPES)
+    list Circle first with a "Suggested" badge; every other type reads
+    Pin, Draw outline, Circle; tapping an option IS the pick (no
+    confirm button). CIRCLE FOOTPRINTS are parametric like
     pivots (lib/geo/circle.ts, unit tested): details carry
     footprint_shape = 'circle', center_lon/lat (mapManaged on every
     asset type), and diameter_ft; the polygon is derived and

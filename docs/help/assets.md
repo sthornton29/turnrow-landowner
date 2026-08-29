@@ -3,12 +3,12 @@ title: Assets on the map
 route: /map
 group: Map
 order: 3
-updated: 2026-08-20
+updated: 2026-08-29
 keywords: asset, pin, crosshair, outline, footprint, circle, grain bin, diameter, well, pivot, coverage, partial circle, end gun, cut area, shop, barn, pond, house, riser, place here, my location, move pin
 ---
 ## Placing an asset
 
-Tap **+ Add** then **Asset**. Pick the type (well, shop, barn, grain bin, house, pond or dam, and so on) and how to place it:
+Tap **+ Add** and pick the type under **Assets** (well, shop, barn, grain bin, house, pond or dam, and so on; the filter box at the top gets you there fast), then how to place it:
 
 - **Pin**: a crosshair sits over the map. Pan the map under it or drag the crosshair itself, or tap My location to use the phone's GPS, then press Place here.
 - **Draw outline**: trace the footprint (a shop, a barn, a pond surface). The panel then shows the footprint in square feet, or acres when it is large.
@@ -18,7 +18,7 @@ Only a name is required. Specs, photos, and documents are added on the asset pag
 
 ## Irrigation pivots
 
-Tap **+ Add** then **Irrigation pivot**. Place the center, and the coverage editor opens: drag the blue handle or type the wetted length in feet, choose Full or Partial circle (green and red handles set the arc), then Save. The coverage circle drives irrigated acres on the ag fields it covers. **+ Add area** draws extra irrigated ground that joins the coverage (a corner arm lobe, end gun reach); **+ Cut area** removes ground that is watered but not plantable (a pond, a waterway). The panel shows plantable acres, and gross watered acres when they differ.
+Tap **+ Add**, then **Irrigation pivot** under Assets. Place the center, and the coverage editor opens: drag the blue handle or type the wetted length in feet, choose Full or Partial circle (green and red handles set the arc), then Save. The coverage circle drives irrigated acres on the ag fields it covers. **+ Add area** draws extra irrigated ground that joins the coverage (a corner arm lobe, end gun reach); **+ Cut area** removes ground that is watered but not plantable (a pond, a waterway). The panel shows plantable acres, and gross watered acres when they differ.
 
 ## Editing
 

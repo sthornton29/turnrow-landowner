@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-25, version 0.1.0, build ea8fe26. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-29, version 0.1.0, build 447ea00. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -199,7 +199,7 @@ A recorded right someone else holds over your land, or one you hold over a neigh
 
 ## Recording one
 
-Draw it from the Map: + Add, Draw, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+Draw it from the Map: + Add, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
 
 ## On the map and in print
 
@@ -450,7 +450,7 @@ A lightweight to-do list for the land. Every problem you mark on the map (a bad 
 
 ## Adding an issue
 
-On the Map, tap **+ Add**, then **Draw**, then **Maintenance issue** at the bottom of the picker. Pick the type, then how to mark it: a **Pin** for a spot (a sinkhole), a **Line** for something that runs along the ground (a failed terrace section), or an **Area** you trace (a wash, a washout). The save form takes an optional label, notes, and a severity (low, medium, high); "Other" needs a label. The property fills in from where you drew.
+On the Map, tap **+ Add**, then **Maintenance issue** under **Needs attention** at the bottom of the picker. Pick the type, then how to mark it: a **Pin** for a spot (a sinkhole), a **Line** for something that runs along the ground (a failed terrace section), or an **Area** you trace (a wash, a washout). The save form takes an optional label, notes, and a severity (low, medium, high); "Other" needs a label. The property fills in from where you drew.
 
 Issues are their own layer in warning colors (amber, red when high severity) so they read as problems, never as land. The Layers box has a separate **Maintenance issues** toggle, so you can hide them while working on boundaries and bring them back later.
 
@@ -491,7 +491,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 - **Zoom all** fits everything you own on screen.
 - **Fullscreen** hides the app frame; on a phone the panels stay usable.
 - **Print** (top right) makes a PDF of the framed area. See the Printing topic.
-- **+ Add** starts drawing or placing. See the Drawing and Assets topics.
+- **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics.
 
 ## Common questions
 
@@ -503,7 +503,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 
 ## Pick first, then draw
 
-Tap **+ Add** then **Draw**. A picker asks what you are drawing: Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery (then Draw the plot or Drop a pin), Road, Easement (then Line or Area), Fence, or Underground pipe, and at the bottom, under Needs attention, a Maintenance issue. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
 
 ## Drawing a shape
 
@@ -531,14 +531,14 @@ Tap a feature and choose **Edit boundary** or **Edit line**. Drag the points, or
 ## Common questions
 
 - **Line or area for an easement?** A line when you know the centerline (a powerline, an access lane); it shows length, and width is a note. An area when you know the strip, the flowage pool, or the conservation tract; it shows acres.
-- **Where did Pipe and Fence go?** They are in the Draw picker. Your own buried irrigation pipe is an asset; a pipeline company's corridor is an easement.
+- **Where did Pipe and Fence go?** Fence is under Lines and corridors and Underground pipe under Assets; both draw as lines. Your own buried irrigation pipe is an asset; a pipeline company's corridor is an easement.
 - **The wrong type is selected.** Cancel the session and pick again. The type cannot change mid-session on purpose.
 
 # Assets on the map  (page: /map)
 
 ## Placing an asset
 
-Tap **+ Add** then **Asset**. Pick the type (well, shop, barn, grain bin, house, pond or dam, and so on) and how to place it:
+Tap **+ Add** and pick the type under **Assets** (well, shop, barn, grain bin, house, pond or dam, and so on; the filter box at the top gets you there fast), then how to place it:
 
 - **Pin**: a crosshair sits over the map. Pan the map under it or drag the crosshair itself, or tap My location to use the phone's GPS, then press Place here.
 - **Draw outline**: trace the footprint (a shop, a barn, a pond surface). The panel then shows the footprint in square feet, or acres when it is large.
@@ -548,7 +548,7 @@ Only a name is required. Specs, photos, and documents are added on the asset pag
 
 ## Irrigation pivots
 
-Tap **+ Add** then **Irrigation pivot**. Place the center, and the coverage editor opens: drag the blue handle or type the wetted length in feet, choose Full or Partial circle (green and red handles set the arc), then Save. The coverage circle drives irrigated acres on the ag fields it covers. **+ Add area** draws extra irrigated ground that joins the coverage (a corner arm lobe, end gun reach); **+ Cut area** removes ground that is watered but not plantable (a pond, a waterway). The panel shows plantable acres, and gross watered acres when they differ.
+Tap **+ Add**, then **Irrigation pivot** under Assets. Place the center, and the coverage editor opens: drag the blue handle or type the wetted length in feet, choose Full or Partial circle (green and red handles set the arc), then Save. The coverage circle drives irrigated acres on the ag fields it covers. **+ Add area** draws extra irrigated ground that joins the coverage (a corner arm lobe, end gun reach); **+ Cut area** removes ground that is watered but not plantable (a pond, a waterway). The panel shows plantable acres, and gross watered acres when they differ.
 
 ## Editing
 
@@ -679,7 +679,7 @@ A timber stand is an area managed as one unit: planted pine of one age, a hardwo
 
 ## Adding stands
 
-- On the Map: + Add, Draw, Timber stand. The save form asks the stand type (required) and prefills Loblolly pine for pine picks.
+- On the Map: + Add, then Timber stand. The save form asks the stand type (required) and prefills Loblolly pine for pine picks.
 - From Timber Scan: let the app propose stands from satellite and crop data, then accept the ones that look right (see Timber Scan).
 - From a file: shapefile or KML through Import.
 
