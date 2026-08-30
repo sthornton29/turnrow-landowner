@@ -53,8 +53,13 @@ export async function POST(request: Request) {
 
   try {
     if (searchType === "entity") {
-      const features = await entitySearch(service, text);
-      return NextResponse.json({ features, count: features.length });
+      const { features, guidance } = await entitySearch(service, text);
+      return NextResponse.json({
+        features,
+        count: features.length,
+        truncated: guidance !== null,
+        guidance,
+      });
     }
 
     const where = buildWhere(searchType, text, service.owner_field, service.parcel_field);
@@ -81,12 +86,14 @@ export async function POST(request: Request) {
 
 // Broad entity search: query the county for every owner containing the
 // seed's most distinctive token, falling back to narrower two-token
-// patterns when that token alone is too common. Never silently
-// truncates: overflow becomes a clear "add another word" error.
+// patterns when that token alone is too common. Overflow is never
+// SILENT, but it no longer refuses either: the capped result set comes
+// back with `guidance` (the add-another-word sentence) so the user
+// sees what was found while being told the recall is incomplete.
 async function entitySearch(
   service: CountyGisService,
   text: string
-): Promise<EntityParcelFeature[]> {
+): Promise<{ features: EntityParcelFeature[]; guidance: string | null }> {
   const plan = planEntityQuery(text);
   if (!plan) {
     throw new GisError(
@@ -94,10 +101,7 @@ async function entitySearch(
       400
     );
   }
-  const tooCommon = new GisError(
-    `"${plan.distinctive}" is too common in ${service.display_name}. Add another word (a first name, or the company's second word) and search again.`,
-    400
-  );
+  const tooCommon = `"${plan.distinctive}" is too common in ${service.display_name}: more names match than can be listed, so this shows only part of them. Add another word (a first name, or the company's second word) and search again for the full picture.`;
 
   const { broad, narrowed } = buildEntityWheres(
     plan.distinctive,
@@ -112,14 +116,26 @@ async function entitySearch(
       maxFeatures: MAX_ENTITY_FEATURES,
     });
 
-  let collected = await query(broad).then((r) => (r.truncated ? null : r.features));
+  let guidance: string | null = null;
+  const broadResult = await query(broad);
+  let collected = broadResult.truncated ? null : broadResult.features;
   if (!collected) {
-    if (narrowed.length === 0) throw tooCommon;
-    collected = [];
-    for (const where of narrowed) {
-      const result = await query(where);
-      if (result.truncated) throw tooCommon;
-      collected.push(...result.features);
+    if (narrowed.length === 0) {
+      // No narrower pattern exists: show the capped broad set.
+      collected = broadResult.features.slice(0, MAX_ENTITY_FEATURES);
+      guidance = tooCommon;
+    } else {
+      collected = [];
+      for (const where of narrowed) {
+        const result = await query(where);
+        if (result.truncated) guidance = tooCommon;
+        collected.push(...result.features);
+        if (collected.length >= MAX_ENTITY_FEATURES) {
+          collected = collected.slice(0, MAX_ENTITY_FEATURES);
+          guidance = tooCommon;
+          break;
+        }
+      }
     }
   }
 
@@ -139,5 +155,5 @@ async function entitySearch(
       owner_stripped: strippedTokens,
     });
   }
-  return out;
+  return { features: out, guidance };
 }

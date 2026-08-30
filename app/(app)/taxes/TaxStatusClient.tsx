@@ -15,6 +15,7 @@ import {
 } from "@/lib/tax";
 import { IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier } from "@/lib/taxIdentifiers";
 import { confirmLineParcel, loadStoredIdentifiers } from "@/components/taxes/taxLearn";
+import TaxChangeReport from "@/components/taxes/TaxChangeReport";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import { NO_ENTITY } from "@/lib/entities";
 
@@ -475,6 +476,27 @@ export default function TaxStatusClient({
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+      {/* Multi-year change analysis: appraisals, effective rates, the
+          decomposition of every tax change, and the flags worth a call
+          to the revenue commissioner. Collapsed by default; all years'
+          lines are already loaded. */}
+      <details className="rounded-xl border border-gray-200 bg-white">
+        <summary className="cursor-pointer px-4 py-3 text-base font-semibold text-gray-900">
+          Tax change report
+          <span className="ml-2 text-sm font-normal text-gray-500">
+            year over year values, rates, and flags
+          </span>
+        </summary>
+        <div className="border-t border-gray-200">
+          <TaxChangeReport
+            lines={lines}
+            parcels={parcels}
+            properties={properties}
+            entities={entities}
+          />
+        </div>
+      </details>
 
       {entityRollup.length > 0 ? (
         <section className="rounded-xl border border-gray-200 bg-white">

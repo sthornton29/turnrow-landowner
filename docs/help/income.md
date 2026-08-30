@@ -3,12 +3,16 @@ title: Income views
 route: /income
 group: Income
 order: 1
-updated: 2026-08-20
-keywords: income, projected, received, rent, timber, hunting, government payments, taxes, net, by property, by entity, by year, chart, rent upload, photograph check, match payment
+updated: 2026-08-30
+keywords: income, projected, received, rent, timber, hunting, government payments, taxes, net, by property, by entity, entity filter, multi-select, by year, chart, rent upload, photograph check, match payment
 ---
 ## What this page shows
 
 A year at a time: expected and received income by type (agricultural rent, hunting, timber, government payments), property taxes due and paid, gross, and net. A second table breaks the same year down by entity and property. Earlier years are a tap away, with a small chart across years.
+
+## Filtering by entity
+
+The entity chips are a multi-select: tap one or more entities (or "No entity") and EVERY number on the page recomputes within the selection - the by-type table, the chart, the government payments line, and the tax rows, not just the by-property list. "All entities" clears it. The same selection follows you to Government Payments and the Dashboard tiles and is remembered on this device. Income with no land linked shows as Unassigned only under All entities.
 
 ## Projected vs received
 

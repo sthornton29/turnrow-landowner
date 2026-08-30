@@ -8,7 +8,13 @@ import { formatAcres, formatNumber } from "@/lib/format";
 import { toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
 import { harvestIdentifiers } from "@/lib/taxIdentifiers";
-import { clusterOwners, displayOwnerName, pickDisplayName } from "@/lib/ownerNames";
+import {
+  CLUSTER_THRESHOLD,
+  clusterOwners,
+  displayOwnerName,
+  pickDisplayName,
+  rankOwnerClusters,
+} from "@/lib/ownerNames";
 import { ENTITY_TYPE_LABELS, guessEntityType } from "@/lib/entities";
 import MiniParcelSketch from "@/components/county/MiniParcelSketch";
 import type { CountyGisService, EntityParcelFeature } from "@/lib/gis";
@@ -67,6 +73,11 @@ interface OwnerGroup {
   displayName: string;
   rowIds: string[];
   knownEntity: { id: string; name: string } | null;
+  // Similarity of the group to the ENTERED search text (best variant),
+  // computed at cluster time by lib/ownerNames rankOwnerClusters. Drives
+  // the close/distant split so a common surname reads ranked instead of
+  // flooding the screen.
+  score: number;
 }
 
 type SearchMode = "entity" | "owner" | "parcel";
@@ -108,6 +119,14 @@ export default function CountyImportClient({
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [mergePick, setMergePick] = useState<Set<string>>(new Set());
   const [truncated, setTruncated] = useState(false);
+  // Ranked presentation of entity groups: close matches show, the rest
+  // defer behind one expander; sort and the single-parcel quick filter
+  // are view state only.
+  const [guidance, setGuidance] = useState<string | null>(null);
+  const [searchSeed, setSearchSeed] = useState("");
+  const [groupSort, setGroupSort] = useState<"match" | "acres">("match");
+  const [hideSingles, setHideSingles] = useState(false);
+  const [showAllGroups, setShowAllGroups] = useState(false);
   const [searched, setSearched] = useState(false);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -163,6 +182,9 @@ export default function CountyImportClient({
     setSelected(new Set());
     setHighlighted(null);
     setTruncated(false);
+    setGuidance(null);
+    setSearchSeed("");
+    setShowAllGroups(false);
     setToast(null);
     // Imported badges are keyed to the current results; the session
     // duplicate pool and Done button survive across searches.
@@ -202,6 +224,9 @@ export default function CountyImportClient({
       }
       setResults(rows);
       setTruncated(Boolean(body.truncated));
+      setGuidance(typeof body.guidance === "string" ? body.guidance : null);
+      setSearchSeed(text.trim());
+      setShowAllGroups(false);
       setSearched(true);
       if (searchType === "entity") {
         const aliasMap = new Map(
@@ -220,7 +245,7 @@ export default function CountyImportClient({
           aliasMap
         );
         setGroups(
-          clusters.map((c) => ({
+          rankOwnerClusters(text, clusters).map((c) => ({
             id: crypto.randomUUID(),
             displayName:
               (c.knownEntityId ? entityNames.get(c.knownEntityId) : null) ||
@@ -233,6 +258,7 @@ export default function CountyImportClient({
                   name: entityNames.get(c.knownEntityId) ?? "",
                 }
               : null,
+            score: c.score,
           }))
         );
       }
@@ -333,6 +359,8 @@ export default function CountyImportClient({
       displayName: variant || "Owner not recorded",
       rowIds: moving,
       knownEntity: null,
+      // A split keeps the parent's rank so it does not jump the list.
+      score: group.score,
     };
     setGroups((gs) =>
       gs.flatMap((g) =>
@@ -374,6 +402,7 @@ export default function CountyImportClient({
       displayName: known?.name || pickDisplayName(variants) || picked[0].displayName,
       rowIds,
       knownEntity: known,
+      score: Math.max(...picked.map((g) => g.score)),
     };
     // If any merged group was included, include the whole merged owner.
     if (picked.some((g) => groupSelectedCount(g) > 0)) {
@@ -386,12 +415,38 @@ export default function CountyImportClient({
     setExpandedGroupId(null);
   }
 
-  const sortedGroups = useMemo(
-    () => [...groups].sort((a, b) => groupAcres(b) - groupAcres(a)),
+  // BETWEEN-group organization: known-entity groups pin first, close
+  // matches (score at or above the clustering threshold) show up to a
+  // cap, and everything else - distant matches, overflow, and (when the
+  // quick filter is on) single-parcel strays - defers behind one
+  // expander with its totals stated, so nothing is hidden, just
+  // deferred. Within-group variants are untouched.
+  const VISIBLE_CLOSE_CAP = 12;
+  const groupView = useMemo(() => {
+    const byMode = (a: OwnerGroup, b: OwnerGroup) =>
+      groupSort === "acres"
+        ? groupAcres(b) - groupAcres(a)
+        : b.score - a.score || groupAcres(b) - groupAcres(a);
+    const pinned = groups.filter((g) => g.knownEntity).sort(byMode);
+    const rest = groups.filter((g) => !g.knownEntity);
+    const isSingle = (g: OwnerGroup) => g.rowIds.length <= 1;
+    const close = rest
+      .filter((g) => g.score >= CLUSTER_THRESHOLD && !(hideSingles && isSingle(g)))
+      .sort(byMode);
+    const deferred = rest
+      .filter((g) => g.score < CLUSTER_THRESHOLD || (hideSingles && isSingle(g)))
+      .sort(byMode);
+    const visible = [...pinned, ...close.slice(0, VISIBLE_CLOSE_CAP)];
+    const folded = [...close.slice(VISIBLE_CLOSE_CAP), ...deferred];
+    const foldedParcels = folded.reduce((s, g) => s + g.rowIds.length, 0);
+    const foldedAcres = folded.reduce((s, g) => s + groupAcres(g), 0);
+    return { visible, folded, foldedParcels, foldedAcres };
     // groupAcres depends only on rowById, which derives from results.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [groups, rowById]
-  );
+  }, [groups, rowById, groupSort, hideSingles]);
+  const sortedGroups = showAllGroups
+    ? [...groupView.visible, ...groupView.folded]
+    : groupView.visible;
 
   // ---------------------------------------------------------------------
   // Duplicates and import
@@ -1136,7 +1191,11 @@ export default function CountyImportClient({
           </button>
         </div>
       ) : null}
-      {truncated ? (
+      {guidance ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {guidance}
+        </p>
+      ) : truncated ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           More than 200 parcels matched; only the first 200 are shown. Narrow
           your search.
@@ -1148,11 +1207,47 @@ export default function CountyImportClient({
           {/* Owner group cards */}
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-gray-600">
-              {formatNumber(sortedGroups.length)} owner
-              {sortedGroups.length === 1 ? "" : "s"} found across{" "}
+              {formatNumber(groups.length)} owner
+              {groups.length === 1 ? "" : "s"} found across{" "}
               {formatNumber(results.length)} parcel
               {results.length === 1 ? "" : "s"}
             </span>
+            {groups.length > 1 ? (
+              <span className="flex overflow-hidden rounded-lg border border-gray-300 text-xs">
+                {(
+                  [
+                    ["match", "Best match"],
+                    ["acres", "Most acres"],
+                  ] as Array<["match" | "acres", string]>
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setGroupSort(mode)}
+                    className={
+                      "px-2.5 py-1 font-medium " +
+                      (groupSort === mode
+                        ? "bg-kelly-500 text-white"
+                        : "bg-white text-gray-600 hover:bg-gray-50")
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </span>
+            ) : null}
+            {groups.some((g) => g.rowIds.length <= 1) ? (
+              <button
+                onClick={() => setHideSingles((h) => !h)}
+                className={
+                  "rounded-full border px-2.5 py-1 text-xs font-medium " +
+                  (hideSingles
+                    ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                    : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50")
+                }
+              >
+                {hideSingles ? "1-parcel owners hidden" : "Hide 1-parcel owners"}
+              </button>
+            ) : null}
             {doneButton}
             {mergePick.size > 0 ? (
               <span className="ml-auto flex items-center gap-2">
@@ -1363,6 +1458,19 @@ export default function CountyImportClient({
               );
             })}
           </div>
+
+          {/* Everything below the close-match line defers here: nothing
+              is hidden, just behind one tap, with its totals stated. */}
+          {groupView.folded.length > 0 ? (
+            <button
+              onClick={() => setShowAllGroups((s) => !s)}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left text-sm font-medium text-kelly-700 hover:bg-gray-50"
+            >
+              {showAllGroups
+                ? `Hide the ${formatNumber(groupView.folded.length)} more distant match${groupView.folded.length === 1 ? "" : "es"}`
+                : `Show ${formatNumber(groupView.folded.length)} more distant match${groupView.folded.length === 1 ? "" : "es"}${searchSeed ? ` for "${searchSeed.toUpperCase()}"` : ""} (${formatNumber(groupView.foldedParcels)} parcel${groupView.foldedParcels === 1 ? "" : "s"}, ${formatAcres(groupView.foldedAcres)} acres)`}
+            </button>
+          ) : null}
 
           <CountySearchMap
             features={mapFeatures}

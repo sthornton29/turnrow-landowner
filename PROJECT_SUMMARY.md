@@ -1,6 +1,60 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-29 evening (ROLES WITH ENTITY-SCOPED ACCESS,
+Last updated: 2026-08-30 (INCOME ENTITY FILTER FIXED AND MULTI-SELECT:
+the old filter touched ONLY the by-property groups (income/page.tsx's
+single `continue` line) while the by-type table, chart, government
+payments line, and tax rows all rendered ORG-WIDE numbers from
+summarizeByYear - lib/income.ts had no property/entity scope at all.
+Now allocateToProperties carries per-type splits
+(PropertyTotals.expectedByType/receivedByType + hasProjection) and
+sumPropertyScope(byProperty, include) rebuilds YearTotals for any
+property set (null = everything, asserted to reconcile exactly with
+summarizeByYear in lib/income.test.ts); the income page computes
+EVERY number within the selection. The entity filter is MULTI-SELECT
+everywhere (components/entities/EntityFilterChips.tsx: comma-list
+?entity= URLs, one shared localStorage key turnrow.entityFilter.v1
+restoring the selection on plain visits, RLS-limited chips for
+restricted users) and the same bug class was fixed on gov payments
+(headline tiles/lease treatments/share now scoped, GovPaymentsClient)
+and the dashboard (which also used a stray "none" literal instead of
+NO_ENTITY; tiles now multi-select, other cards deliberately
+org-wide as before). COUNTY IMPORT RANKED RESULTS: entity-mode owner
+groups now rank by similarity of their best variant to the ENTERED
+name (lib/ownerNames.ts rankOwnerClusters, unit-tested;
+known-entity-alias groups pin first with their badge), close matches
+(score >= CLUSTER_THRESHOLD, capped at 12) render and everything else
+folds behind ONE expander ("Show 23 more distant matches for
+'THORNTON' (61 parcels, 1,204 acres)"); small sort toggle (Best match
+| Most acres) and a Hide-1-parcel-owners chip; the too-common case now
+RETURNS the capped result set with the add-another-word guidance as an
+amber banner instead of refusing with a 400
+(app/api/gis/search entitySearch returns {features, guidance});
+within-group variant chips unchanged. TAX CHANGE REPORT (Property
+Taxes page, collapsible section; all years' lines were already loaded
+client-side): lib/taxChange.ts (unit-tested, 16 tests) matches lines
+across years by parcel_id (the (parcel_id, tax_year) unique index
+guarantees one line per parcel-year), computes appraised deltas and
+percents, per-year effective rates (tax/appraised), and the EXACT
+decomposition deltaTax = r0*(v1-v0) + v1*(r1-r0) (valuation effect at
+the prior rate + rate effect at the current value, cross term folded
+into rates per standard practice, cents folded so parts always sum to
+the delta) rendered as plain language ("Up $412.00: $300.00 from
+higher appraisal, $112.00 from rates"); FLAGS: assessment ratio
+(assessed/appraised) shifts >= 3 points with Alabama class wording
+(10% Class III current use <-> 20% Class II; losing current use tells
+you to ask the revenue commissioner), exemption codes disappearing
+(H1 homestead analog), value spikes past a configurable threshold
+(default 15%) as appeal-review candidates, and presence gaps
+(missing/new parcels surfaced, never dropped). UI
+(components/taxes/TaxChangeReport.tsx): year range + entity
+multi-select (seeded from the shared stored selection) + property +
+county + threshold scope, summary cards, two div-bar trend charts,
+biggest-movers table linking to parcel pages, grouped flags; PDF
+export (components/taxes/taxReportPdf.ts, jsPDF in the print system's
+style - pine title block, brand lockup via the now-exported
+loadLockupPng, page-broken movers table - dynamic import so jsPDF
+stays out of the taxes bundle). No migration this release.)
+Earlier, 2026-08-29 evening (ROLES WITH ENTITY-SCOPED ACCESS,
 migration 0034: roles renamed owner -> admin, member -> user
 (is_platform_admin unchanged); admins see everything; users see ONLY
 their granted entities' data, enforced by ~39 ADDITIVE RESTRICTIVE RLS
@@ -317,7 +371,14 @@ and Postgres row level security guarantees each org sees only its own data.
   parsing and seed cotton blend, FSA benchmark workbook discovery and
   parsing, program config resolution, PLC and ARC-CO engines with
   worked examples, government payment projection and allocation,
-  income government line, assistant SQL guard mirror, assistant tool
+  income government line, the multi-entity income recompute
+  (per-type property splits, sumPropertyScope reconciling exactly
+  with summarizeByYear, entity scopes summing back to the whole), the
+  tax change analysis (decomposition incl. rate-only and value-only
+  fixture years summing to the cent, Alabama ratio-shift wording both
+  directions, exemption disappearance, spike thresholds, presence
+  flags, property/county scoping), owner-cluster ranking (pinning,
+  cutoff, best-variant scoring), assistant SQL guard mirror, assistant tool
   schemas, help route matching and search and nav coverage, the
   entity-scope policy mirror of migration 0034); plus the RLS_TEST=1
   gated live isolation suite (lib/entityScope.live.test.ts, the
@@ -1084,7 +1145,10 @@ Entity level (migrations 0007 and 0009; org RLS, same policy pattern):
   idempotent. Written when the user imports from an owner group in the
   county import; later entity searches pre-group records whose
   normalized owner matches a known alias and show a "Known entity"
-  badge. Available for later reuse by the tax statement upload's owner
+  badge, and (2026-08-30) the groups RANK by similarity to the entered
+  name with known-alias groups pinned first, close matches capped at
+  12, and the rest behind one "Show N more distant matches" expander
+  with parcel/acre totals (rankOwnerClusters in lib/ownerNames.ts). Available for later reuse by the tax statement upload's owner
   matching, but the tax upload flow is unchanged.
 - properties.entity_id: nullable composite FK to entities (a landowner
   with land in their own name is never forced to create an entity).
@@ -2162,10 +2226,16 @@ Functions and views:
     Property taxes / Net rows, by-property table with taxes and net
     received columns (taxes route statement -> parcel -> property;
     unmatched to Unassigned; expense basis: taxes due = expected expense,
-    tax payments = actual). Once entities exist, an entity chip row
-    filters the by-property table and the table groups properties under
-    entity subtotal rows (expected, received, taxes, net per entity;
-    Unassigned income shows only under All entities). Property detail pages show allocated income
+    tax payments = actual). ENTITY FILTERING (2026-08-30, the fix):
+    the chip row is MULTI-SELECT (EntityFilterChips, comma-list URL,
+    persisted selection) and EVERY number recomputes within the
+    selection - allocateToProperties carries per-type splits and
+    sumPropertyScope sums the selected properties into YearTotals for
+    the by-type table, the chart (per-year allocation when filtering),
+    the gov payments line (rows filtered by property), and the tax
+    rows; the by-property table groups properties under entity
+    subtotal rows (Unassigned income shows only under All entities,
+    the rule sumPropertyScope makes explicit with include = null). Property detail pages show allocated income
     with taxes paid and net; the dashboard shows a "Payments needing
     attention" card (past due + due within 60 days).
   - /taxes ("Property Taxes"; the module renamed from "Taxes"
@@ -2183,7 +2253,12 @@ Functions and views:
     resolve control; statement cards with computed status chips, inline
     payment recording, expandable details (payments, attached document,
     edit/delete); batch payment (select unpaid statements, one date and
-    check number, individual tax_payments rows).
+    check number, individual tax_payments rows); and the TAX CHANGE
+    REPORT (2026-08-30, collapsible section): multi-year per-parcel
+    analysis from lib/taxChange.ts - see the Last updated note for the
+    full shape (exact decomposition, effective rates, Alabama
+    ratio-shift and exemption flags, spikes, presence gaps, PDF
+    export via components/taxes/taxReportPdf.ts).
   - /taxes/upload: PDFs and phone photos (JPEG/PNG/WebP), multiple per
     session, each extracted via /api/extract kind=tax. Parcel numbers are
     normalized (case, punctuation, leading zeros) and matched against

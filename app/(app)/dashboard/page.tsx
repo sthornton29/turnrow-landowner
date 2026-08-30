@@ -2,6 +2,8 @@ import Link from "next/link";
 import AskEntryCard from "@/components/assistant/AskEntryCard";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { NO_ENTITY, parseEntityParam } from "@/lib/entities";
+import EntityFilterChips from "@/components/entities/EntityFilterChips";
 import { bboxOf } from "@/lib/geo/normalize";
 import {
   PAYMENT_STATUS_LABELS,
@@ -121,17 +123,24 @@ export default async function DashboardPage({
 
   // Entity filter for the stat tiles (only shown when the org holds land
   // in more than one entity). Alerts and cards below stay org-wide.
+  // MULTI-SELECT comma list, shared semantics (and the shared NO_ENTITY
+  // key - this page used a stray "none" literal before) with the income
+  // and gov payments pages.
   const entityList = entities ?? [];
   const showEntityChips = entityList.length > 1;
-  const entityFilter = showEntityChips ? (entityParam ?? "") : "";
-  const filteredProperties = entityFilter
-    ? (properties ?? []).filter((p) =>
-        entityFilter === "none" ? !p.entity_id : p.entity_id === entityFilter
+  const selectedKeys = showEntityChips
+    ? parseEntityParam(entityParam).filter(
+        (k) => k === NO_ENTITY || entityList.some((e) => e.id === k)
       )
+    : [];
+  const filtering = selectedKeys.length > 0;
+  const selectedSet = new Set(selectedKeys);
+  const filteredProperties = filtering
+    ? (properties ?? []).filter((p) => selectedSet.has(p.entity_id ?? NO_ENTITY))
     : (properties ?? []);
   const propertyIds = new Set(filteredProperties.map((p) => p.id));
   const inScope = (row: { property_id: string | null }) =>
-    !entityFilter || (row.property_id !== null && propertyIds.has(row.property_id));
+    !filtering || (row.property_id !== null && propertyIds.has(row.property_id));
   const scopedFields = (fields ?? []).filter(inScope);
   const scopedPastures = (pastures ?? []).filter(inScope);
   const scopedWetlands = (wetlands ?? []).filter(inScope);
@@ -365,26 +374,11 @@ export default async function DashboardPage({
       ) : null}
 
       {showEntityChips ? (
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            { key: "", label: "All entities" },
-            ...entityList.map((e) => ({ key: e.id, label: e.name })),
-            { key: "none", label: "No entity" },
-          ].map((chip) => (
-            <Link
-              key={chip.key || "all"}
-              href={chip.key ? `/dashboard?entity=${chip.key}` : "/dashboard"}
-              className={
-                "rounded-full border px-3 py-1 text-sm font-medium " +
-                (entityFilter === chip.key
-                  ? "border-kelly-500 bg-kelly-50 text-pine-900"
-                  : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
-              }
-            >
-              {chip.label}
-            </Link>
-          ))}
-        </div>
+        <EntityFilterChips
+          entities={entityList}
+          selected={selectedKeys}
+          basePath="/dashboard"
+        />
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

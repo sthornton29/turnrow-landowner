@@ -18,6 +18,16 @@ export const ENTITY_TYPE_LABELS: Record<LandEntityType, string> = {
 // grouping, income and tax subtotals, map legend).
 export const NO_ENTITY = "__none__";
 
+// The multi-select entity filter's URL format: ?entity=id1,id2 (and/or
+// NO_ENTITY). Shared by the server pages that parse it and the client
+// chips that write it (components/entities/EntityFilterChips.tsx).
+export function parseEntityParam(param: string | undefined | null): string[] {
+  return (param ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 // Outline colors for the map's color-by-entity mode. Chosen to read over
 // satellite imagery and to avoid the meanings already on the map: white
 // (property outlines / no entity) and kelly green (fields). Cycles when

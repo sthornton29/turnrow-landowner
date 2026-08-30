@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-30, version 0.1.0, build 64f864b. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-30, version 0.1.0, build 2f3ec67. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -368,7 +368,9 @@ Search a county's public parcel map by owner name or parcel number, preview the 
 
 - Pick the county. Only counties in the registry appear; the registry grows as counties are verified.
 - Search by owner (try the name as the county prints it, last name first) or by parcel number in any format; separators like dots and dashes do not matter.
-- Results group by owner name. Check the parcels you want, choose whether they form a new property or join an existing one, and confirm the owner entity (a Known entity badge means the name was imported before).
+- Results group by owner name, RANKED: groups matching your known entities pin to the top with the Known entity badge, then the closest matches to the name you typed. With a common surname, the distant matches fold behind one "Show N more distant matches" line (with their parcel and acre counts), so nothing is hidden, just deferred. A sort toggle (Best match or Most acres) and a "Hide 1-parcel owners" filter tidy the list further; each group still shows its name variants.
+- A very common name shows what was found with a note that more names matched than could be listed; add another word (a first name, or the company's second word) for the full picture.
+- Check the parcels you want, choose whether they form a new property or join an existing one, and confirm the owner entity.
 - Import. Parcels arrive with boundaries and deeded acres; the property boundary can be set from its parcels in one click afterward.
 
 ## Common questions
@@ -382,6 +384,10 @@ Search a county's public parcel map by owner name or parcel number, preview the 
 ## What this page shows
 
 A year at a time: expected and received income by type (agricultural rent, hunting, timber, government payments), property taxes due and paid, gross, and net. A second table breaks the same year down by entity and property. Earlier years are a tap away, with a small chart across years.
+
+## Filtering by entity
+
+The entity chips are a multi-select: tap one or more entities (or "No entity") and EVERY number on the page recomputes within the selection - the by-type table, the chart, the government payments line, and the tax rows, not just the by-property list. "All entities" clears it. The same selection follows you to Government Payments and the Dashboard tiles and is remembered on this device. Income with no land linked shows as Unassigned only under All entities.
 
 ## Projected vs received
 
@@ -700,6 +706,16 @@ When no number matches, a printed legal description can still place the line thr
 ## Taxpayer and entity
 
 The taxpayer name as printed is matched to your entities, tolerating county typos, and a "C/O" name is the signal when the county bills in care of someone. Confirming a statement registers its account to that entity and saves the printed spelling, so later statements on the same account are labeled instantly.
+
+## The Tax Change Report
+
+Once two or more years of statements are loaded, the **Tax change report** section compares each parcel's lines year over year. Pick the years, entities (the same multi-select chips as Income), a property or county, and a spike threshold, and it shows:
+
+- Total tax and appraised value for both years with percent changes, and a small trend chart across every year in between.
+- **Biggest movers**: each parcel's values, tax, and effective rate (tax divided by appraised value), with a plain sentence splitting the change ("Up $412.00: $300.00 from higher appraisal, $112.00 from rates").
+- **Flags**, the part worth reading first: an assessment ratio (assessed over appraised) jumping from 10% to 20% usually means current use (Class III) was lost and is worth a call to the revenue commissioner; an exemption code like H1 disappearing is the homestead version of the same problem; a value spike past the threshold is an appeal-review candidate; and parcels present one year but missing the other are listed rather than silently dropped.
+
+**Export PDF** produces the report in the print style for a CPA or an appeal filing. A restricted user's report covers only their granted entities.
 
 ## Paying
 

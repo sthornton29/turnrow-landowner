@@ -4,6 +4,7 @@ import {
   allocateToProperties,
   projectedLeaseYears,
   summarizeByYear,
+  sumPropertyScope,
   type IncomeInputs,
   govShareByYearForLease,
 } from "./income";
@@ -163,6 +164,80 @@ describe("allocateToProperties with projections", () => {
     expect(byProperty.get("propA")?.expected).toBeCloseTo(20250 * 0.6, 2);
     expect(byProperty.get("propB")?.expected).toBeCloseTo(20250 * 0.4, 2);
     expect(byProperty.get(UNASSIGNED)).toBeUndefined();
+  });
+});
+
+// Entity filtering rides on sumPropertyScope: the by-type table, chart,
+// and tax rows recompute by summing property allocations over the
+// selected entities' properties. These fixtures put propA and propB in
+// different entities (the split is by leased acres, so a lease that
+// straddles entities pro-rates rather than double-counting).
+describe("sumPropertyScope (multi-entity recompute)", () => {
+  const multiEntityInputs = (): IncomeInputs => {
+    const inputs = cropShareInputs(); // lease across propA (60%) + propB (40%)
+    inputs.payments = [
+      { id: "pay1", lease_id: "lease1", timber_sale_id: null, expected_payment_id: null, received_date: "2026-11-01", amount: 5000 },
+    ] as never;
+    inputs.settlements = [
+      { id: "set1", timber_sale_id: "sale1", settlement_date: "2026-06-01", total_amount: 9000 },
+    ] as never;
+    // sale1's stands sit on propA only.
+    inputs.saleStands = [{ timber_sale_id: "sale1", timber_stand_id: "st1" }] as never;
+    inputs.stands = [{ id: "st1", property_id: "propA", acres: 40 }] as never;
+    inputs.parcels = [
+      { id: "pa", property_id: "propA" },
+      { id: "pb", property_id: "propB" },
+    ];
+    inputs.taxStatements = [{ id: "s1", tax_year: 2026, amount_due: 1000, entity_id: null }] as never;
+    inputs.taxLines = [
+      { id: "l1", tax_statement_id: "s1", tax_year: 2026, tax_due: 700, parcel_id: "pa", line_type: "real_property" },
+      { id: "l2", tax_statement_id: "s1", tax_year: 2026, tax_due: 300, parcel_id: "pb", line_type: "real_property" },
+    ] as never;
+    return inputs;
+  };
+
+  it("carries per-type splits on each property", () => {
+    const by = allocateToProperties(multiEntityInputs(), 2026);
+    expect(by.get("propA")?.expectedByType.agricultural).toBeCloseTo(20250 * 0.6, 2);
+    expect(by.get("propA")?.receivedByType.timber).toBe(9000);
+    expect(by.get("propA")?.receivedByType.agricultural).toBeCloseTo(5000 * 0.6, 2);
+    expect(by.get("propB")?.receivedByType.agricultural).toBeCloseTo(5000 * 0.4, 2);
+    expect(by.get("propB")?.receivedByType.timber).toBe(0);
+  });
+
+  it("scope null reconciles exactly with summarizeByYear", () => {
+    const inputs = multiEntityInputs();
+    const all = sumPropertyScope(allocateToProperties(inputs, 2026), null);
+    const totals = summarizeByYear(inputs).get(2026)!;
+    for (const type of ["agricultural", "hunting", "timber", "government"] as const) {
+      expect(all.expected[type]).toBeCloseTo(totals.expected[type], 6);
+      expect(all.received[type]).toBeCloseTo(totals.received[type], 6);
+    }
+    expect(all.taxesDue).toBeCloseTo(totals.taxesDue, 6);
+    expect(all.taxesPaid).toBeCloseTo(totals.taxesPaid, 6);
+    expect(all.hasProjection).toBe(totals.hasProjection);
+  });
+
+  it("entity scopes recompute and their parts sum back to the whole", () => {
+    const inputs = multiEntityInputs();
+    const by = allocateToProperties(inputs, 2026);
+    const entityA = sumPropertyScope(by, new Set(["propA"]));
+    const entityB = sumPropertyScope(by, new Set(["propB"]));
+    const all = sumPropertyScope(by, null);
+
+    // The numbers actually CHANGE with the selection (the bug fixed).
+    expect(entityA.received.timber).toBe(9000);
+    expect(entityB.received.timber).toBe(0);
+    expect(entityA.taxesDue).toBe(700);
+    expect(entityB.taxesDue).toBe(300);
+    expect(entityA.expected.agricultural).toBeCloseTo(20250 * 0.6, 2);
+
+    // And reconcile: A + B (+ nothing Unassigned here) = the whole.
+    for (const type of ["agricultural", "hunting", "timber", "government"] as const) {
+      expect(entityA.expected[type] + entityB.expected[type]).toBeCloseTo(all.expected[type], 6);
+      expect(entityA.received[type] + entityB.received[type]).toBeCloseTo(all.received[type], 6);
+    }
+    expect(entityA.taxesDue + entityB.taxesDue).toBeCloseTo(all.taxesDue, 6);
   });
 });
 

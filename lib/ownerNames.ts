@@ -410,6 +410,43 @@ export function clusterOwners(
   return results.sort((a, b) => b.totalAcres - a.totalAcres);
 }
 
+export interface RankedOwnerCluster extends OwnerClusterResult {
+  // Similarity of the cluster to the ENTERED search text: the max
+  // ownerSimilarity across the cluster's variants (0 when the query
+  // normalizes to nothing).
+  score: number;
+}
+
+// Rank clusters for PRESENTATION (recall stays whatever the search
+// returned): clusters matching a known entity alias pin to the top,
+// then everything by similarity to the entered name, acres breaking
+// ties. The caller draws the close/distant line; CLUSTER_THRESHOLD is
+// the sensible default cutoff.
+export function rankOwnerClusters(
+  queryRaw: string,
+  clusters: OwnerClusterResult[]
+): RankedOwnerCluster[] {
+  const q = normalizeOwnerName(queryRaw).normalized;
+  const scored = clusters.map((c): RankedOwnerCluster => ({
+    ...c,
+    score: q
+      ? Math.max(
+          0,
+          ...c.variants.map((v) => {
+            const n = normalizeOwnerName(v).normalized;
+            return n ? ownerSimilarity(q, n) : 0;
+          })
+        )
+      : 0,
+  }));
+  return scored.sort((a, b) => {
+    const pin = Number(!!b.knownEntityId) - Number(!!a.knownEntityId);
+    if (pin !== 0) return pin;
+    if (b.score !== a.score) return b.score - a.score;
+    return b.totalAcres - a.totalAcres;
+  });
+}
+
 // The most complete variant: most normalized tokens, ties broken by the
 // longer verbatim string. "THORNTON STUART R" beats "THORNTON S R ETUX"
 // because ETUX is noise and S is no more complete than STUART is.

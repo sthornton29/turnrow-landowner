@@ -144,7 +144,8 @@ function niceScaleBar(groundFtAcross: number): { feet: number; label: string } {
   return best;
 }
 
-async function loadLockupPng(): Promise<string | null> {
+// Shared with the tax change report PDF (components/taxes/taxReportPdf.ts).
+export async function loadLockupPng(): Promise<string | null> {
   try {
     const img = new Image();
     img.src = "/brand/turnrow_horizontal_green.svg";

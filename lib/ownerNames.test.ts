@@ -6,6 +6,7 @@ import {
   ownerSimilarity,
   pickDisplayName,
   planEntityQuery,
+  rankOwnerClusters,
   tokensMatch,
   CLUSTER_THRESHOLD,
 } from "./ownerNames";
@@ -287,5 +288,51 @@ describe("planEntityQuery", () => {
   it("returns null when no full word survives", () => {
     expect(planEntityQuery("S R")).toBeNull();
     expect(planEntityQuery("")).toBeNull();
+  });
+});
+
+describe("rankOwnerClusters", () => {
+  const cluster = (over: Partial<import("./ownerNames").OwnerClusterResult>) => ({
+    recordIds: ["r1"],
+    variants: ["SMITH JOHN"],
+    displayName: "SMITH JOHN",
+    knownEntityId: null,
+    totalAcres: 10,
+    ...over,
+  });
+
+  it("orders by similarity to the entered name, acres breaking ties", () => {
+    const ranked = rankOwnerClusters("THORNTON", [
+      cluster({ displayName: "SMITH JOHN", variants: ["SMITH JOHN"], totalAcres: 999 }),
+      cluster({ displayName: "THORNTON STUART R", variants: ["THORNTON STUART R"], totalAcres: 50 }),
+      cluster({ displayName: "THORNTON SAM", variants: ["THORNTON SAM"], totalAcres: 200 }),
+    ]);
+    // Both THORNTON groups score 1.0 (single-token query is a subset);
+    // acres break the tie; SMITH sinks.
+    expect(ranked.map((c) => c.displayName)).toEqual([
+      "THORNTON SAM",
+      "THORNTON STUART R",
+      "SMITH JOHN",
+    ]);
+    expect(ranked[0].score).toBe(1);
+    expect(ranked[2].score).toBe(0);
+  });
+
+  it("pins known-entity clusters above a higher-scoring stranger", () => {
+    const ranked = rankOwnerClusters("THORNTON", [
+      cluster({ displayName: "THORNTON STUART R", variants: ["THORNTON STUART R"], totalAcres: 500 }),
+      cluster({ displayName: "ALBEMARLE CORP", variants: ["ALBEMARLE CORP"], knownEntityId: "e1", totalAcres: 5 }),
+    ]);
+    expect(ranked[0].displayName).toBe("ALBEMARLE CORP");
+    expect(ranked[0].knownEntityId).toBe("e1");
+  });
+
+  it("scores from the BEST variant and stays below the cutoff for distant names", () => {
+    const ranked = rankOwnerClusters("THORNTON STUART", [
+      cluster({ variants: ["T S FARMS LLC", "THORNTON STUART FARMS LLC"], displayName: "THORNTON STUART FARMS LLC" }),
+      cluster({ variants: ["THORN DAVID"], displayName: "THORN DAVID" }),
+    ]);
+    expect(ranked[0].score).toBeGreaterThanOrEqual(CLUSTER_THRESHOLD);
+    expect(ranked[1].score).toBeLessThan(CLUSTER_THRESHOLD);
   });
 });

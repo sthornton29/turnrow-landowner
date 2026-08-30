@@ -24,6 +24,7 @@ import {
   type PropertyAllocation,
 } from "@/lib/gov/govProjection";
 import type { GovShareRow } from "@/lib/income";
+import EntityFilterChips from "@/components/entities/EntityFilterChips";
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:border-kelly-500 focus:outline-none";
@@ -112,6 +113,32 @@ export default function GovPaymentsClient({
   const years = [selectedYear - 2, selectedYear - 1, selectedYear, selectedYear + 1];
 
   const propertyById = new Map(properties.map((p) => [p.id, p]));
+
+  // Entity filter: multi-select comma list (shared semantics with the
+  // income page and dashboard). Empty = all. The headline tiles below
+  // recompute WITHIN the selection - previously only the by-property
+  // groups filtered while the tiles stayed org-wide (same bug class as
+  // the income page).
+  const selectedKeys = entityFilter.split(",").map((s) => s.trim()).filter(Boolean);
+  const filtering = selectedKeys.length > 0;
+  const selectedSet = new Set(selectedKeys);
+  const scope = filtering
+    ? new Set(
+        properties
+          .filter((p) => selectedSet.has(p.entity_id ?? NO_ENTITY))
+          .map((p) => p.id)
+      )
+    : null;
+  const scopedAllocations = scope
+    ? allocations.filter((a) => a.propertyId !== UNLINKED_FARM && scope.has(a.propertyId))
+    : allocations;
+  const scopedShareRows = scope
+    ? shareRows.filter((r) => scope.has(r.propertyId))
+    : shareRows;
+  const scopedLeaseIds = new Set(scopedShareRows.map((r) => r.leaseId));
+  const scopedLeaseTreatments = filtering
+    ? leaseTreatments.filter((l) => scopedLeaseIds.has(l.id))
+    : leaseTreatments;
   const farmById = new Map(inputs.farms.map((f) => [f.id, f]));
   const rowKey = (r: ProjectionRow) => `${r.farmId}|${r.commodity}`;
   const rowByKey = new Map(rows.map((r) => [rowKey(r), r]));
@@ -127,7 +154,7 @@ export default function GovPaymentsClient({
       pid === UNLINKED_FARM ? UNLINKED_FARM : (propertyById.get(pid)?.entity_id ?? NO_ENTITY);
     const keys = [...entities.map((e) => e.id), NO_ENTITY, UNLINKED_FARM];
     return keys
-      .filter((k) => !entityFilter || k === entityFilter)
+      .filter((k) => !filtering || selectedSet.has(k))
       .map((k) => ({
         key: k,
         name: k === UNLINKED_FARM ? "Farms not linked to a property" : k === NO_ENTITY ? "No entity" : (entities.find((e) => e.id === k)?.name ?? "Entity"),
@@ -136,12 +163,13 @@ export default function GovPaymentsClient({
       .filter((g) => g.props.length > 0);
   }, [allocations, entities, entityFilter, propertyById]);
 
-  const totalNet = Math.round(allocations.reduce((s, a) => s + a.net, 0) * 100) / 100;
-  const landownerShare = Math.round(shareRows.reduce((s, r) => s + r.landownerAmount, 0) * 100) / 100;
+  const totalNet = Math.round(scopedAllocations.reduce((s, a) => s + a.net, 0) * 100) / 100;
+  const landownerShare = Math.round(scopedShareRows.reduce((s, r) => s + r.landownerAmount, 0) * 100) / 100;
   // The informational "to your tenant" line belongs only when every
   // share lease leaves the payments with the tenant.
   const tenantRetainsAll =
-    leaseTreatments.length > 0 && leaseTreatments.every((l) => l.treatment === "tenant_retains");
+    scopedLeaseTreatments.length > 0 &&
+    scopedLeaseTreatments.every((l) => l.treatment === "tenant_retains");
   const myaFor = (slug: string) => {
     const r = rows.find((x) => x.commodity === slug);
     return r ? { price: r.myaPrice, state: r.myaState as MyaState } : null;
@@ -379,20 +407,12 @@ export default function GovPaymentsClient({
       </p>
 
       {entities.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {[{ key: "", label: "All entities" }, ...entities.map((e) => ({ key: e.id, label: e.name })), { key: NO_ENTITY, label: "No entity" }].map((chip) => (
-            <Link
-              key={chip.key || "all"}
-              href={href({ entity: chip.key })}
-              className={
-                "rounded-full border px-3 py-1 text-sm font-medium " +
-                (entityFilter === chip.key ? "border-kelly-500 bg-kelly-50 text-pine-900" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
-              }
-            >
-              {chip.label}
-            </Link>
-          ))}
-        </div>
+        <EntityFilterChips
+          entities={entities}
+          selected={selectedKeys}
+          basePath="/gov-payments"
+          extraParams={{ year: String(selectedYear), framing }}
+        />
       ) : null}
 
       {configNotice ? (
@@ -416,13 +436,13 @@ export default function GovPaymentsClient({
               ? "flows into Income as Government payments"
               : tenantRetainsAll
                 ? `base acres on this land generate approximately ${formatDollars(totalNet)}/yr to your tenant`
-                : leaseTreatments.length === 0
+                : scopedLeaseTreatments.length === 0
                   ? "no crop share or flex lease on this land"
                   : "choose the government payment treatment on each lease"}
           </p>
-          {leaseTreatments.length > 0 ? (
+          {scopedLeaseTreatments.length > 0 ? (
             <ul className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-700">
-              {leaseTreatments.map((l) => (
+              {scopedLeaseTreatments.map((l) => (
                 <li key={l.id}>
                   <Link href={`/leases/${l.id}`} className="font-medium text-kelly-700 hover:underline">
                     {l.name}

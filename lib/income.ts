@@ -431,7 +431,21 @@ export interface PropertyTotals {
   received: number;
   taxesDue: number;
   taxesPaid: number;
+  // Per-type splits of expected/received (same buckets as YearTotals),
+  // so entity-scoped views can rebuild the by-type table by summing
+  // properties instead of falling back to org-wide numbers (the income
+  // page entity-filter bug).
+  expectedByType: Record<IncomeType, number>;
+  receivedByType: Record<IncomeType, number>;
+  hasProjection: boolean;
 }
+
+const zeroByType = (): Record<IncomeType, number> => ({
+  agricultural: 0,
+  hunting: 0,
+  timber: 0,
+  government: 0,
+});
 
 // Per-property income and tax expense for one year. Taxes route through
 // the statement's parcel to its property; unmatched statements land in
@@ -441,43 +455,78 @@ export function allocateToProperties(
   year: number
 ): Map<string, PropertyTotals> {
   const result = new Map<string, PropertyTotals>();
-  const add = (propertyId: string, field: keyof PropertyTotals, amount: number) => {
+  const get = (propertyId: string): PropertyTotals => {
     const cur =
       result.get(propertyId) ??
-      { expected: 0, received: 0, taxesDue: 0, taxesPaid: 0 };
-    cur[field] += amount;
+      {
+        expected: 0, received: 0, taxesDue: 0, taxesPaid: 0,
+        expectedByType: zeroByType(), receivedByType: zeroByType(),
+        hasProjection: false,
+      };
     result.set(propertyId, cur);
+    return cur;
+  };
+  const add = (
+    propertyId: string,
+    field: "expected" | "received" | "taxesDue" | "taxesPaid",
+    amount: number,
+    type?: IncomeType
+  ) => {
+    const cur = get(propertyId);
+    cur[field] += amount;
+    if (type && (field === "expected" || field === "received")) {
+      cur[field === "expected" ? "expectedByType" : "receivedByType"][type] += amount;
+    }
   };
   const spread = (
     leaseId: string | null,
     timberSaleId: string | null,
     field: "expected" | "received",
-    amount: number
+    amount: number,
+    type: IncomeType,
+    projection = false
   ) => {
     const shares = sharesFor(inputs, leaseId, timberSaleId);
     if (!shares) {
-      add(UNASSIGNED, field, amount);
+      add(UNASSIGNED, field, amount, type);
+      if (projection) get(UNASSIGNED).hasProjection = true;
       return;
     }
     for (const [propertyId, share] of shares) {
-      add(propertyId, field, amount * share);
+      add(propertyId, field, amount * share, type);
+      if (projection) get(propertyId).hasProjection = true;
     }
   };
 
+  const govIds = govExpectedIds(inputs);
   for (const e of effectiveExpectedEntries(inputs)) {
     if (e.year !== year) continue;
-    spread(e.leaseId, e.timberSaleId, "expected", e.amount);
+    spread(
+      e.leaseId,
+      e.timberSaleId,
+      "expected",
+      e.amount,
+      e.gov ? "government" : typeOf(inputs, e.leaseId, e.timberSaleId),
+      e.projection
+    );
   }
   for (const r of govShareRows(inputs, year)) {
-    if (r.landownerAmount > 0 && !r.generated) add(r.propertyId, "expected", r.landownerAmount);
+    if (r.landownerAmount > 0 && !r.generated) {
+      add(r.propertyId, "expected", r.landownerAmount, "government");
+      get(r.propertyId).hasProjection = true;
+    }
   }
   for (const p of inputs.payments) {
     if (Number(p.received_date.slice(0, 4)) !== year) continue;
-    spread(p.lease_id, p.timber_sale_id, "received", p.amount);
+    const type =
+      p.expected_payment_id && govIds.has(p.expected_payment_id)
+        ? "government"
+        : typeOf(inputs, p.lease_id, p.timber_sale_id);
+    spread(p.lease_id, p.timber_sale_id, "received", p.amount, type);
   }
   for (const s of inputs.settlements) {
     if (Number(s.settlement_date.slice(0, 4)) !== year) continue;
-    spread(null, s.timber_sale_id, "received", s.total_amount);
+    spread(null, s.timber_sale_id, "received", s.total_amount, "timber");
   }
 
   // Taxes route LINE by LINE: a line's tax goes to its parcel's property;
@@ -518,6 +567,31 @@ export function allocateToProperties(
     for (const l of lines) add(propertyOfLine(l), "taxesPaid", shares.get(l.id) ?? 0);
   }
   return result;
+}
+
+// YearTotals for a property SCOPE, summed from the per-property
+// allocation. include = null means everything (including Unassigned),
+// which reconciles exactly with summarizeByYear for the same year; a
+// concrete set sums only those properties (Unassigned income shows only
+// under the everything view, today's rule made explicit). This is what
+// entity filtering rides on: the by-type table, chart, and tax rows all
+// recompute within the scope instead of showing org-wide numbers.
+export function sumPropertyScope(
+  byProperty: Map<string, PropertyTotals>,
+  include: Set<string> | null
+): YearTotals {
+  const totals = emptyTotals();
+  for (const [propertyId, t] of byProperty) {
+    if (include && !include.has(propertyId)) continue;
+    for (const type of Object.keys(totals.expected) as IncomeType[]) {
+      totals.expected[type] += t.expectedByType[type];
+      totals.received[type] += t.receivedByType[type];
+    }
+    totals.taxesDue += t.taxesDue;
+    totals.taxesPaid += t.taxesPaid;
+    if (t.hasProjection) totals.hasProjection = true;
+  }
+  return totals;
 }
 
 // Fetch-all helper used by pages that need income data. Kept here so every

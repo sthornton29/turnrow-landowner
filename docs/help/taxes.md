@@ -3,8 +3,8 @@ title: Property taxes
 route: /taxes
 group: Property Taxes
 order: 1
-updated: 2026-08-21
-keywords: property tax, statement, upload, account, parcel match, PPIN, identifiers, lines, reconcile, completeness, unpaid, delinquent, due date, batch pay, check number, county calendar, assessed value, appraised value, personal property, tax year, entity, taxpayer
+updated: 2026-08-30
+keywords: property tax, statement, upload, account, parcel match, PPIN, identifiers, lines, reconcile, completeness, unpaid, delinquent, due date, batch pay, check number, county calendar, assessed value, appraised value, personal property, tax year, entity, taxpayer, change report, year over year, effective rate, current use, class iii, homestead, exemption, appeal, spike, pdf
 ---
 ## What this page is for
 
@@ -31,6 +31,16 @@ When no number matches, a printed legal description can still place the line thr
 ## Taxpayer and entity
 
 The taxpayer name as printed is matched to your entities, tolerating county typos, and a "C/O" name is the signal when the county bills in care of someone. Confirming a statement registers its account to that entity and saves the printed spelling, so later statements on the same account are labeled instantly.
+
+## The Tax Change Report
+
+Once two or more years of statements are loaded, the **Tax change report** section compares each parcel's lines year over year. Pick the years, entities (the same multi-select chips as Income), a property or county, and a spike threshold, and it shows:
+
+- Total tax and appraised value for both years with percent changes, and a small trend chart across every year in between.
+- **Biggest movers**: each parcel's values, tax, and effective rate (tax divided by appraised value), with a plain sentence splitting the change ("Up $412.00: $300.00 from higher appraisal, $112.00 from rates").
+- **Flags**, the part worth reading first: an assessment ratio (assessed over appraised) jumping from 10% to 20% usually means current use (Class III) was lost and is worth a call to the revenue commissioner; an exemption code like H1 disappearing is the homestead version of the same problem; a value spike past the threshold is an appeal-review candidate; and parcels present one year but missing the other are listed rather than silently dropped.
+
+**Export PDF** produces the report in the print style for a CPA or an appeal filing. A restricted user's report covers only their granted entities.
 
 ## Paying
 

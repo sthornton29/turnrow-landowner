@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
 import { formatDollars } from "@/lib/format";
-import { NO_ENTITY } from "@/lib/entities";
+import { NO_ENTITY, parseEntityParam } from "@/lib/entities";
 import {
   UNASSIGNED,
   allocateToProperties,
@@ -9,11 +9,13 @@ import {
   informationalGovPayments,
   loadIncomeInputs,
   summarizeByYear,
+  sumPropertyScope,
   type IncomeType,
   type PropertyTotals,
   govShareRows,
 } from "@/lib/income";
 import RentUpload from "@/components/payments/RentUpload";
+import EntityFilterChips from "@/components/entities/EntityFilterChips";
 
 export const metadata = { title: "Income" };
 
@@ -43,28 +45,60 @@ export default async function IncomePage({
   const years = Array.from(new Set([...byYear.keys(), currentYear])).sort();
   const selectedYear = Number(yearParam) || currentYear;
 
-  const totals = byYear.get(selectedYear) ?? emptyTotals();
-  const sumTypes = (r: Record<IncomeType, number>) =>
-    r.agricultural + r.hunting + r.timber + r.government;
-  const totalExpected = sumTypes(totals.expected);
-  const totalReceived = sumTypes(totals.received);
-  const govInfo = informationalGovPayments(inputs, selectedYear);
-  const govRowsYear = govShareRows(inputs, selectedYear);
-  const fsaDirectShare = govRowsYear.some((r) => r.landownerAmount > 0 && r.receivedVia === "fsa_direct");
-  const tenantRemitShare = govRowsYear.some((r) => r.landownerAmount > 0 && r.receivedVia === "tenant_remits");
-
-  const byProperty = allocateToProperties(inputs, selectedYear);
-  const propertyName = new Map((properties ?? []).map((p) => [p.id, p.name]));
-
-  // Entity level: group the by-property rows under the entity that holds
-  // each property. Unassigned income (no land linked) and unmatched taxes
-  // belong to no entity and only show in the "All entities" view.
+  // Entity filter: MULTI-SELECT (empty = all entities). EVERY number on
+  // the page recomputes within the selection by summing the per-property
+  // allocation over the selected entities' properties - the old code
+  // filtered only the by-property groups and left the totals, chart,
+  // gov line, and tax rows org-wide (the reported bug).
   const entityList = entities ?? [];
   const hasEntities = entityList.length > 0;
   const entityOfProperty = new Map(
     (properties ?? []).map((p) => [p.id, p.entity_id ?? NO_ENTITY])
   );
-  const entityFilter = entityParam ?? "";
+  const selectedKeys = parseEntityParam(entityParam).filter(
+    (k) => k === NO_ENTITY || entityList.some((e) => e.id === k)
+  );
+  const filtering = selectedKeys.length > 0;
+  const selectedSet = new Set(selectedKeys);
+  // The property scope the selection resolves to (null = everything,
+  // which includes Unassigned; a concrete selection never does).
+  const scope = filtering
+    ? new Set(
+        (properties ?? [])
+          .filter((p) => selectedSet.has(p.entity_id ?? NO_ENTITY))
+          .map((p) => p.id)
+      )
+    : null;
+
+  const byProperty = allocateToProperties(inputs, selectedYear);
+  const totals = filtering
+    ? sumPropertyScope(byProperty, scope)
+    : (byYear.get(selectedYear) ?? emptyTotals());
+  const sumTypes = (r: Record<IncomeType, number>) =>
+    r.agricultural + r.hunting + r.timber + r.government;
+  const totalExpected = sumTypes(totals.expected);
+  const totalReceived = sumTypes(totals.received);
+
+  // Government payments line, scoped the same way (the rows carry their
+  // property).
+  const govInfo = informationalGovPayments(inputs, selectedYear);
+  const govInfoTotal = scope
+    ? Array.from(govInfo.byProperty.entries()).reduce(
+        (s, [pid, amount]) => (scope.has(pid) ? s + amount : s),
+        0
+      )
+    : govInfo.total;
+  const govRowsYear = govShareRows(inputs, selectedYear).filter(
+    (r) => !scope || scope.has(r.propertyId)
+  );
+  const fsaDirectShare = govRowsYear.some((r) => r.landownerAmount > 0 && r.receivedVia === "fsa_direct");
+  const tenantRemitShare = govRowsYear.some((r) => r.landownerAmount > 0 && r.receivedVia === "tenant_remits");
+
+  const propertyName = new Map((properties ?? []).map((p) => [p.id, p.name]));
+
+  // Entity level: group the by-property rows under the entity that holds
+  // each property. Unassigned income (no land linked) and unmatched taxes
+  // belong to no entity and only show in the "All entities" view.
   const entityGroups: Array<{
     key: string;
     name: string | null;
@@ -77,7 +111,7 @@ export default async function IncomePage({
       UNASSIGNED,
     ];
     for (const key of orderedKeys) {
-      if (entityFilter && key !== entityFilter) continue;
+      if (filtering && !selectedSet.has(key)) continue;
       const rows = Array.from(byProperty.entries())
         .filter(([propertyId]) =>
           key === UNASSIGNED
@@ -110,12 +144,22 @@ export default async function IncomePage({
       { expected: 0, received: 0, taxesDue: 0, taxesPaid: 0 }
     );
 
-  // Chart data: expected vs received vs taxes paid per year
+  // Chart data: expected vs received vs taxes paid per year, computed
+  // within the entity selection (per-year allocation; the years list is
+  // small).
   const chartYears = years.map((y) => {
-    const t = byYear.get(y);
-    const expected = t ? sumTypes(t.expected) : 0;
-    const received = t ? sumTypes(t.received) : 0;
-    return { year: y, expected, received, taxes: t?.taxesPaid ?? 0 };
+    const t = filtering
+      ? sumPropertyScope(
+          y === selectedYear ? byProperty : allocateToProperties(inputs, y),
+          scope
+        )
+      : (byYear.get(y) ?? emptyTotals());
+    return {
+      year: y,
+      expected: sumTypes(t.expected),
+      received: sumTypes(t.received),
+      taxes: t.taxesPaid,
+    };
   });
   const maxValue = Math.max(
     1,
@@ -131,7 +175,7 @@ export default async function IncomePage({
           {years.map((y) => (
             <Link
               key={y}
-              href={`/income?year=${y}${entityFilter ? `&entity=${entityFilter}` : ""}`}
+              href={`/income?year=${y}${filtering ? `&entity=${selectedKeys.join(",")}` : ""}`}
               className={
                 "rounded-lg px-3 py-1.5 text-sm font-medium " +
                 (y === selectedYear
@@ -146,26 +190,12 @@ export default async function IncomePage({
       </div>
 
       {hasEntities ? (
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            { key: "", label: "All entities" },
-            ...entityList.map((e) => ({ key: e.id, label: e.name })),
-            { key: NO_ENTITY, label: "No entity" },
-          ].map((chip) => (
-            <Link
-              key={chip.key || "all"}
-              href={`/income?year=${selectedYear}${chip.key ? `&entity=${chip.key}` : ""}`}
-              className={
-                "rounded-full border px-3 py-1 text-sm font-medium " +
-                (entityFilter === chip.key
-                  ? "border-kelly-500 bg-kelly-50 text-pine-900"
-                  : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
-              }
-            >
-              {chip.label}
-            </Link>
-          ))}
-        </div>
+        <EntityFilterChips
+          entities={entityList}
+          selected={selectedKeys}
+          basePath="/income"
+          extraParams={{ year: String(selectedYear) }}
+        />
       ) : null}
 
       {/* Expected vs received by year */}
@@ -270,10 +300,10 @@ export default async function IncomePage({
                             : "Remitted by the tenant (expected each October)"}
                       </span>
                     ) : null}
-                    {type === "government" && govInfo.total > 0 ? (
+                    {type === "government" && govInfoTotal > 0 ? (
                       <span className="block text-xs font-normal text-gray-500">
                         Base acres on your land generate approximately{" "}
-                        {formatDollars(govInfo.total)}/yr to your tenant
+                        {formatDollars(govInfoTotal)}/yr to your tenant
                         {totals.expected.government > 0 ? "" : " (no share under your leases)"}.{" "}
                         <Link href="/gov-payments" className="text-kelly-700 hover:underline">
                           Details
@@ -334,8 +364,8 @@ export default async function IncomePage({
         </h2>
         {entityGroups.length === 0 ? (
           <p className="p-4 text-sm text-gray-500">
-            {entityFilter
-              ? `No income recorded or projected for this entity in ${selectedYear}.`
+            {filtering
+              ? `No income recorded or projected for the selected entities in ${selectedYear}.`
               : `No income recorded or projected for ${selectedYear} yet. Lump sums
                  allocate across a lease's linked properties by leased acres.`}
           </p>
