@@ -12,22 +12,32 @@ import {
 } from "@/lib/assetTypes";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import { circleUpdateForDetails } from "@/lib/geo/circle";
+import { formatNumber } from "@/lib/format";
 import type { AssetGeo, AssetType } from "@/types/db";
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none";
 
 // Full asset editor: shared fields plus the dynamic type-specific form
-// driven by lib/assetTypes.ts, photos, and documents.
+// driven by lib/assetTypes.ts, photos, and documents. Grain bins lead
+// with capacity; bin sites lead with the TOTAL capacity of their bins.
 export default function AssetDetail({
   asset,
   properties,
-  wells,
+  parentOptions,
+  childAssets,
   orgId,
 }: {
   asset: AssetGeo;
   properties: Array<{ id: string; name: string }>;
-  wells: Array<{ id: string; name: string }>;
+  parentOptions: Array<{ id: string; name: string }>;
+  childAssets: Array<{
+    id: string;
+    name: string;
+    asset_type: string;
+    details: Record<string, unknown> | null;
+    is_active: boolean;
+  }>;
   orgId: string;
 }) {
   const supabase = createClient();
@@ -38,6 +48,46 @@ export default function AssetDetail({
   const [error, setError] = useState<string | null>(null);
 
   const def = ASSET_TYPES[assetType];
+
+  // Capacity is the grain headline: a bin's own bushels, a site's total
+  // over its active bins.
+  const capacityBu = Number(asset.details?.capacity_bu) || null;
+  const isSite = assetType === "grain_bin_site";
+  const childBins = childAssets.filter(
+    (c) => c.asset_type === "grain_bin" && c.is_active
+  );
+  const siteCapacity = childBins.reduce(
+    (s, b) => s + (Number(b.details?.capacity_bu) || 0),
+    0
+  );
+  const parentName = asset.parent_asset_id
+    ? parentOptions.find((p) => p.id === asset.parent_asset_id)?.name ?? null
+    : null;
+
+  // A new bin lands on the site unplaced (no geometry yet); the map's
+  // Move pin puts it on the ground afterward.
+  async function addBinToSite() {
+    const name = window.prompt("Name the new bin (e.g. Bin 3)");
+    if (!name?.trim()) return;
+    setBusy(true);
+    const { data, error: err } = await supabase
+      .from("assets")
+      .insert({
+        organization_id: orgId,
+        asset_type: "grain_bin",
+        name: name.trim(),
+        property_id: asset.property_id,
+        parent_asset_id: asset.id,
+      })
+      .select("id")
+      .single();
+    setBusy(false);
+    if (err || !data) {
+      setError("Could not add the bin. " + (err?.message ?? ""));
+      return;
+    }
+    router.push(`/assets/${data.id}`);
+  }
 
   async function save(formData: FormData) {
     setBusy(true);
@@ -65,7 +115,7 @@ export default function AssetDetail({
         year_installed: num("year_installed"),
         condition: text("condition"),
         estimated_value: num("estimated_value"),
-        parent_asset_id: def.canLinkToWell ? text("parent_asset_id") : null,
+        parent_asset_id: def.parentType ? text("parent_asset_id") : null,
         notes: text("notes"),
         details,
       })
@@ -144,6 +194,65 @@ export default function AssetDetail({
         </div>
       </div>
 
+      {/* Capacity headline: a bin's bushels, or a site's total. */}
+      {isSite ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Total capacity
+          </p>
+          <p className="text-3xl font-semibold text-pine-900">
+            {formatNumber(siteCapacity)} <span className="text-lg font-medium">bu</span>
+          </p>
+          <p className="mt-0.5 text-sm text-gray-600">
+            {childBins.length} bin{childBins.length === 1 ? "" : "s"} on this site
+          </p>
+          {childBins.length > 0 ? (
+            <ul className="mt-2 divide-y divide-gray-100 border-t border-gray-100">
+              {childBins.map((b) => (
+                <li key={b.id} className="flex items-baseline justify-between py-1.5 text-sm">
+                  <Link href={`/assets/${b.id}`} className="font-medium text-gray-900 hover:underline">
+                    {b.name}
+                  </Link>
+                  <span className="text-pine-900">
+                    {Number(b.details?.capacity_bu)
+                      ? `${formatNumber(Number(b.details?.capacity_bu))} bu`
+                      : "no capacity set"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <button
+            onClick={addBinToSite}
+            disabled={busy}
+            className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            + Add a bin to this site
+          </button>
+        </div>
+      ) : assetType === "grain_bin" ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Capacity
+          </p>
+          <p className="text-3xl font-semibold text-pine-900">
+            {capacityBu != null ? formatNumber(capacityBu) : "-"}{" "}
+            <span className="text-lg font-medium">bu</span>
+          </p>
+          {parentName ? (
+            <p className="mt-0.5 text-sm text-gray-600">
+              Part of{" "}
+              <Link
+                href={`/assets/${asset.parent_asset_id}`}
+                className="font-medium text-kelly-700 hover:underline"
+              >
+                {parentName}
+              </Link>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <form action={save} className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -217,10 +326,10 @@ export default function AssetDetail({
               className={inputClass}
             />
           </div>
-          {def.canLinkToWell ? (
+          {def.parentType ? (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
-                Supply well
+                {def.parentLabel ?? "Parent"}
               </label>
               <select
                 name="parent_asset_id"
@@ -228,7 +337,7 @@ export default function AssetDetail({
                 className={inputClass}
               >
                 <option value="">None</option>
-                {wells.map((w) => (
+                {parentOptions.map((w) => (
                   <option key={w.id} value={w.id}>
                     {w.name}
                   </option>

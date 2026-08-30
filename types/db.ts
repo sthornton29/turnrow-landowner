@@ -4,7 +4,10 @@ import type { DocType } from "@/lib/documents";
 // Row shapes as the app reads them (geometry comes from the *_geo views
 // as parsed GeoJSON).
 
-export type Role = "owner" | "member";
+// Migration 0034 renamed the roles: owner -> admin, member -> user.
+// Admins see everything in the org; users see only their granted
+// entities (entity_access, enforced in RLS).
+export type Role = "admin" | "user";
 
 export interface Organization {
   id: string;
@@ -29,6 +32,9 @@ export interface Invite {
   organization_id: string;
   email: string;
   role: Role;
+  // Initial entity grants copied into entity_access when a user-role
+  // invite is accepted (migration 0034).
+  entity_ids: string[];
   invited_by: string | null;
   accepted_at: string | null;
   created_at: string;
@@ -134,6 +140,7 @@ export type AssetType =
   | "shed"
   | "barn"
   | "grain_bin"
+  | "grain_bin_site"
   | "house"
   | "fence"
   | "pond_dam"
@@ -222,6 +229,7 @@ export interface EasementGeo {
   elevation_ft: number | null; // flowage contour
   program: string | null; // conservation program / holder detail
   restrictions: string | null; // conservation restrictions notes
+  emergency_phone: string | null; // shown tap-to-call; prominent on pipeline/powerline
   notes: string | null;
   acres: number | null;
   length_feet: number | null;

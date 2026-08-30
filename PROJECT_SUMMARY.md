@@ -1,6 +1,60 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-29 (one-step Add: the map's + Add button now
+Last updated: 2026-08-29 evening (ROLES WITH ENTITY-SCOPED ACCESS,
+migration 0034: roles renamed owner -> admin, member -> user
+(is_platform_admin unchanged); admins see everything; users see ONLY
+their granted entities' data, enforced by ~39 ADDITIVE RESTRICTIVE RLS
+policies (<t>_entity_scope) layered on the untouched org policies:
+properties by entity_id, children via hoisted accessible-id array
+helpers (private.user_accessible_property_ids() and friends, evaluated
+once per statement), leases via lease_lands, timber sales via mapped
+stands, tax statements via matched lines OR the statement's entity,
+FSA farms via property links, farm rows via field mappings, documents
+via links or the primary attachment; NULL-entity properties and
+property-less assets/easements/issues are ADMIN-ONLY (an amber
+Settings notice lists them); link tables check BOTH sides on write;
+parent creation (leases, sales, farms, statements) is admin work by
+design; write checks read the new row's own columns (never a
+self-select); deliberately org-wide: tenants (INCLUDING their contact
+details, per spec), farm_connections reads (writes admin-only),
+farm_marketing_prices, county_tax_defaults; storage objects stay
+org-scoped (unguessable paths, the documents table is the filtered
+index). entity_access join table + invites.entity_ids; accept_invite
+copies role and grants; set_member_role (SECURITY DEFINER, never your
+own row) is the one role-change path; Settings Members grew role
+selects, per-user entity checkboxes, entity grants on invites. The
+assistant inherits all of it through the session client and SECURITY
+INVOKER assistant_query, zero assistant changes. Tests:
+lib/entityScopePolicies.test.ts (mirror: every scoped table has its
+restrictive policy) and lib/entityScope.live.test.ts (RLS_TEST=1,
+provisions a scratch two-entity org + two real users against the live
+project, asserts read isolation per table, the assistant path, and
+the write rules, then cleans up). ALSO: map Filter button (reuses the
+print selection machinery, extracted to components/map/FilterTree.tsx
+- property chips, searchable tri-state item tree - against a
+persisted turnrow.map.filter.v1 exclusion set; hidden items leave the
+map and labels; amber "N hidden - clear" pill; print keeps its own
+session set); grain bins are capacity-first (capacity_bu is the
+headline on the panel and page; circle placement and diameter_ft
+RETIRED for bins, migration 0035 converts circle-drawn bins to pins
+at their centers and RAISEs the count); NEW grain_bin_site asset type
+(letter BS, children via parent_asset_id - canLinkToWell generalized
+to parentType/parentLabel; site panel/page lead with TOTAL capacity,
+bin list, Add bin to this site; on the map the site marker carries
+the total in its label and child bin pins render only past zoom 13.5
+via assets-child-* layers); header logo hard left (full-bleed banner,
+nav takes the freed width; page content stays max-w-5xl so header and
+content edges no longer align on wide screens, deliberate); Assets
+page grouped by type (Irrigation / Storage / Buildings / Other, counts
++ value and bushel subtotals, sites nest their bins; a single-type
+filter collapses flat); easements gain emergency_phone (migration
+0036; on every type's form, tap-to-call, RED and prominent for
+pipeline/powerline; deed extraction suggests it and offers to save it
+to the attached easement). Cosmetic admin gates on New lease / New
+timber sale / taxes upload buttons (RLS is the enforcement). Help:
+new members.md topic; assets/assets-page/map/easements/settings
+updated.)
+Earlier, 2026-08-29: (one-step Add: the map's + Add button now
 opens ONE unified picker directly (components/map/AddPicker.tsx; the
 old Draw / Asset / Pivot intermediate menu and the separate
 DrawTypePicker / AssetPlacePicker components are gone): grouped
@@ -70,6 +124,39 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 "?" drawer, how-to chat, and Contact support)
 
 ## DEPLOY CHECKLIST (this release)
+
+0000000. Run 0034_roles_entity_access.sql, then 0035_grain_bin_sites.sql,
+   then 0036_easement_emergency_phone.sql in Supabase, IN THAT ORDER,
+   BEFORE this deploy goes live (ALL THREE RUN 2026-08-29; 0034's
+   first cut hit "operator does not exist: uuid = uuid[]" - ANY over a
+   bare scalar subselect parses as the SUBQUERY form; the shipped v2
+   casts every hoisted subselect ::uuid[] and is fully re-runnable).
+   THEN run 0037_entity_scope_read_after_write.sql (2026-08-29, NOT
+   YET RUN at the time of writing): PostgREST INSERT..RETURNING checks
+   the new row against USING, and 0034's documents/tax_statements
+   USING needed the row's OWN columns (a same-statement self-select
+   sees nothing), or a user-role member's own document upload is
+   rejected. Found by the live isolation test. Without 0037 nothing
+   admin-facing breaks; user-role uploads and entity-matched statement
+   inserts fail until it runs.
+   * 0034 (roles + entity scoping): AFTER IT RUNS, every existing
+     'member' account is a 'user' with NO entity grants and their app
+     is EMPTY until an admin grants entities in Settings > Members or
+     promotes them to admin. 'owner' accounts become 'admin' and are
+     unaffected (Stuart's account was 'owner'). A deploy without 0034
+     breaks Settings (entity_access queries) and the invite form
+     (entity_ids column).
+   * 0035 (bin sites + capacity-first bins): watch the SQL editor
+     NOTICE line "Converted N circle-drawn grain bin(s) to pins" and
+     note the count. A deploy without it breaks saving grain_bin_site
+     assets (check constraint).
+   * 0036 (easement emergency_phone): the map and easement pages read
+     the column through easements_geo; a deploy without it breaks the
+     easements panel.
+   * After 0034, optionally run the live isolation test once from a
+     dev machine: RLS_TEST=1 npx vitest run lib/entityScope.live.test.ts
+     (needs SUPABASE_SERVICE_ROLE_KEY in .env.local; it provisions and
+     deletes its own scratch org).
 
 000000. Run 0033_harvest_status.sql in Supabase BEFORE this deploy goes
    live (2026-08-25; NOT YET RUN at the time of writing): adds
@@ -231,7 +318,11 @@ and Postgres row level security guarantees each org sees only its own data.
   parsing, program config resolution, PLC and ARC-CO engines with
   worked examples, government payment projection and allocation,
   income government line, assistant SQL guard mirror, assistant tool
-  schemas, help route matching and search and nav coverage)
+  schemas, help route matching and search and nav coverage, the
+  entity-scope policy mirror of migration 0034); plus the RLS_TEST=1
+  gated live isolation suite (lib/entityScope.live.test.ts, the
+  repo's first database-touching test, taxFixtures.live pattern:
+  provisions and removes its own scratch org)
 
 ## Environment variables (local .env.local and Vercel)
 
@@ -334,7 +425,15 @@ Tables:
   (informational on LINE easements, never auto-buffered; draw the
   polygon for the strip), elevation_ft (flowage contour), program and
   restrictions (conservation holder/program detail and restrictions
-  notes), notes. GEOMETRY IS LINE OR POLYGON PER EASEMENT: boundary
+  notes), emergency_phone (migration 0036; on EVERY type's form,
+  rendered as a tel: link - a prominent RED block on the map panel and
+  easement page for pipeline and powerline
+  (easementShowsEmergencyPhoneProminently in lib/easements.ts), a calm
+  row for other types; the deed extraction schema carries
+  emergency_phone so a scanned easement deed that prints the
+  operator's one-call number suggests it, and confirming a scan on a
+  document attached to an easement offers to save it there -
+  confirm-first, the FSA-farms precedent), notes. GEOMETRY IS LINE OR POLYGON PER EASEMENT: boundary
   MultiPolygon with the generated acres column, OR geom
   MultiLineString with generated length_feet/miles (the roads
   formula), with a check that both are never set; set_geometry's
@@ -599,15 +698,38 @@ Phase 2 tables (all with the same org RLS + composite property FK):
   and miles.
 - assets: ONE table with a type system. property_id (nullable),
   asset_type (well, irrigation_pivot, underground_pipe, riser, shop,
-  shed, barn, grain_bin, house, fence, pond_dam, other; an
+  shed, barn, grain_bin, grain_bin_site since 0035, house, fence,
+  pond_dam, other; an
   irrigation_lateral type existed briefly in 0013 and was removed in
   0015 with zero rows), name (only required field), geometry accepting Point/Line/Polygon, year_installed, condition
   (excellent/good/fair/poor), estimated_value, notes, details jsonb
   (type-specific fields validated in the app against lib/assetTypes.ts,
   which drives the dynamic forms and panels), parent_asset_id
-  (self-reference: pivot/riser/pipe links to its supply well; composite FK
-  keeps it in-tenant), is_active (deactivate instead of delete to keep
-  history).
+  (self-reference, generalized 2026-08-29 from canLinkToWell to
+  AssetTypeDef.parentType/parentLabel: pivot/riser/pipe link to their
+  supply well, a grain_bin to its grain_bin_site; composite FK
+  keeps it in-tenant; deleting a parent detaches children, set null),
+  is_active (deactivate instead of delete to keep history).
+  GRAIN BINS ARE CAPACITY-FIRST (2026-08-29): capacity_bu is the
+  headline on the map panel and asset page; the diameter_ft spec field
+  and the circle placement are RETIRED for bins (migration 0035
+  converted circle-drawn bins to pins at their centers; noCircle on
+  AssetTypeDef also excludes the generic mapManaged footprint
+  diameter, and ROUND_ASSET_TYPES is now empty - the circle tool
+  itself remains for other types). GRAIN BIN SITES (letter BS): pin or
+  outline; the site's panel and page lead with TOTAL capacity summed
+  over child bins, list the bins tappably, and offer "Add bin to this
+  site" (map: crosshair placement with parent + property prefilled
+  via binSiteParentRef; page: creates an unplaced bin). On the map the
+  site marker's label carries the total ("North bins (124,000 bu)")
+  and child bin pins render only past zoom 13.5 (assets-child-circle/
+  letter/name layers filter on the parentId feature prop rowsToFC
+  stamps; the base assets layers exclude parented bins; no Mapbox
+  clustering - the assets source mixes geometries). The Assets page
+  groups by type automatically (Irrigation / Storage / Buildings /
+  Other with count, value, and bushel subtotals; sites nest their
+  bins; a single-type filter collapses flat); the dashboard's Grain
+  bins tile keeps counting individual bins.
 - Views timber_stands_geo / roads_geo / assets_geo mirror the Phase 1 *_geo
   pattern. public.set_geometry(entity_type, id, geojson) generalizes
   set_boundary to every entity type (polygon types incl. utility
@@ -1276,18 +1398,87 @@ Functions and views:
   returns raw geometry as binary hex. The app reads boundaries only from
   these views.
 
-## Tenancy and auth model (Phase 1 decisions)
+## Tenancy, roles, and entity-scoped access
 
 - Signup is INVITE ONLY. Admin workflow for a new customer (Supabase SQL
   editor): insert an organizations row, then an invites row with the
-  customer's email and role 'owner'. The customer signs up with that email;
+  customer's email and role 'admin'. The customer signs up with that email;
   the onboarding page calls accept_invite() and connects them. Self-serve
   org creation (with a paywall) can be added later with a small migration.
-- Org owners invite additional members from the Members page (no email is
-  sent; the invitee just signs up with the same address).
+- ROLES (migration 0034): 'admin' (was 'owner') and 'user' (was
+  'member'); profiles.is_platform_admin stays orthogonal (global
+  registries only). Admins see and manage everything in their org.
+  USERS SEE ONLY THEIR GRANTED ENTITIES' DATA, enforced in RLS by one
+  additive RESTRICTIVE policy per scoped table (<t>_entity_scope)
+  ANDed with the untouched permissive org policies (rollback = drop
+  the restrictive policies). entity_access(user_id, entity_id) holds
+  the grants (admins are not listed; the role sees everything).
+- The scope rules, per chain: properties by entity_id (NULL =
+  admin-only); parcels/fields/pastures/wetlands/timber_stands/roads/
+  cemeteries/land_sections/property_aliases/timber_scans via their
+  property; assets/easements/maintenance_issues the same with NULL
+  property admin-only (the Settings amber notice lists unassigned
+  records); entities/entity_aliases/entity_accounts by granted entity;
+  leases via ANY lease_lands property (no lands = admin-only), their
+  assumptions/expected_payments/payments through the lease or sale;
+  timber_sales via mapped stands, settlements through the sale; tax
+  statements via a matched line's parcel OR the statement's own
+  entity_id, lines by their parcel (personal property = admin-only),
+  payments through the statement, parcel_identifiers by parcel; FSA
+  farms via fsa_farm_properties, base acres and elections through the
+  farm; farm_field_data/farm_projected_yields via a field mapping to
+  an accessible property or ag field; documents via document_properties
+  links or the primary attachment (tenant and Unfiled = admin-only),
+  document_versions through the document. DELIBERATELY ORG-WIDE:
+  tenants (including contact details, per spec - noted), reads of
+  farm_connections (writes admin-only), farm_marketing_prices,
+  county_tax_defaults, assistant_usage, profiles/invites/organizations.
+  STORAGE stays org-scoped: paths are unguessable and the documents
+  table is the only (filtered) index - an accepted boundary.
+- Policy mechanics (hard-won rules): helper calls are HOISTED as
+  scalar subselects CAST TO uuid[]
+  ("= any((select private.user_entity_ids())::uuid[])" - without the
+  cast Postgres parses ANY(subquery) and fails with uuid = uuid[]) so
+  they run once per statement and use indexes; accessible-id ARRAY
+  helpers (user_accessible_property_ids and friends, SECURITY DEFINER,
+  org-checked) avoid per-row policy recursion; BOTH the write check
+  AND the read-back read the new row's OWN columns, never a
+  self-select (a same-statement self-read sees nothing: it rejects
+  inserts via WITH CHECK, and - the 0037 lesson - rejects the
+  INSERT..RETURNING read-back via USING, which is how PostgREST
+  returns the new row; documents use
+  can_access_attachment(entity_type, entity_id) on both sides, with
+  document_has_accessible_link(id) as USING's second door, and
+  tax_statements' USING carries the own-column entity branch);
+  link tables
+  (lease_lands, timber_sale_stands, fsa_farm_properties,
+  document_properties) require BOTH sides on write so a user cannot
+  graft their property onto another entity's record and escalate
+  reads; parents whose access derives from children (leases, sales,
+  farms, statements) cannot be CREATED by users - org-structure
+  creation is admin work (cosmetic button gates on the leases,
+  timber sales, and taxes pages; RLS enforces).
+- Every aggregate surface (dashboard, income, gov payments, taxes,
+  Farm Data, prints, exports) reads through the session client, so a
+  user's totals are computed within their scope automatically; the Ask
+  assistant scopes the same way (session client + SECURITY INVOKER
+  assistant_query, unchanged). Service-role writers remain the global
+  caches and the farm sync only.
+- Members UI (Settings): role select per member (via SECURITY DEFINER
+  set_member_role: admin-only, same org, never your own row), entity
+  checkboxes per user-role member (entity_access, admin-write RLS),
+  invites carry role + entity_ids (accept_invite copies both,
+  validating entities belong to the invite's org), and the amber
+  unassigned-records notice. Tests: lib/entityScopePolicies.test.ts
+  (mirror; every scoped table must have its restrictive policy) and
+  lib/entityScope.live.test.ts (RLS_TEST=1 gated; provisions a
+  two-entity scratch org and two auth users on the LIVE project,
+  asserts per-session table counts, assistant_query isolation, and
+  the write rules, then tears down).
 - proxy.ts (Next 16's rename of middleware.ts) refreshes the Supabase
   session and redirects: logged-out users to /login, logged-in users with no
-  org to /onboarding (via the (app) layout's requireOrg()).
+  org to /onboarding (via the (app) layout's requireOrg()). No route
+  gates by role; RLS is the enforcement everywhere.
 
 ## App structure
 
@@ -1301,10 +1492,16 @@ Functions and views:
   on /map, and the nav order starts with Map, then Dashboard,
   Properties, Timber, Assets, Leases, Property Taxes, Income, Gov
   Payments, Documents, Ask, Farm Data, Import, then the "?" help
-  button and a gear icon for /settings. Bottom tab bar on mobile (Map,
+  button and a gear icon for /settings. The banner is FULL-BLEED
+  (2026-08-29): the logo sits hard left and the nav takes the whole
+  width (min-w-0 justify-end), which is what stopped the pills
+  crowding at laptop widths; page content stays max-w-5xl centered,
+  so header and content edges no longer align on wide screens
+  (deliberate). Bottom tab bar on mobile (Map,
   Home, Properties, Leases, Income) with the "?" and the gear in the
-  top bar. ONE SETTINGS PAGE (/settings): Members section (list,
-  invites, roles; owner-only invite form), Admin section (the
+  top bar. ONE SETTINGS PAGE (/settings): Members section (roles,
+  per-user entity access, invites with entity grants, the
+  admin-only unassigned-records notice; see Tenancy), Admin section (the
   platform-admin county GIS registry rendered inline via
   AdminGisClient embedded mode, platform admins only), an Admin
   "government payment program parameters" section
@@ -1660,7 +1857,25 @@ Functions and views:
     Likewise the LAYERS toggle box: the left control column is
     11.5rem with 13px rows so every layer name ("Pastures/Grassland",
     "Maintenance issues", a future "Government payments") fits one
-    line; the yardstick is commented in LayerToggle.tsx. PICK FIRST,
+    line; the yardstick is commented in LayerToggle.tsx. MAP FILTER
+    (2026-08-29): a Filter button under the Layers box opens a panel
+    reusing the print setup's selection machinery, extracted to
+    components/map/FilterTree.tsx (PropertyChips, the searchable
+    tri-state ItemTree, TriCheckbox/triStateOf; the print panel now
+    imports the same components): property chips hide a boundary plus
+    everything on it (togglePropertyIn sweep over rowLists), the tree
+    lists ALL rows (not frame-limited, unlike print), and the
+    exclusion set persists per browser as turnrow.map.filter.v1
+    (stale keys of deleted rows are harmless to inc()). Hidden items
+    leave every live source AND label source through the same inc()
+    seam the print uses (excluded = printOpen ? printExcluded :
+    mapFilterExcluded - the print session's set takes over while the
+    print panel is open and the filter's set resumes after); the
+    button shows "Filter - N hidden" in amber, a floating amber "N
+    hidden - clear" pill offers one-tap recovery when the panel is
+    closed, and there is NO tap-to-ghost on the live map (that gesture
+    stays print-only; live taps keep opening things). Layer toggles
+    remain the coarse control the filter composes with. PICK FIRST,
     THEN DRAW: picking fixes
     the type for the session: the right tool loads (polygon vs line),
     the mapbox-gl-draw draft layers are recolored to that type's map

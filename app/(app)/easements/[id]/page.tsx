@@ -3,6 +3,7 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatNumber } from "@/lib/format";
 import {
   EASEMENT_RELATIONSHIP_LABELS,
+  easementShowsEmergencyPhoneProminently,
   easementTypeLabel,
 } from "@/lib/easements";
 import {
@@ -68,6 +69,34 @@ export default async function EasementSummaryPage({
         geometry={easement.boundary_geojson ?? easement.geom_geojson}
         focus={`easement:${id}`}
       />
+
+      {/* Tap-to-call emergency contact: red and prominent on pipeline
+          and powerline easements, a calmer card otherwise. */}
+      {easement.emergency_phone ? (
+        <a
+          href={`tel:${easement.emergency_phone}`}
+          className={
+            "block rounded-xl border p-4 " +
+            (easementShowsEmergencyPhoneProminently(easement.easement_type)
+              ? "border-red-300 bg-red-50"
+              : "border-gray-200 bg-white")
+          }
+        >
+          <span
+            className={
+              "block text-xs font-semibold uppercase tracking-wide " +
+              (easementShowsEmergencyPhoneProminently(easement.easement_type)
+                ? "text-red-700"
+                : "text-gray-500")
+            }
+          >
+            Emergency contact
+          </span>
+          <span className="block text-2xl font-semibold text-gray-900">
+            {easement.emergency_phone}
+          </span>
+        </a>
+      ) : null}
 
       <DetailsCard
         rows={[

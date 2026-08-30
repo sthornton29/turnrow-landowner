@@ -37,6 +37,28 @@ export default function ScanDocumentButton({
   // the FSA farm and its base acres (item 2). Always asked, never silent.
   async function handleConfirmed(scanKind: ScanKind, extracted: Record<string, unknown>) {
     onConfirmed?.(scanKind, extracted);
+    // An easement deed attached to an easement: offer to carry the
+    // printed emergency number onto the easement record. Asked, never
+    // silent (same rule as the FSA farms below).
+    const phone = String(extracted.emergency_phone ?? "").trim();
+    if (scanKind === "deed" && phone && doc.entity_type === "easement") {
+      if (
+        window.confirm(
+          `Save the emergency contact number ${phone} to this easement? It shows tap-to-call on the map and the easement page.`
+        )
+      ) {
+        const { error: err } = await supabase
+          .from("easements")
+          .update({ emergency_phone: phone })
+          .eq("id", doc.entity_id);
+        setFarmResult(
+          err
+            ? "Could not save the emergency number to the easement."
+            : `Emergency number ${phone} saved to the easement.`
+        );
+        if (!err) onChanged();
+      }
+    }
     if (scanKind !== "fsa_156ez") return;
     const farms = normalizeFsaExtraction(extracted);
     const numbers = farms.map((f) => String(f.farm_number ?? "").trim()).filter(Boolean);

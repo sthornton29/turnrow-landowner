@@ -50,6 +50,7 @@ export interface NewBoundaryPayload {
   elevationFt: number | null;
   program: string | null;
   restrictions: string | null;
+  emergencyPhone: string | null;
   easementNotes: string | null;
   cemeteryNotes?: string | null;
 }
@@ -165,6 +166,7 @@ export default function NewBoundaryDialog({
       program: isEasement && easementShowsProgram(easementType) ? str("program") : null,
       restrictions:
         isEasement && easementShowsProgram(easementType) ? str("restrictions") : null,
+      emergencyPhone: isEasement ? str("emergency_phone") : null,
       easementNotes: isEasement ? str("easement_notes") : null,
       cemeteryNotes: entityType === "cemetery" ? str("cemetery_notes") : null,
     });
@@ -345,6 +347,15 @@ export default function NewBoundaryDialog({
                 </div>
               </>
             ) : null}
+            <div>
+              <label className={labelClass}>Emergency contact number</label>
+              <input
+                name="emergency_phone"
+                type="tel"
+                placeholder="Printed on pipeline and powerline markers"
+                className={inputClass}
+              />
+            </div>
             <div>
               <label className={labelClass}>Notes</label>
               <input name="easement_notes" placeholder="Optional" className={inputClass} />

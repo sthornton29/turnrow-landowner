@@ -12,7 +12,11 @@ A recorded right someone else holds over your land, or one you hold over a neigh
 
 ## Recording one
 
-Draw it from the Map: + Add, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+Draw it from the Map: + Add, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), an **emergency contact number**, notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+
+## The emergency number
+
+Pipeline and powerline markers print the operator's emergency or one-call number; record it on the easement and it shows prominently in red, tap-to-call, on the map panel and the easement page (other types show it as a normal row). When you scan an easement deed that prints the number, the review suggests it and offers to save it to the linked easement.
 
 ## On the map and in print
 

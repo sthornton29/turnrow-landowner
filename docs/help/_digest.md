@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-29, version 0.1.0, build 969e2cc. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-30, version 0.1.0, build 64f864b. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -36,16 +36,20 @@ It does not change anything, and it cannot see other organizations' data. It doe
 
 ## What this page is for
 
-Every well, pivot, bin, building, pond, fence, and pipe you have recorded, filterable by property and type, with a total estimated value. Tap a row to open the asset page, or Show on map to zoom to it.
+Every well, pivot, bin, building, pond, fence, and pipe you have recorded, organized by type automatically: Irrigation first, then Storage, Buildings, and Other. Each section shows its count and subtotals (estimated value, and total bushels for storage). Filter by property or type; filtering to one type shows a plain list. Tap a row to open the asset page, or Map to zoom to it.
+
+## Grain bins and bin sites
+
+A **grain bin site** groups the bins standing on it: the site row shows total capacity and its bins nest beneath it. Each bin's own row and page lead with its capacity in bushels. Add bins to a site from the site's page or its map panel.
 
 ## The asset page
 
-Shared fields (name, property, year installed, condition, estimated value, notes) plus a form specific to the type: well depth and pump details, pivot make and wetted length, bin capacity and diameter, building construction and utilities, and so on. Pivots, risers, and pipes can link to their supply well. Photos and documents attach below. Deactivate keeps the history and takes the asset off the map; delete is permanent.
+Shared fields (name, property, year installed, condition, estimated value, notes) plus a form specific to the type: well depth and pump details, pivot make and wetted length, bin capacity, building construction and utilities, and so on. Pivots, risers, and pipes link to their supply well; bins link to their bin site. Photos and documents attach below. Deactivate keeps the history and takes the asset off the map; delete is permanent.
 
 ## Common questions
 
-- **The bin diameter changed the circle on the map.** That is on purpose: a grain bin drawn as a circle uses the same diameter both places.
-- **Where do I place it?** Assets are placed from the Map (pin, drawn outline, or circle). An asset created without a location says so and waits.
+- **Where did the bin diameter field go?** Retired. Capacity in bushels is the number that matters for a bin; bins place as a pin (or a drawn outline), not a circle.
+- **Where do I place it?** Assets are placed from the Map. An asset created without a location says so and waits.
 
 # Getting started  (page: /dashboard)
 
@@ -199,7 +203,11 @@ A recorded right someone else holds over your land, or one you hold over a neigh
 
 ## Recording one
 
-Draw it from the Map: + Add, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+Draw it from the Map: + Add, Easement, then Line or Area. The save form asks the type, whether it **burdens** your land (the default) or **benefits** it (an access lane you hold across a neighbor, drawn outside your boundary on purpose), the holder, the recorded reference (book and page or instrument number), an expiration date (blank means permanent), an **emergency contact number**, notes, and depending on type: width for a line (informational only; draw an area if you want the strip), the flowage elevation, and the conservation program and its restrictions.
+
+## The emergency number
+
+Pipeline and powerline markers print the operator's emergency or one-call number; record it on the easement and it shows prominently in red, tap-to-call, on the map panel and the easement page (other types show it as a normal row). When you scan an easement deed that prints the number, the review suggests it and offers to save it to the linked easement.
 
 ## On the map and in print
 
@@ -492,6 +500,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 - **Fullscreen** hides the app frame; on a phone the panels stay usable.
 - **Print** (top right) makes a PDF of the framed area. See the Printing topic.
 - **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics.
+- **Filter** (under the Layers box) hides individual items from the map: tap property chips to hide a whole property with everything on it, or open the searchable item tree and uncheck single fields, stands, or assets. Hidden items leave the map and its labels, an amber "N hidden" pill offers one-tap clear, and your choices stick on this device. Layers stay the coarse control; Filter works within them.
 
 ## Common questions
 
@@ -542,9 +551,13 @@ Tap **+ Add** and pick the type under **Assets** (well, shop, barn, grain bin, h
 
 - **Pin**: a crosshair sits over the map. Pan the map under it or drag the crosshair itself, or tap My location to use the phone's GPS, then press Place here.
 - **Draw outline**: trace the footprint (a shop, a barn, a pond surface). The panel then shows the footprint in square feet, or acres when it is large.
-- **Circle**: for round structures. Place the center with the crosshair, then set the diameter by typing it or dragging the blue rim handle; the white handle moves the center. Grain bins start on Circle, and the diameter is the bin's diameter on its asset page. Type a new diameter on either side and the other updates.
+- **Circle**: for round structures. Place the center with the crosshair, then set the diameter by typing it or dragging the blue rim handle; the white handle moves the center. (Grain bins and bin sites place as a pin or outline only; a bin's number is its capacity in bushels.)
 
 Only a name is required. Specs, photos, and documents are added on the asset page afterward.
+
+## Grain bins and bin sites
+
+A **grain bin site** stands for the cluster: from far out the map shows one site marker labeled with the site's total bushels, and the individual bin pins appear as you zoom in. Tap the site for its total capacity, the list of bins, and **Add bin to this site**; tap a bin for its own capacity and a link up to its site. Bins without a site behave like any other pin.
 
 ## Irrigation pivots
 
@@ -556,8 +569,8 @@ Pins: tap the asset, then Move pin. Footprints: Edit outline. Circles: Edit circ
 
 ## Common questions
 
-- **Can a pond be a circle?** Yes. Circle is offered for every type; it just leads for grain bins.
-- **Where is the letter on the marker from?** Each type has a letter (W well, B bin, P pivot, S shop). Footprints and circles keep the letter at their center so they read from far out.
+- **Can a pond be a circle?** Yes. Circle is offered for every type except grain bins and bin sites.
+- **Where is the letter on the marker from?** Each type has a letter (W well, B bin, BS bin site, P pivot, S shop). Footprints and circles keep the letter at their center so they read from far out.
 - **Deactivate or delete?** Deactivate keeps the history and takes the asset off the map. Delete is permanent.
 
 # Printing a map PDF  (page: /map)
@@ -618,7 +631,7 @@ Every parcel, ag field, pasture/grassland, wetland, timber stand, road, and asse
 
 ## Members
 
-Owners invite people by email and set their role. **Owner** can invite and manage members; **member** can do everything else. Invites show until accepted. Sign out is at the bottom.
+Admins invite people by email, set their role (**admin** sees and manages everything; **user** sees only their granted entities), and manage each user's entity access. See the "Members, roles, and who sees what" topic for the full picture. Invites show until accepted. Sign out is at the bottom.
 
 ## Admin sections
 
@@ -627,7 +640,38 @@ Platform administrators see extra sections: the county GIS registry (the public 
 ## Common questions
 
 - **Change my name?** Your display name is editable on this page.
-- **Remove someone?** Owners can remove a member; their past uploads stay attributed.
+- **Remove someone?** Admins can remove a member; their past uploads stay attributed.
+
+# Members, roles, and who sees what  (page: /settings)
+
+## The two roles
+
+Every member of your organization is an **admin** or a **user**.
+
+- **Admins** see everything and manage everything: land, leases, taxes, documents, farm data, members, and access.
+- **Users** see only the data belonging to the **entities** they are granted: those entities' properties and everything on them (parcels, ag fields, timber, roads, easements, assets), plus the leases, income, taxes, documents, FSA farms, and shared farm data that reach the land through those properties. A user with no granted entities sees an empty app until an admin grants access.
+
+The rule is enforced in the database itself, not just hidden in menus: a restricted user cannot reach another entity's records through any page, export, print, or the Ask assistant.
+
+## Granting access
+
+On Settings under Members, each user-role member shows a "Can see" row with a checkbox per entity. Check the entities they should see and Save access. Admins have no checkboxes; the admin role sees everything.
+
+Roles are changed with the select beside each member. You cannot change your own role, so there is always at least one admin.
+
+## Inviting someone
+
+Invite by email, pick the role, and for a user check their starting entities. When they sign up with that same email they connect automatically with the role and access you chose.
+
+## Records visible to admins only
+
+A property with no entity, or an asset or easement not attached to a property, is visible to admins only; unassigned never means visible to everyone. An amber notice in the Members section lists these records so they get assigned.
+
+## Common questions
+
+- **A user says the app is empty.** They have no entity grants yet, or their entities hold no properties. Grant entities on Settings, and check the amber unassigned notice.
+- **Can a user create leases or upload tax statements?** No; creating organization records (leases, timber sales, FSA farms, tax statements, tenants, farm connections) is admin work. Users view and edit within their entities.
+- **Do tenant contacts stay visible?** Yes, tenant names and contact details are organization-wide so lease pages read correctly for everyone.
 
 # Property taxes  (page: /taxes)
 

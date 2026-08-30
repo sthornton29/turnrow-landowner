@@ -203,6 +203,10 @@ export const EXTRACTED_FIELDS: Record<ScanKind, ExtractedFieldDef[]> = {
     { key: "county", label: "County", input: "text" },
     { key: "state", label: "State", input: "text" },
     { key: "parcel_refs", label: "Parcel references", input: "text" },
+    // Pipeline and powerline easement deeds often print the operator's
+    // emergency / one-call number; the review surfaces it so it lands
+    // on the easement record.
+    { key: "emergency_phone", label: "Emergency contact number", input: "text" },
     { key: "legal_description", label: "Legal description (verbatim)", input: "textarea" },
   ],
   survey: [

@@ -21,7 +21,14 @@ export interface AssetTypeDef {
   label: string;
   letter: string; // map marker letter
   defaultGeometry: "point" | "line";
-  canLinkToWell: boolean; // show the parent well selector
+  // Parent link through assets.parent_asset_id: a pivot/pipe/riser
+  // points at its supply well, a grain bin at its bin site. The label
+  // names the selector in forms.
+  parentType?: AssetType;
+  parentLabel?: string;
+  // Circle placement is offered to every point type EXCEPT these
+  // (grain bins are pins or outlines; capacity is their number).
+  noCircle?: boolean;
   fields: DetailField[];
 }
 
@@ -52,7 +59,6 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Well",
     letter: "W",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: [
       { key: "total_depth_ft", label: "Total depth", input: "number", unit: "ft" },
       { key: "casing_diameter_in", label: "Casing diameter", input: "number", unit: "in" },
@@ -89,7 +95,8 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Irrigation pivot",
     letter: "P",
     defaultGeometry: "point",
-    canLinkToWell: true,
+    parentType: "well",
+    parentLabel: "Supply well",
     fields: [
       {
         key: "make",
@@ -135,7 +142,8 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Underground pipe",
     letter: "U",
     defaultGeometry: "line",
-    canLinkToWell: true,
+    parentType: "well",
+    parentLabel: "Supply well",
     fields: [
       { key: "diameter_in", label: "Diameter", input: "number", unit: "in" },
       {
@@ -157,7 +165,8 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Riser",
     letter: "R",
     defaultGeometry: "point",
-    canLinkToWell: true,
+    parentType: "well",
+    parentLabel: "Supply well",
     fields: [
       { key: "size_in", label: "Size", input: "number", unit: "in" },
       {
@@ -176,31 +185,32 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Shop",
     letter: "S",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: buildingFields,
   },
   shed: {
     label: "Shed",
     letter: "SD",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: buildingFields,
   },
   barn: {
     label: "Barn",
     letter: "BN",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: buildingFields,
   },
   grain_bin: {
     label: "Grain bin",
     letter: "B",
     defaultGeometry: "point",
-    canLinkToWell: false,
+    parentType: "grain_bin_site",
+    parentLabel: "Bin site",
+    noCircle: true,
     fields: [
+      // Capacity is THE grain bin number: the click panel and the asset
+      // page lead with it. (The old diameter_ft spec field retired with
+      // the circle placement; migration 0035 cleared stored values.)
       { key: "capacity_bu", label: "Capacity", input: "number", unit: "bu" },
-      { key: "diameter_ft", label: "Diameter", input: "number", unit: "ft" },
       {
         key: "manufacturer",
         label: "Manufacturer",
@@ -227,11 +237,20 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
       { key: "unload_system", label: "Unload system", input: "boolean" },
     ],
   },
+  grain_bin_site: {
+    // A pin or outline that groups the bins standing on it; child
+    // grain_bin assets link here via parent_asset_id. Panels and pages
+    // lead with TOTAL capacity summed from the children.
+    label: "Grain bin site",
+    letter: "BS",
+    defaultGeometry: "point",
+    noCircle: true,
+    fields: [],
+  },
   house: {
     label: "House",
     letter: "H",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: [
       { key: "square_feet", label: "Square feet", input: "number" },
       { key: "bedrooms", label: "Bedrooms", input: "number" },
@@ -244,7 +263,6 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Fence",
     letter: "F",
     defaultGeometry: "line",
-    canLinkToWell: false,
     fields: [
       {
         key: "fence_type",
@@ -263,7 +281,6 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Pond / dam",
     letter: "PD",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: [
       { key: "surface_acres", label: "Surface acres", input: "number", unit: "ac" },
       { key: "last_inspection_year", label: "Last inspection year", input: "number" },
@@ -273,7 +290,6 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
     label: "Other",
     letter: "A",
     defaultGeometry: "point",
-    canLinkToWell: false,
     fields: [],
   },
 };
@@ -282,9 +298,9 @@ export const ASSET_TYPES: Record<AssetType, AssetTypeDef> = {
 // jsonb). footprint_shape is 'circle' when the polygon was generated
 // from center + diameter_ft by the map's circle editor (lib/geo/
 // circle.ts); outline-drawn footprints carry no shape key. Map-managed
-// so form saves carry them through. diameter_ft stays a normal spec
-// field on grain bins (declared above), so for bins the circle editor
-// and the form share one number.
+// so form saves carry them through. noCircle types (grain bins, bin
+// sites) never get the map-managed footprint diameter: the circle
+// editor is not offered for them at all.
 const FOOTPRINT_FIELDS: DetailField[] = [
   { key: "footprint_shape", label: "Footprint shape", input: "text", mapManaged: true },
   { key: "center_lon", label: "Center longitude", input: "number", mapManaged: true },
@@ -294,9 +310,7 @@ for (const t of Object.keys(ASSET_TYPES) as AssetType[]) {
   const def = ASSET_TYPES[t];
   const have = new Set(def.fields.map((f) => f.key));
   for (const f of FOOTPRINT_FIELDS) if (!have.has(f.key)) def.fields.push(f);
-  // Circle footprints need a diameter; every type other than grain bin
-  // (which has it as a spec field) keeps it map-managed.
-  if (!have.has("diameter_ft")) {
+  if (!def.noCircle && !have.has("diameter_ft")) {
     def.fields.push({ key: "diameter_ft", label: "Footprint diameter", input: "number", unit: "ft", mapManaged: true });
   }
 }
@@ -304,8 +318,10 @@ for (const t of Object.keys(ASSET_TYPES) as AssetType[]) {
 export const ASSET_TYPE_ORDER = Object.keys(ASSET_TYPES) as AssetType[];
 
 // Types whose footprint is usually round: the placement picker leads
-// with Circle for these (it stays available for every type).
-export const ROUND_ASSET_TYPES: AssetType[] = ["grain_bin"];
+// with Circle for these (it stays available for every type without
+// noCircle). Empty since grain bins retired their circle placement;
+// the mechanism stays for future round types.
+export const ROUND_ASSET_TYPES: AssetType[] = [];
 
 export function assetTypeLabel(t: AssetType): string {
   return ASSET_TYPES[t]?.label ?? t;

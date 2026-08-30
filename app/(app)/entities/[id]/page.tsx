@@ -52,7 +52,7 @@ export default async function EntityDetailPage({
   ]);
 
   const totalAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
-  const isOwner = profile.role === "owner";
+  const isOwner = profile.role === "admin";
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">

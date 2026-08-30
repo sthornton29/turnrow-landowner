@@ -49,6 +49,7 @@ export default function TaxStatusClient({
   initialLines,
   initialPayments,
   entities,
+  canUpload = true,
 }: {
   orgId: string;
   parcels: Parcel[];
@@ -57,6 +58,8 @@ export default function TaxStatusClient({
   initialLines: TaxStatementLineRow[];
   initialPayments: TaxPaymentRow[];
   entities: Array<{ id: string; name: string }>;
+  // Cosmetic gate: statement creation is admin work (RLS enforces).
+  canUpload?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const searchParams = useSearchParams();
@@ -447,9 +450,11 @@ export default function TaxStatusClient({
               </option>
             ))}
           </select>
-          <Link href="/taxes/upload" className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600">
-            + Upload statements
-          </Link>
+          {canUpload ? (
+            <Link href="/taxes/upload" className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600">
+              + Upload statements
+            </Link>
+          ) : null}
         </span>
       </div>
 
@@ -527,9 +532,11 @@ export default function TaxStatusClient({
                   {propertyName.get(p.property_id) ?? ""}
                   {p.county ? ` · ${p.county}` : ""}
                 </span>
-                <Link href="/taxes/upload" className="ml-auto text-sm font-medium text-kelly-700 hover:underline">
-                  Upload statement
-                </Link>
+                {canUpload ? (
+                  <Link href="/taxes/upload" className="ml-auto text-sm font-medium text-kelly-700 hover:underline">
+                    Upload statement
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -585,11 +592,16 @@ export default function TaxStatusClient({
         <h2 className="text-lg font-semibold text-gray-900">Statements on file for {year}</h2>
         {yearStatements.length === 0 ? (
           <p className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
-            No statements yet for {year}.{" "}
-            <Link href="/taxes/upload" className="font-medium text-kelly-700 hover:underline">
-              Upload the first one
-            </Link>
-            .
+            No statements yet for {year}.
+            {canUpload ? (
+              <>
+                {" "}
+                <Link href="/taxes/upload" className="font-medium text-kelly-700 hover:underline">
+                  Upload the first one
+                </Link>
+                .
+              </>
+            ) : null}
           </p>
         ) : (
           <ul className="space-y-2">

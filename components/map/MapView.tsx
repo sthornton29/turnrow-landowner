@@ -112,6 +112,11 @@ import type {
 } from "@/types/db";
 import LayerToggle from "./LayerToggle";
 import {
+  ItemTree,
+  PropertyChips,
+  type SelectableItem,
+} from "./FilterTree";
+import {
   generateMapPdf,
   mapAspect,
   type LegendEntry,
@@ -161,49 +166,10 @@ function approxLengthFt(ml: MultiLineString): number {
 }
 
 // An in-frame item in the print setup's property chips / item drawer.
-interface PrintItemInfo {
-  key: string; // "entityType:id"
-  entityType: EntityType;
-  id: string;
-  name: string;
-  propertyId: string | null;
-}
-
-const PRINT_TYPE_LABELS: Record<EntityType, string> = {
-  property: "Property boundary",
-  parcel: LAND_TYPE_LABELS.parcel.plural,
-  field: LAND_TYPE_LABELS.field.plural,
-  pasture: LAND_TYPE_LABELS.pasture.plural,
-  wetland: LAND_TYPE_LABELS.wetland.plural,
-  timber_stand: LAND_TYPE_LABELS.timber_stand.plural,
-  road: LAND_TYPE_LABELS.road.plural,
-  easement: LAND_TYPE_LABELS.easement.plural,
-  asset: LAND_TYPE_LABELS.asset.plural,
-  cemetery: LAND_TYPE_LABELS.cemetery.plural,
-  maintenance_issue: LAND_TYPE_LABELS.maintenance_issue.plural,
-};
-
-// Tri-state checkbox for the Choose items drawer: checked = fully
-// included in the print, indeterminate = partly excluded.
-function TriCheckbox({
-  state,
-  onToggle,
-}: {
-  state: "all" | "some" | "none";
-  onToggle: () => void;
-}) {
-  return (
-    <input
-      type="checkbox"
-      checked={state === "all"}
-      ref={(el) => {
-        if (el) el.indeterminate = state === "some";
-      }}
-      onChange={onToggle}
-      className="h-3.5 w-3.5 shrink-0 accent-kelly-500"
-    />
-  );
-}
+// The print setup and the live map filter share the selection
+// machinery (components/map/FilterTree.tsx): "entityType:id" exclusion
+// keys, property chips, and the tri-state item tree.
+type PrintItemInfo = SelectableItem;
 
 // Layer toggle defaults: parcels start OFF (they clutter the default
 // view); the user's choices persist per browser and win over defaults.
@@ -230,6 +196,22 @@ function loadLayerVisibility(): LayerVisibility {
     return { ...LAYER_DEFAULTS, ...(JSON.parse(raw) as Partial<LayerVisibility>) };
   } catch {
     return LAYER_DEFAULTS;
+  }
+}
+
+// The live map filter persists per user like the layer toggles. Keys of
+// deleted rows going stale in storage is harmless: inc() just never
+// matches them.
+const MAP_FILTER_STORAGE_KEY = "turnrow.map.filter.v1";
+
+function loadMapFilter(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(MAP_FILTER_STORAGE_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    return new Set();
   }
 }
 
@@ -263,6 +245,29 @@ function centerMarker(g: Geometry, props: Record<string, unknown>): Feature | nu
 
 export function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureCollection {
   const features: Feature[] = [];
+  // Bin sites cluster their bins: the site marker (labeled with total
+  // capacity) stands for the group at low zoom; child bin markers carry
+  // parentId and render only from close zoom (the assets-child layers).
+  const siteIds =
+    entityType === "asset"
+      ? new Set(
+          rows
+            .filter((r) => (r as AssetGeo).asset_type === "grain_bin_site")
+            .map((r) => r.id)
+        )
+      : null;
+  const siteCapacity = new Map<string, number>();
+  if (entityType === "asset") {
+    for (const r of rows as AssetGeo[]) {
+      if (r.asset_type === "grain_bin" && r.parent_asset_id) {
+        const cap = Number(r.details?.capacity_bu) || 0;
+        siteCapacity.set(
+          r.parent_asset_id,
+          (siteCapacity.get(r.parent_asset_id) ?? 0) + cap
+        );
+      }
+    }
+  }
   for (const row of rows) {
     const g = geomOf(row);
     if (!g) continue;
@@ -275,6 +280,13 @@ export function rowsToFC(rows: AnyGeoRow[], entityType: EntityType): FeatureColl
       const a = row as AssetGeo;
       props.letter = ASSET_TYPES[a.asset_type]?.letter ?? "A";
       props.assetType = a.asset_type;
+      if (a.asset_type === "grain_bin" && a.parent_asset_id && siteIds?.has(a.parent_asset_id)) {
+        props.parentId = a.parent_asset_id;
+      }
+      if (a.asset_type === "grain_bin_site") {
+        const total = siteCapacity.get(a.id) ?? 0;
+        if (total > 0) props.name = `${props.name} (${formatNumber(total)} bu)`;
+      }
     }
     if (entityType === "timber_stand") {
       props.standType = (row as TimberStandGeo).stand_type ?? "other";
@@ -428,6 +440,23 @@ export default function MapView({
       // Private browsing without storage: toggles just do not persist.
     }
   }, [visibility]);
+  // The live map filter: hidden "entityType:id" keys, persisted like
+  // the layer toggles. Layer toggles stay the coarse control this
+  // composes with (a hidden LAYER hides everything of that type; the
+  // filter hides individual items).
+  const [mapFilterExcluded, setMapFilterExcluded] = useState<Set<string>>(loadMapFilter);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [mapItemFilter, setMapItemFilter] = useState("");
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        MAP_FILTER_STORAGE_KEY,
+        JSON.stringify([...mapFilterExcluded])
+      );
+    } catch {
+      // Private browsing without storage: the filter does not persist.
+    }
+  }, [mapFilterExcluded]);
   const [fullscreen, setFullscreen] = useState(false);
 
   // Draw/save state. drawKind is the tool (polygon or line); the
@@ -441,6 +470,9 @@ export default function MapView({
   const [placeAssetType, setPlaceAssetType] = useState<AssetType | null>(null);
   // Crosshair is placing a NEW circle footprint's center for this type.
   const placeForCircleRef = useRef<AssetType | null>(null);
+  // Set by a bin site's "Add bin to this site": the next pin-placed
+  // grain bin links to this site.
+  const binSiteParentRef = useRef<string | null>(null);
   // Editing a saved line (road, line easement, pipe/fence): no boolean
   // area tools in the toolbar.
   const [editIsLine, setEditIsLine] = useState(false);
@@ -746,7 +778,7 @@ export default function MapView({
     // parcels > properties
     const groups: string[][] = [
       ["maintenance-circle", "maintenance-line", "maintenance-fill"],
-      ["assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
+      ["assets-child-circle", "assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
       ["cemeteries-circle"],
       ["roads-hit"],
       ["easements-hit", "easements-fill", "easements-hatch-base"],
@@ -992,19 +1024,45 @@ export default function MapView({
           "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#ffffff", "text-halo-color": "#7f1d1d", "text-halo-width": 1.1 } });
 
-      // Asset markers on top: branded circle + type letter + name below
+      // Asset markers on top: branded circle + type letter + name below.
+      // Bin-site children (features with parentId) are split into their
+      // own layers gated to close zoom, so the SITE marker stands for
+      // the cluster from far out and individual bins appear as you
+      // zoom in (no Mapbox clustering: the assets source mixes
+      // geometries, which clustering does not support).
+      const notBinChild: mapboxgl.Expression = ["!", ["has", "parentId"]];
+      const BIN_CHILD_MINZOOM = 13.5;
       map.addLayer({ id: "assets-circle", type: "circle", source: "assets",
-        filter: ["==", ["geometry-type"], "Point"],
+        filter: ["all", ["==", ["geometry-type"], "Point"], notBinChild],
         paint: { "circle-radius": 10, "circle-color": PINE,
           "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
       map.addLayer({ id: "assets-letter", type: "symbol", source: "assets",
-        filter: ["==", ["geometry-type"], "Point"],
+        filter: ["all", ["==", ["geometry-type"], "Point"], notBinChild],
         layout: { "text-field": ["get", "letter"], "text-size": 9,
           "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
           "text-allow-overlap": true },
         paint: { "text-color": "#ffffff" } });
       map.addLayer({ id: "assets-name", type: "symbol", source: "assets",
-        filter: ["==", ["geometry-type"], "Point"], minzoom: 12,
+        filter: ["all", ["==", ["geometry-type"], "Point"], notBinChild], minzoom: 12,
+        layout: { "text-field": ["get", "name"], "text-size": 10,
+          "text-offset": [0, 1.6],
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#ffffff", "text-halo-color": PINE, "text-halo-width": 1.2 } });
+      map.addLayer({ id: "assets-child-circle", type: "circle", source: "assets",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["has", "parentId"]],
+        minzoom: BIN_CHILD_MINZOOM,
+        paint: { "circle-radius": 10, "circle-color": PINE,
+          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+      map.addLayer({ id: "assets-child-letter", type: "symbol", source: "assets",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["has", "parentId"]],
+        minzoom: BIN_CHILD_MINZOOM,
+        layout: { "text-field": ["get", "letter"], "text-size": 9,
+          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff" } });
+      map.addLayer({ id: "assets-child-name", type: "symbol", source: "assets",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["has", "parentId"]],
+        minzoom: BIN_CHILD_MINZOOM,
         layout: { "text-field": ["get", "name"], "text-size": 10,
           "text-offset": [0, 1.6],
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
@@ -1176,7 +1234,7 @@ export default function MapView({
       "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
       "wetlands-fill", "timber-fill", "roads-hit", "easements-fill",
       "easements-hatch-base", "easements-hit",
-      "assets-circle", "assets-line", "assets-fill",
+      "assets-circle", "assets-child-circle", "assets-line", "assets-fill",
       "cemeteries-fill", "cemeteries-circle",
       "maintenance-fill", "maintenance-line", "maintenance-circle",
     ]) {
@@ -1237,9 +1295,10 @@ export default function MapView({
     const setData = (source: string, fc: FeatureCollection) =>
       (map.getSource(source) as GeoJSONSource)?.setData(fc);
 
-    // Print-mode item exclusions: excluded items leave their normal
-    // layers (and labels) and render in the ghost source instead.
-    const excluded = printOpen ? printExcluded : new Set<string>();
+    // Item exclusions: while the print setup is open its own set rules
+    // (excluded items ghost); otherwise the LIVE MAP FILTER applies and
+    // hidden items simply leave their layers and labels.
+    const excluded = printOpen ? printExcluded : mapFilterExcluded;
     const inc = <T extends AnyGeoRow>(rows: T[], type: EntityType): T[] =>
       excluded.size === 0
         ? rows
@@ -1297,7 +1356,7 @@ export default function MapView({
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, visibility, rowLists]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, mapFilterExcluded, visibility, rowLists]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -1384,7 +1443,7 @@ export default function MapView({
       ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
       ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
       ["easement", [...easementLayerIdsRef.current, "easement-labels"]],
-      ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "pivot-circles-fill", "pivot-circles-line"]],
+      ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "assets-child-circle", "assets-child-letter", "assets-child-name", "pivot-circles-fill", "pivot-circles-line"]],
       ["cemetery", ["cemeteries-fill", "cemeteries-line", "cemeteries-circle", "cemeteries-letter", "cemeteries-name", "cemetery-labels"]],
       ["maintenance_issue", ["maintenance-fill", "maintenance-outline", "maintenance-line", "maintenance-circle", "maintenance-letter", "maintenance-name"]],
     ];
@@ -1473,6 +1532,7 @@ export default function MapView({
     completedDrawIdsRef.current = new Set();
     placeForPivotRef.current = false;
     placeForCircleRef.current = null;
+    binSiteParentRef.current = null;
     setPlaceAssetType(null);
     setDrawSession(null);
     setEditIsLine(false);
@@ -2432,6 +2492,7 @@ export default function MapView({
         base.elevation_ft = payload.elevationFt;
         base.program = payload.program;
         base.restrictions = payload.restrictions;
+        base.emergency_phone = payload.emergencyPhone;
         base.notes = payload.easementNotes;
       }
     }
@@ -2548,10 +2609,16 @@ export default function MapView({
     if (!pendingPoint) return;
     setSaving(true);
     setSaveError(null);
+    // "Add bin to this site": the new bin links to the site it was
+    // started from (and the placement crosshair began at the site).
+    const parentId = binSiteParentRef.current;
+    binSiteParentRef.current = null;
     const sel = await insertAndSetGeometry(
       "assets",
       { organization_id: orgId, property_id: payload.propertyId,
-        name: payload.name, asset_type: payload.assetType },
+        name: payload.name, asset_type: payload.assetType,
+        parent_asset_id:
+          parentId && payload.assetType === "grain_bin" ? parentId : null },
       "asset", { type: "Point", coordinates: pendingPoint }
     );
     setSaving(false);
@@ -2562,11 +2629,37 @@ export default function MapView({
     }
   }
 
+  // A bin site's panel action: place a NEW child bin with the
+  // crosshair, starting from the site's marker so the pin lands nearby.
+  function startAddBinToSite(siteId: string) {
+    const site = assets.find((a) => a.id === siteId);
+    binSiteParentRef.current = siteId;
+    setSelected(null);
+    const g = site ? geomOf(site) : null;
+    const center =
+      g?.type === "Point"
+        ? (g.coordinates as [number, number])
+        : g
+          ? (() => {
+              const mp = toMultiPolygon(g);
+              return mp ? labelPointOf(mp) : null;
+            })()
+          : null;
+    const map = mapRef.current;
+    if (center && map) {
+      map.flyTo({ center, zoom: Math.max(map.getZoom(), 15.5) });
+    }
+    beginAssetPlacement("grain_bin", "pin");
+  }
+
   // ---------------------------------------------------------------- print
 
   function openPrintSetup() {
     const map = mapRef.current;
     setSelected(null);
+    // The print setup takes over item selection; the live filter panel
+    // steps aside (its hidden set still applies again after printing).
+    setFilterOpen(false);
     // Prefill layers from the live toggles; parcel LABELS default off
     // in print even when the layer is on.
     setPrintLayers({
@@ -2676,8 +2769,13 @@ export default function MapView({
   // Property chip: excluding a property expands to its boundary plus
   // everything on it, so the flat exclusion set stays the one source
   // of truth for taps, chips, and the drawer alike.
-  function togglePrintProperty(pid: string) {
-    setPrintExcluded((prev) => {
+  // Shared by the print setup and the live map filter: excluding a
+  // property sweeps in its boundary plus everything on it.
+  function togglePropertyIn(
+    setExcluded: React.Dispatch<React.SetStateAction<Set<string>>>,
+    pid: string
+  ) {
+    setExcluded((prev) => {
       const next = new Set(prev);
       const keys = [`property:${pid}`];
       for (const [type, rows] of Object.entries(rowLists) as Array<
@@ -2699,8 +2797,11 @@ export default function MapView({
     });
   }
 
-  function togglePrintKeys(keys: string[]) {
-    setPrintExcluded((prev) => {
+  function toggleKeysIn(
+    setExcluded: React.Dispatch<React.SetStateAction<Set<string>>>,
+    keys: string[]
+  ) {
+    setExcluded((prev) => {
       const next = new Set(prev);
       const anyExcluded = keys.some((k) => next.has(k));
       for (const key of keys) {
@@ -2710,6 +2811,34 @@ export default function MapView({
       return next;
     });
   }
+
+  const togglePrintProperty = (pid: string) => togglePropertyIn(setPrintExcluded, pid);
+  const togglePrintKeys = (keys: string[]) => toggleKeysIn(setPrintExcluded, keys);
+  const toggleFilterProperty = (pid: string) => togglePropertyIn(setMapFilterExcluded, pid);
+  const toggleFilterKeys = (keys: string[]) => toggleKeysIn(setMapFilterExcluded, keys);
+
+  // Every row on the map, grouped for the filter tree (unlike the print
+  // drawer, NOT frame-limited: the filter panel lists everything).
+  const filterItems = useMemo<SelectableItem[]>(() => {
+    const items: SelectableItem[] = [];
+    for (const [type, rows] of Object.entries(rowLists) as Array<
+      [EntityType, AnyGeoRow[]]
+    >) {
+      for (const row of rows) {
+        items.push({
+          key: `${type}:${row.id}`,
+          entityType: type,
+          id: row.id,
+          name: nameOf(row, type),
+          propertyId:
+            type === "property"
+              ? row.id
+              : ((row as { property_id?: string | null }).property_id ?? null),
+        });
+      }
+    }
+    return items;
+  }, [rowLists]);
 
   // Excluded items vanish from the PDF, its legend, and its labels;
   // this filter is what makes the exclusion real at generation time.
@@ -3080,31 +3209,13 @@ export default function MapView({
                 <p className="pt-1 text-xs font-medium text-gray-600">
                   Properties in frame (tap to include or exclude)
                 </p>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {printInFrame.propertyIds.map((pid) => {
-                    const property = properties.find((p) => p.id === pid);
-                    const off = printExcluded.has(`property:${pid}`);
-                    return (
-                      <button
-                        key={pid}
-                        onClick={() => togglePrintProperty(pid)}
-                        className={
-                          "rounded-full border px-2.5 py-1 text-xs font-medium " +
-                          (off
-                            ? "border-gray-300 bg-gray-100 text-gray-400 line-through"
-                            : "border-kelly-500 bg-kelly-50 text-pine-900")
-                        }
-                        title={
-                          off
-                            ? "Excluded from the print with everything on it; tap to restore"
-                            : "Tap to exclude this whole property from the print"
-                        }
-                      >
-                        {property?.name ?? "Property"}
-                      </button>
-                    );
-                  })}
-                </div>
+                <PropertyChips
+                  propertyIds={printInFrame.propertyIds}
+                  properties={properties}
+                  excluded={printExcluded}
+                  onToggleProperty={togglePrintProperty}
+                  what="the print"
+                />
               </div>
             ) : null}
 
@@ -3134,104 +3245,18 @@ export default function MapView({
                     placeholder="Filter items..."
                     className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
                   />
-                  {(() => {
-                    const filter = printItemFilter.trim().toLowerCase();
-                    const visibleItems = printInFrame.items.filter(
-                      (i) => !filter || i.name.toLowerCase().includes(filter)
-                    );
-                    if (visibleItems.length === 0) {
-                      return (
-                        <p className="text-xs text-gray-500">
-                          Nothing in the frame{filter ? " matches" : ""}.
-                        </p>
-                      );
+                  <ItemTree
+                    items={printInFrame.items}
+                    properties={properties}
+                    excluded={printExcluded}
+                    filter={printItemFilter}
+                    emptyText={
+                      printItemFilter.trim()
+                        ? "Nothing in the frame matches."
+                        : "Nothing in the frame."
                     }
-                    // Property > type > items, in-frame only.
-                    const propertyOrder: Array<string | null> = [];
-                    const byProperty = new Map<string | null, PrintItemInfo[]>();
-                    for (const item of visibleItems) {
-                      const pid = item.propertyId;
-                      if (!byProperty.has(pid)) {
-                        byProperty.set(pid, []);
-                        propertyOrder.push(pid);
-                      }
-                      byProperty.get(pid)!.push(item);
-                    }
-                    const triState = (keys: string[]): "all" | "some" | "none" => {
-                      const excludedCount = keys.filter((k) =>
-                        printExcluded.has(k)
-                      ).length;
-                      if (excludedCount === 0) return "all";
-                      return excludedCount === keys.length ? "none" : "some";
-                    };
-                    return propertyOrder.map((pid) => {
-                      const groupItems = byProperty.get(pid)!;
-                      const groupKeys = groupItems.map((i) => i.key);
-                      const propertyName = pid
-                        ? (properties.find((p) => p.id === pid)?.name ?? "Property")
-                        : "No property";
-                      const typeOrder: EntityType[] = [];
-                      const byType = new Map<EntityType, PrintItemInfo[]>();
-                      for (const item of groupItems) {
-                        if (item.entityType === "property") continue;
-                        if (!byType.has(item.entityType)) {
-                          byType.set(item.entityType, []);
-                          typeOrder.push(item.entityType);
-                        }
-                        byType.get(item.entityType)!.push(item);
-                      }
-                      const boundaryItem = groupItems.find(
-                        (i) => i.entityType === "property"
-                      );
-                      return (
-                        <div key={pid ?? "none"} className="space-y-1">
-                          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-gray-800">
-                            <TriCheckbox
-                              state={triState(groupKeys)}
-                              onToggle={() => togglePrintKeys(groupKeys)}
-                            />
-                            {propertyName}
-                          </label>
-                          {boundaryItem ? (
-                            <label className="ml-4 flex cursor-pointer items-center gap-1.5 text-xs text-gray-700">
-                              <TriCheckbox
-                                state={triState([boundaryItem.key])}
-                                onToggle={() => togglePrintKeys([boundaryItem.key])}
-                              />
-                              Boundary outline
-                            </label>
-                          ) : null}
-                          {typeOrder.map((type) => {
-                            const typeItems = byType.get(type)!;
-                            const typeKeys = typeItems.map((i) => i.key);
-                            return (
-                              <div key={type} className="ml-4 space-y-0.5">
-                                <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-700">
-                                  <TriCheckbox
-                                    state={triState(typeKeys)}
-                                    onToggle={() => togglePrintKeys(typeKeys)}
-                                  />
-                                  {PRINT_TYPE_LABELS[type]}
-                                </label>
-                                {typeItems.map((item) => (
-                                  <label
-                                    key={item.key}
-                                    className="ml-4 flex cursor-pointer items-center gap-1.5 text-xs text-gray-600"
-                                  >
-                                    <TriCheckbox
-                                      state={triState([item.key])}
-                                      onToggle={() => togglePrintKeys([item.key])}
-                                    />
-                                    <span className="truncate">{item.name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    });
-                  })()}
+                    onToggleKeys={togglePrintKeys}
+                  />
                 </div>
               ) : null}
             </div>
@@ -3333,6 +3358,24 @@ export default function MapView({
           LayerToggle.tsx. */}
       <div className="absolute left-3 top-3 z-20 flex w-[11.5rem] flex-col gap-2">
         <LayerToggle visibility={visibility} onChange={setVisibility} />
+        {/* Live map filter: hide individual items (the layer toggles
+            above stay the coarse control). */}
+        {mode === "view" ? (
+          <button
+            onClick={() => setFilterOpen((o) => !o)}
+            className={
+              "rounded-lg px-2 py-1.5 text-left text-[13px] font-medium shadow-md " +
+              (mapFilterExcluded.size > 0
+                ? "bg-amber-50 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
+                : "bg-white/95 text-gray-800 hover:bg-white")
+            }
+          >
+            Filter
+            {mapFilterExcluded.size > 0
+              ? ` · ${mapFilterExcluded.size} hidden`
+              : ""}
+          </button>
+        ) : null}
         {visibility.easement && easements.length > 0 ? (
           <div className="rounded-lg bg-white/95 p-2 shadow-md">
             <p className="text-xs font-medium text-gray-800">Easements</p>
@@ -3816,6 +3859,84 @@ export default function MapView({
         </div>
       ) : null}
 
+      {/* Live map filter panel: property chips + the same searchable
+          tri-state item tree as the print setup, against the map's own
+          persisted exclusion set. No tap-to-ghost here: tapping the
+          live map keeps meaning "open the thing". */}
+      {filterOpen && !printOpen ? (
+        <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:left-[13rem] md:top-3 md:bottom-auto md:max-h-[calc(100%-1.5rem)] md:w-80 md:rounded-xl md:border">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Filter the map</h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Hidden items disappear from the map and its labels until you
+                bring them back. Your choices stick on this device. Layers
+                (left) hide whole types.
+              </p>
+            </div>
+            <button
+              onClick={() => setFilterOpen(false)}
+              aria-label="Close"
+              className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {properties.length > 1 ? (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600">
+                Properties (tap to hide or show)
+              </p>
+              <PropertyChips
+                propertyIds={properties.map((p) => p.id)}
+                properties={properties}
+                excluded={mapFilterExcluded}
+                onToggleProperty={toggleFilterProperty}
+                what="the map"
+              />
+            </div>
+          ) : null}
+          {mapFilterExcluded.size > 0 ? (
+            <button
+              onClick={() => setMapFilterExcluded(new Set())}
+              className="mt-2 flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+            >
+              {mapFilterExcluded.size} item{mapFilterExcluded.size === 1 ? "" : "s"} hidden · clear all
+            </button>
+          ) : null}
+          <input
+            value={mapItemFilter}
+            onChange={(e) => setMapItemFilter(e.target.value)}
+            placeholder="Search items..."
+            className="mt-2 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm"
+          />
+          <div className="mt-2 space-y-2">
+            <ItemTree
+              items={filterItems}
+              properties={properties}
+              excluded={mapFilterExcluded}
+              filter={mapItemFilter}
+              emptyText={
+                mapItemFilter.trim() ? "Nothing matches." : "Nothing on the map yet."
+              }
+              onToggleKeys={toggleFilterKeys}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {/* One-tap recovery when the panel is closed but items are hidden. */}
+      {!filterOpen && !printOpen && mode === "view" && mapFilterExcluded.size > 0 ? (
+        <button
+          onClick={() => setMapFilterExcluded(new Set())}
+          className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 shadow-md hover:bg-amber-100"
+        >
+          {mapFilterExcluded.size} hidden · clear
+        </button>
+      ) : null}
+
       {/* The one Add picker: every addable thing, grouped, one step. */}
       {pickerOpen ? (
         <AddPicker
@@ -3951,6 +4072,32 @@ export default function MapView({
                 ? (farmActivity.byProperty[selected.id] ?? null)
                 : null
           }
+          assetChildren={
+            selected.entityType === "asset" &&
+            (selectedRow as AssetGeo).asset_type === "grain_bin_site"
+              ? assets
+                  .filter(
+                    (a) =>
+                      a.parent_asset_id === selected.id &&
+                      a.asset_type === "grain_bin"
+                  )
+                  .map((a) => ({
+                    id: a.id,
+                    name: a.name,
+                    capacityBu: Number(a.details?.capacity_bu) || null,
+                  }))
+              : null
+          }
+          parentAssetName={
+            selected.entityType === "asset" &&
+            (selectedRow as AssetGeo).parent_asset_id
+              ? (assets.find(
+                  (a) => a.id === (selectedRow as AssetGeo).parent_asset_id
+                )?.name ?? null)
+              : null
+          }
+          onSelectAsset={(id) => setSelected({ entityType: "asset", id })}
+          onAddBin={() => startAddBinToSite(selected.id)}
           onClose={() => setSelected(null)}
           onEditGeometry={startEditGeometry}
           onSplit={startSplitStand}

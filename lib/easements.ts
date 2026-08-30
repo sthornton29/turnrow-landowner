@@ -138,6 +138,14 @@ export function easementShowsElevation(type: EasementType): boolean {
 export function easementShowsProgram(type: EasementType): boolean {
   return type === "conservation";
 }
+// The emergency contact number is on EVERY type's form; pipelines and
+// powerlines display it prominently (red, tap-to-call) because those
+// are the ones with a number you call at 2 AM.
+export function easementShowsEmergencyPhoneProminently(
+  type: EasementType | string | null | undefined
+): boolean {
+  return type === "pipeline" || type === "powerline";
+}
 
 // The category legend lists only categories present among the rows.
 export function categoriesPresent(

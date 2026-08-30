@@ -95,6 +95,7 @@ export const DEED_TOOL: Anthropic.Tool = {
       county: nullable("string", "County of recording (without the word County)"),
       state: nullable("string", "Two-letter state"),
       parcel_refs: nullable("string", "Parcel / PIN numbers referenced, comma separated"),
+      emergency_phone: nullable("string", "Emergency or one-call contact phone number printed on the document (pipeline and powerline easements often carry one)"),
       legal_description: nullable("string", "The FULL legal description VERBATIM, every call and exception, line breaks kept"),
       unsure_fields: unsure,
     },
@@ -422,6 +423,7 @@ export const INTAKE_TOOL: Anthropic.Tool = {
           county: nullable("string", "County of recording or of the land (without the word County)"),
           state: nullable("string", "Two-letter state"),
           parcel_refs: nullable("string", "Parcel / PIN numbers referenced, comma separated"),
+          emergency_phone: nullable("string", "Easement deeds: the emergency or one-call phone number printed on the document, when one appears"),
           legal_description: nullable("string", "Deeds, plats, descriptions: the FULL legal description VERBATIM, every call and exception"),
           surveyor: nullable("string", "Plats: surveyor or firm and license number"),
           survey_date: nullable("string", "Plats: survey date"),
@@ -456,7 +458,7 @@ export const INTAKE_TOOL: Anthropic.Tool = {
         },
         required: [
           "grantor", "grantee", "execution_date", "recording_date", "recording_ref", "consideration",
-          "county", "state", "parcel_refs", "legal_description", "surveyor", "survey_date",
+          "county", "state", "parcel_refs", "emergency_phone", "legal_description", "surveyor", "survey_date",
           "stated_acres", "insurer", "policy_number", "policy_amount", "policy_date", "exceptions",
           "farms", "tract", "determination_codes", "determination_date", "notes", "parties",
           "document_date", "amount", "reference", "summary",
@@ -521,11 +523,11 @@ export const VAULT_TOOLS: Record<VaultKind, Anthropic.Tool> = {
 
 export const VAULT_PROMPTS: Record<VaultKind, string> = {
   intake:
-    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and propose a title in the app's pattern (see the title field). 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. 6) If the legal description carries a section, township, and range, fill plss_reference with the digits and direction letters EXACTLY as printed (a misread N/S or E/W lands the tract in the wrong county); for metes and bounds fill mb_anchor with the stated county and any section tie. List uncertain field names in unsure_fields.",
+    "Read this document for a rural landowner's records in ONE pass. 1) Classify it (exactly one type; 'other' when nothing fits) and propose a title in the app's pattern (see the title field). 2) If it is really a lease, a timber sale contract, a timber settlement, a property tax statement, or a rent payment, set specialized_kind. 3) Fill the key fields for its type (deeds: parties, dates, recording reference, the legal description VERBATIM, and on easement deeds any printed emergency or one-call phone number; plats: surveyor, date, stated acres, description; title insurance: insurer, amount, date, EVERY Schedule B exception; FSA-156EZ: every farm with its base acres table; determinations: tract, codes, date; anything else: parties, date, amount, reference, summary). Leave keys that do not apply null. 4) Read plain facts into property_hints (never guess). 5) Using the owner's property and entity lists in this message, name the properties and the entity the document concerns; cite the single signal and the exact printed value for each; leave them empty when nothing on the page ties to the list. 6) If the legal description carries a section, township, and range, fill plss_reference with the digits and direction letters EXACTLY as printed (a misread N/S or E/W lands the tract in the wrong county); for metes and bounds fill mb_anchor with the stated county and any section tie. List uncertain field names in unsure_fields.",
   classify:
     "Classify this document for a rural landowner's records. Look at the heading, the first page, and any recording stamps. Pick exactly one type; 'other' when nothing fits. Suggest a short title.",
   deed:
-    "Extract this recorded deed. Only record what it actually states; use null for anything absent. Keep names exactly as written. Dates as YYYY-MM-DD. Copy the legal description VERBATIM and complete, including every 'less and except'. List every field you are unsure about in unsure_fields.",
+    "Extract this recorded deed. Only record what it actually states; use null for anything absent. Keep names exactly as written. Dates as YYYY-MM-DD. Copy the legal description VERBATIM and complete, including every 'less and except'. On an easement deed, capture any emergency or one-call phone number the document prints (pipeline and powerline easements often carry one) in emergency_phone. List every field you are unsure about in unsure_fields.",
   survey:
     "Extract this survey plat or legal description (it may be a photo or a scan of a drawing; read the notes and the certification block). Only record what it states; use null for anything absent. Copy the legal description VERBATIM and complete. List every field you are unsure about in unsure_fields.",
   title_insurance:

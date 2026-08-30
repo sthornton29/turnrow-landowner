@@ -13,6 +13,7 @@ import {
 import {
   EASEMENT_RELATIONSHIP_LABELS,
   EASEMENT_TYPE_LABELS,
+  easementShowsEmergencyPhoneProminently,
 } from "@/lib/easements";
 import { circleFromDetails, formatFootprint } from "@/lib/geo/circle";
 import { LAND_TYPE_LABELS } from "@/lib/landLabels";
@@ -133,6 +134,7 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "elevation_ft", label: "Flowage elevation (ft)", input: "number" },
     { key: "program", label: "Program / holder detail (conservation)", input: "text" },
     { key: "restrictions", label: "Restrictions (conservation)", input: "textarea" },
+    { key: "emergency_phone", label: "Emergency contact number", input: "text" },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   asset: [
@@ -300,10 +302,11 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
         ]);
       }
     }
-    // Type-specific details, labeled from the config
+    // Type-specific details, labeled from the config. capacity_bu is
+    // the grain bin HEADLINE (the metric slot), not a detail row.
     for (const f of ASSET_TYPES[a.asset_type]?.fields ?? []) {
       if (f.mapManaged) continue;
-      if (f.mapManaged) continue;
+      if (a.asset_type === "grain_bin" && f.key === "capacity_bu") continue;
       const v = a.details?.[f.key];
       if (v === null || v === undefined || v === "") continue;
       let text: string;
@@ -359,11 +362,15 @@ export default function FeaturePanel({
   propertyName,
   entityName = null,
   farmActivity = null,
+  assetChildren = null,
+  parentAssetName = null,
   onClose,
   onEditGeometry,
   onSplit,
   onPivotCircle,
   onCircleFootprint,
+  onSelectAsset,
+  onAddBin,
   onChanged,
 }: {
   entityType: EntityType;
@@ -371,11 +378,17 @@ export default function FeaturePanel({
   propertyName: string | null;
   entityName?: string | null; // holding entity, shown for properties
   farmActivity?: FarmActivityInfo[] | null;
+  // A bin site's child bins (name + capacity), and a child's parent
+  // name, resolved by the map from its loaded asset list.
+  assetChildren?: Array<{ id: string; name: string; capacityBu: number | null }> | null;
+  parentAssetName?: string | null;
   onClose: () => void;
   onEditGeometry: () => void;
   onSplit?: () => void; // timber stands: split with a drawn line
   onPivotCircle?: () => void; // irrigation pivots: parametric coverage circle
   onCircleFootprint?: () => void; // round assets: parametric circle footprint
+  onSelectAsset?: (id: string) => void; // tap a child bin in a site panel
+  onAddBin?: () => void; // bin sites: place a new child bin
   onChanged: () => void;
 }) {
   const supabase = createClient();
@@ -468,13 +481,36 @@ export default function FeaturePanel({
   }
 
   const isLineEasement = entityType === "easement" && !!(row as EasementGeo).geom_geojson;
+  // Grain headline figures: a bin's own capacity, a site's total over
+  // its child bins (passed in by the map, which holds the asset list).
+  const assetRow = entityType === "asset" ? (row as AssetGeo) : null;
+  const isBin = assetRow?.asset_type === "grain_bin";
+  const isBinSite = assetRow?.asset_type === "grain_bin_site";
+  const binCapacity = isBin ? Number(assetRow?.details?.capacity_bu) || null : null;
+  const siteCapacity = isBinSite
+    ? (assetChildren ?? []).reduce((s, c) => s + (c.capacityBu ?? 0), 0)
+    : null;
   const metric =
     entityType === "road" || isLineEasement
       ? `${formatNumber(Math.round((row as RoadGeo).length_feet ?? 0))} ft (${((row as RoadGeo).miles ?? 0).toFixed(2)} mi)`
-      : entityType !== "asset" && !isIssue && "acres" in row &&
-          (row as { acres: number | null }).acres !== null
-        ? `${formatAcres((row as { acres: number | null }).acres)} acres`
-        : null;
+      : isBin
+        ? binCapacity != null
+          ? `${formatNumber(binCapacity)} bu`
+          : null
+        : isBinSite
+          ? `${formatNumber(siteCapacity ?? 0)} bu`
+          : entityType !== "asset" && !isIssue && "acres" in row &&
+              (row as { acres: number | null }).acres !== null
+            ? `${formatAcres((row as { acres: number | null }).acres)} acres`
+            : null;
+  const metricLabel =
+    entityType === "road" || isLineEasement
+      ? "Length"
+      : isBin
+        ? "Capacity"
+        : isBinSite
+          ? "Total capacity"
+          : "Acres";
 
   return (
     <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[55%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-80 md:rounded-xl md:border">
@@ -520,13 +556,55 @@ export default function FeaturePanel({
 
       {!editing ? (
         <div className="mt-3 space-y-3">
+          {/* Emergency contact: prominent (red, tap-to-call) on pipeline
+              and powerline easements, a calmer row for other types. */}
+          {entityType === "easement" && (row as EasementGeo).emergency_phone ? (
+            <a
+              href={`tel:${(row as EasementGeo).emergency_phone}`}
+              className={
+                "block rounded-lg border p-2.5 " +
+                (easementShowsEmergencyPhoneProminently(
+                  (row as EasementGeo).easement_type
+                )
+                  ? "border-red-300 bg-red-50"
+                  : "border-gray-200 bg-gray-50")
+              }
+            >
+              <span
+                className={
+                  "block text-xs font-semibold uppercase tracking-wide " +
+                  (easementShowsEmergencyPhoneProminently(
+                    (row as EasementGeo).easement_type
+                  )
+                    ? "text-red-700"
+                    : "text-gray-500")
+                }
+              >
+                Emergency contact
+              </span>
+              <span className="block text-lg font-semibold text-gray-900">
+                {(row as EasementGeo).emergency_phone}
+              </span>
+            </a>
+          ) : null}
           <dl className="space-y-1.5 text-sm">
             {metric ? (
               <div className="flex justify-between">
-                <dt className="text-gray-500">
-                  {entityType === "road" || isLineEasement ? "Length" : "Acres"}
-                </dt>
+                <dt className="text-gray-500">{metricLabel}</dt>
                 <dd className="font-medium text-gray-900">{metric}</dd>
+              </div>
+            ) : null}
+            {isBin && parentAssetName && assetRow?.parent_asset_id ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-gray-500">Bin site</dt>
+                <dd className="text-right font-medium">
+                  <button
+                    onClick={() => onSelectAsset?.(assetRow.parent_asset_id!)}
+                    className="text-kelly-700 hover:underline"
+                  >
+                    {parentAssetName}
+                  </button>
+                </dd>
               </div>
             ) : null}
             {propertyName ? (
@@ -554,6 +632,36 @@ export default function FeaturePanel({
               </div>
             ) : null}
           </dl>
+
+          {/* A bin site's bins, each tappable, plus the add action. */}
+          {isBinSite ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                {(assetChildren ?? []).length} bin
+                {(assetChildren ?? []).length === 1 ? "" : "s"} on this site
+              </p>
+              {(assetChildren ?? []).map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => onSelectAsset?.(c.id)}
+                  className="flex w-full items-baseline justify-between py-0.5 text-left text-sm hover:underline"
+                >
+                  <span className="font-medium text-gray-900">{c.name}</span>
+                  <span className="text-pine-900">
+                    {c.capacityBu != null ? `${formatNumber(c.capacityBu)} bu` : ""}
+                  </span>
+                </button>
+              ))}
+              {onAddBin ? (
+                <button
+                  onClick={onAddBin}
+                  className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  + Add bin to this site
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {farmActivity && farmActivity.length > 0 ? (
             <div className="rounded-lg border border-kelly-100 bg-kelly-50 p-2.5">
@@ -642,6 +750,7 @@ export default function FeaturePanel({
               const canCircle =
                 entityType === "asset" &&
                 !isPivot &&
+                !ASSET_TYPES[(row as AssetGeo).asset_type]?.noCircle &&
                 !(row as AssetGeo).geom_geojson?.type?.includes("Line");
               return (
                 <>

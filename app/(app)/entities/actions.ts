@@ -18,18 +18,18 @@ export async function createEntity(formData: FormData) {
   revalidatePath("/entities");
 }
 
-// Merge and delete are restructuring tools: org owners only (the UI is
-// hidden for members; this is the server-side backstop).
-async function requireOwner() {
+// Merge and delete are restructuring tools: admins only (the UI is
+// hidden for users; this is the server-side backstop).
+async function requireAdmin() {
   const context = await requireOrg();
-  if (context.profile.role !== "owner") {
-    throw new Error("Only organization owners can do that.");
+  if (context.profile.role !== "admin") {
+    throw new Error("Only admins can do that.");
   }
   return context;
 }
 
 export async function deleteEntity(formData: FormData) {
-  const { supabase } = await requireOwner();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
@@ -63,7 +63,7 @@ export async function deleteEntity(formData: FormData) {
 // (not per entity), so the move cannot collide. Storage paths key on
 // entity_type, not the entity id, so moved documents keep their files.
 export async function mergeEntity(formData: FormData) {
-  const { supabase } = await requireOwner();
+  const { supabase } = await requireAdmin();
   const sourceId = String(formData.get("source_id") ?? "");
   const targetId = String(formData.get("target_id") ?? "");
   if (!sourceId || !targetId || sourceId === targetId) return;

@@ -38,7 +38,12 @@ export default function AppHeader() {
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-gray-200 bg-white">
-      <div className="mx-auto flex h-full w-full max-w-5xl items-center gap-4 px-4 md:px-6">
+      {/* Full-bleed banner: the logo sits HARD LEFT and the nav takes
+          every pixel that frees up, which is what stops the pills
+          crowding at laptop widths. Deliberate trade: page content
+          stays max-w-5xl centered, so the header no longer aligns with
+          content edges on wide screens. */}
+      <div className="flex h-full w-full items-center gap-4 px-4 md:px-6">
         {/* Brand: the horizontal logo stands alone (T mark on mobile).
             Tapping it goes home, which is the map now. */}
         <Link href="/map" className="flex shrink-0 items-center">
@@ -60,7 +65,7 @@ export default function AppHeader() {
           />
         </Link>
 
-        <nav className="ml-auto hidden items-center gap-1 md:flex">
+        <nav className="ml-auto hidden min-w-0 items-center justify-end gap-1 md:flex">
           {NAV.map((item) => {
             const active =
               pathname === item.href ||

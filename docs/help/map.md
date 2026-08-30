@@ -4,7 +4,7 @@ route: /map
 group: Map
 order: 1
 updated: 2026-08-29
-keywords: map, satellite, layers, legend, parcels, ag fields, pastures, grassland, cemeteries, wetlands, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
+keywords: map, satellite, layers, legend, filter, hide, hidden, parcels, ag fields, pastures, grassland, cemeteries, wetlands, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
 ---
 ## What this page is for
 
@@ -32,6 +32,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 - **Fullscreen** hides the app frame; on a phone the panels stay usable.
 - **Print** (top right) makes a PDF of the framed area. See the Printing topic.
 - **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics.
+- **Filter** (under the Layers box) hides individual items from the map: tap property chips to hide a whole property with everything on it, or open the searchable item tree and uncheck single fields, stands, or assets. Hidden items leave the map and its labels, an amber "N hidden" pill offers one-tap clear, and your choices stick on this device. Layers stay the coarse control; Filter works within them.
 
 ## Common questions
 

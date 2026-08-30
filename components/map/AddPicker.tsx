@@ -111,7 +111,9 @@ const SECTIONS: Section[] = [
         pick: { t: "draw", type: { kind: "line", entityType: "underground_pipe" } } },
       { key: "riser", label: "Riser", hint: "Where the pipe surfaces", swatch: { color: ASSET_LIGHT_BLUE, kind: "fill" },
         pick: { t: "asset", assetType: "riser" } },
-      { key: "grain_bin", label: "Grain bin", hint: "Round; place as a circle", swatch: { color: ASSET_LIGHT_BLUE, kind: "fill" },
+      { key: "grain_bin_site", label: "Grain bin site", hint: "Groups the bins on it", swatch: { color: ASSET_LIGHT_BLUE, kind: "fill" },
+        pick: { t: "asset", assetType: "grain_bin_site" } },
+      { key: "grain_bin", label: "Grain bin", hint: "Capacity in bushels", swatch: { color: ASSET_LIGHT_BLUE, kind: "fill" },
         pick: { t: "asset", assetType: "grain_bin" } },
       { key: "shop", label: "Shop", hint: "Work building", swatch: { color: ASSET_LIGHT_BLUE, kind: "fill" },
         pick: { t: "asset", assetType: "shop" } },
@@ -324,6 +326,9 @@ export default function AddPicker({
   );
 
   const round = assetType ? ROUND_ASSET_TYPES.includes(assetType) : false;
+  // noCircle types (grain bins, bin sites) place as Pin or Draw outline
+  // only; the circle editor is not offered for them.
+  const noCircle = assetType ? !!ASSET_TYPES[assetType].noCircle : false;
 
   const heading =
     step === "easement"
@@ -366,10 +371,13 @@ export default function AddPicker({
   );
 
   // Asset placement: round types lead with Circle (suggested);
-  // everything else reads Pin, Draw outline, Circle.
-  const placements = round
-    ? [PLACEMENT_OPTIONS[2], PLACEMENT_OPTIONS[0], PLACEMENT_OPTIONS[1]]
-    : PLACEMENT_OPTIONS;
+  // noCircle types offer Pin and Draw outline only; everything else
+  // reads Pin, Draw outline, Circle.
+  const placements = noCircle
+    ? PLACEMENT_OPTIONS.filter((o) => o.key !== "circle")
+    : round
+      ? [PLACEMENT_OPTIONS[2], PLACEMENT_OPTIONS[0], PLACEMENT_OPTIONS[1]]
+      : PLACEMENT_OPTIONS;
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-30">

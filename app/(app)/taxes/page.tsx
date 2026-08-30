@@ -32,6 +32,7 @@ export default async function TaxesPage() {
     <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading...</div>}>
       <TaxStatusClient
         orgId={profile.organization_id!}
+        canUpload={profile.role === "admin"}
         parcels={parcels ?? []}
         properties={properties ?? []}
         initialStatements={statements ?? []}

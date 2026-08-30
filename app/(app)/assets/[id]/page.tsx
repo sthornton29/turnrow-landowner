@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import type { AssetGeo } from "@/types/db";
+import { ASSET_TYPES } from "@/lib/assetTypes";
+import type { AssetGeo, AssetType } from "@/types/db";
 import AssetDetail from "./AssetDetail";
 import { MapThumb } from "@/components/summary/Summary";
 
@@ -14,18 +15,34 @@ export default async function AssetDetailPage({
   const { id } = await params;
   const { supabase, profile } = await requireOrg();
 
-  const [{ data: asset }, { data: properties }, { data: wells }] =
+  const { data: asset } = await supabase
+    .from("assets_geo")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (!asset) notFound();
+
+  // Parent candidates come from the type registry (a pivot's supply
+  // well, a bin's bin site); children are whatever links back here (a
+  // site's bins, a well's pivots).
+  const parentType = ASSET_TYPES[(asset as AssetGeo).asset_type]?.parentType ?? null;
+  const [{ data: properties }, { data: parents }, { data: children }] =
     await Promise.all([
-      supabase.from("assets_geo").select("*").eq("id", id).single(),
       supabase.from("properties").select("id, name").order("name"),
+      parentType
+        ? supabase
+            .from("assets")
+            .select("id, name")
+            .eq("asset_type", parentType satisfies AssetType)
+            .eq("is_active", true)
+            .order("name")
+        : Promise.resolve({ data: [] }),
       supabase
         .from("assets")
-        .select("id, name")
-        .eq("asset_type", "well")
-        .eq("is_active", true)
+        .select("id, name, asset_type, details, is_active")
+        .eq("parent_asset_id", id)
         .order("name"),
     ]);
-  if (!asset) notFound();
 
   return (
     <>
@@ -38,7 +55,8 @@ export default async function AssetDetailPage({
       <AssetDetail
         asset={asset as AssetGeo}
         properties={properties ?? []}
-        wells={(wells ?? []).filter((w) => w.id !== id)}
+        parentOptions={(parents ?? []).filter((w) => w.id !== id)}
+        childAssets={children ?? []}
         orgId={profile.organization_id!}
       />
     </>

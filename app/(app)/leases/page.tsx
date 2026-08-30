@@ -14,7 +14,10 @@ const STATUS_CLASSES: Record<string, string> = {
 };
 
 export default async function LeasesPage() {
-  const { supabase } = await requireOrg();
+  const { supabase, profile } = await requireOrg();
+  // Cosmetic gate only: creating org-structure records is admin work
+  // (RLS enforces it; migration 0034).
+  const isAdmin = profile.role === "admin";
 
   const [{ data: leases }, { data: tenants }, { data: lands }] = await Promise.all([
     supabase
@@ -44,12 +47,14 @@ export default async function LeasesPage() {
           </Link>
           .
         </p>
-        <Link
-          href="/leases/new"
-          className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-        >
-          + New lease
-        </Link>
+        {isAdmin ? (
+          <Link
+            href="/leases/new"
+            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+          >
+            + New lease
+          </Link>
+        ) : null}
       </div>
 
       {(leases ?? []).length === 0 ? (

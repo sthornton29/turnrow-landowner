@@ -57,12 +57,15 @@ export default async function TimberSalesPage() {
               }))}
             />
           ) : null}
-          <Link
-            href="/timber-sales/new"
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-          >
-            + New timber sale
-          </Link>
+          {/* Cosmetic gate: sale creation is admin work (RLS enforces). */}
+          {profile.role === "admin" ? (
+            <Link
+              href="/timber-sales/new"
+              className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+            >
+              + New timber sale
+            </Link>
+          ) : null}
         </span>
       </div>
 
