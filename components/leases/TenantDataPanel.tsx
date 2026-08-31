@@ -92,8 +92,6 @@ export default function TenantDataPanel({
   canUse,
   savedEntriesByYear,
   onFill,
-  onRefresh,
-  refreshing,
   scopeNote = null,
 }: {
   yearBlocks: Array<{ year: number; rows: TenantCropRow[] }>;
@@ -105,8 +103,6 @@ export default function TenantDataPanel({
   canUse: boolean; // crop share fills; flex shows the panel as reference
   savedEntriesByYear: Map<number, CropAssumption[]>;
   onFill: (year: number, fills: PanelFill[], force: boolean) => void;
-  onRefresh: () => void;
-  refreshing: boolean;
 }) {
   const blocksWithData = yearBlocks.filter((b) => b.rows.length > 0);
 
@@ -114,19 +110,15 @@ export default function TenantDataPanel({
     <div className="rounded-xl border border-kelly-100 bg-kelly-50/50 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold text-pine-900">Tenant data</h3>
-        <span className="text-xs text-gray-500">
+        <span
+          className="text-xs text-gray-500"
+          title="This panel reads the connection's synced cache. It refreshes automatically every 6 hours, or from Refresh now on the Farm connections page."
+        >
           {scopeNote ?? `from ${connectionLabel}`}
           {lastSyncedAt
             ? `, last synced ${new Date(lastSyncedAt).toLocaleString()}`
             : ""}
         </span>
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="ml-auto rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-        >
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
       </div>
 
       {blocksWithData.length === 0 ? (

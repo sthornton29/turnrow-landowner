@@ -6,7 +6,21 @@ import { syncConnection } from "@/lib/farmSync";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
-// POST: manual "Refresh now" from the app (user session; RLS scopes rows).
+function serviceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createSupabaseClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+// POST: manual "Refresh now" from the app. The signed-in user's session
+// picks the connections (RLS scopes that read), but the sync itself runs
+// with the service role exactly like the cron: the sync is the system's
+// one write path for farm data, and running it under a member's session
+// silently dropped writes RLS rejected (a user-role member's refresh
+// could not even update the connection's own scopes cache).
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -17,41 +31,53 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const connectionId = body.connection_id ? String(body.connection_id) : null;
 
-  let query = supabase.from("farm_connections").select("*").neq("status", "revoked");
+  let query = supabase.from("farm_connections").select("id").neq("status", "revoked");
   if (connectionId) query = query.eq("id", connectionId);
-  const { data: connections } = await query;
+  const { data: visible } = await query;
+  const ids = ((visible ?? []) as Array<{ id: string }>).map((r) => r.id);
+  if (ids.length === 0) return NextResponse.json({ results: [] });
+
+  const service = serviceClient();
+  if (!service) {
+    return NextResponse.json(
+      { error: "SUPABASE_SERVICE_ROLE_KEY is not configured." },
+      { status: 500 }
+    );
+  }
+  const { data: connections } = await service
+    .from("farm_connections")
+    .select("*")
+    .in("id", ids);
 
   const results = [];
   for (const connection of connections ?? []) {
-    results.push(await syncConnection(supabase, connection));
+    results.push(await syncConnection(service, connection));
   }
   return NextResponse.json({ results });
 }
 
 // GET: the Vercel cron (every 6 hours). Authenticated by CRON_SECRET, runs
-// with the service role so every organization's active connections sync.
+// with the service role so every organization's connections sync. Error
+// connections are retried every run (a transient failure must never park
+// a connection outside the cron); only revoked ones are skipped.
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   const auth = request.headers.get("authorization");
   if (!secret || auth !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) {
+  const supabase = serviceClient();
+  if (!supabase) {
     return NextResponse.json(
       { error: "SUPABASE_SERVICE_ROLE_KEY is not configured." },
       { status: 500 }
     );
   }
-  const supabase = createSupabaseClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
   const { data: connections } = await supabase
     .from("farm_connections")
     .select("*")
-    .eq("status", "active");
+    .neq("status", "revoked");
 
   const results = [];
   for (const connection of connections ?? []) {

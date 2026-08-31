@@ -8,6 +8,7 @@ import {
   emptyTotals,
   informationalGovPayments,
   loadIncomeInputs,
+  projectedLeaseYears,
   summarizeByYear,
   sumPropertyScope,
   type IncomeType,
@@ -34,11 +35,22 @@ export default async function IncomePage({
   const { supabase, profile } = await requireOrg();
   const { year: yearParam, entity: entityParam } = await searchParams;
 
-  const [inputs, { data: properties }, { data: entities }] = await Promise.all([
+  const [inputs, { data: properties }, { data: entities }, { data: driftLeases }] = await Promise.all([
     loadIncomeInputs(supabase),
     supabase.from("properties").select("id, name, entity_id").order("name"),
     supabase.from("entities").select("id, name").order("name"),
+    supabase.from("lease_assumption_drift").select("lease_id"),
   ]);
+  // Leases whose committed tenant-sourced assumptions have newer synced
+  // numbers: projections resting on them get a quiet staleness note
+  // (advisory only; no number on this page changes).
+  const driftedLeaseIds = new Set(
+    ((driftLeases ?? []) as Array<{ lease_id: string }>).map((d) => d.lease_id)
+  );
+  const projectionsByLease = projectedLeaseYears(inputs);
+  const staleProjection = Array.from(driftedLeaseIds).some((id) =>
+    projectionsByLease.get(id)?.size ? true : false
+  );
 
   const byYear = summarizeByYear(inputs);
   const currentYear = new Date().getFullYear();
@@ -274,6 +286,18 @@ export default async function IncomePage({
             Projections change as those numbers update. Generating a lease
             {"'"}s expected payments replaces its projection with the payment
             schedule.
+          </p>
+        ) : null}
+        {staleProjection ? (
+          <p className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-600">
+            Some projected amounts rest on assumptions with newer tenant
+            data.{" "}
+            <Link
+              href="/leases/updates"
+              className="font-medium text-kelly-700 hover:underline"
+            >
+              Review tenant data updates
+            </Link>
           </p>
         ) : null}
         <div className="overflow-x-auto">

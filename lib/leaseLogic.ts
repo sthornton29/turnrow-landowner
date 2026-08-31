@@ -229,6 +229,30 @@ export interface YearAssumptions {
   expected_shared_expenses?: number | null;
 }
 
+// The canonical persisted shape of crop entries: every field present
+// (null when empty) and a sources object only for values that still
+// carry provenance. The assumption row editor and the drift accept
+// helper both write through this so the saved shape never diverges.
+export function normalizeCropEntries(entries: CropAssumption[]): CropAssumption[] {
+  const VALUE_FIELDS = ["acres", "expected_yield", "expected_price"] as const;
+  return entries.map((e) => {
+    const sources: NonNullable<CropAssumption["sources"]> = {};
+    for (const field of VALUE_FIELDS) {
+      const s = e.sources?.[field];
+      if (s && e[field] != null) sources[field] = s;
+    }
+    return {
+      crop: e.crop ?? null,
+      practice: e.practice ?? null,
+      acres: e.acres ?? null,
+      expected_yield: e.expected_yield ?? null,
+      expected_price: e.expected_price ?? null,
+      expected_shared_expenses: e.expected_shared_expenses ?? null,
+      ...(Object.keys(sources).length > 0 ? { sources } : {}),
+    };
+  });
+}
+
 // The year's crop entries, whichever shape the row was saved in.
 export function cropAssumptions(
   a: YearAssumptions | null | undefined

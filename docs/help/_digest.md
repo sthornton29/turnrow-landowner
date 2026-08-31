@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-30, version 0.1.0, build ca00d35. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-31, version 0.1.0, build 01adfd5. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -85,7 +85,7 @@ The Dashboard shows total acres, property count, ag field and timber acres, and 
 
 Every file you attach anywhere (property, parcel, lease, timber sale, easement, asset, entity, tax statement) lives in Documents as one list, newest first. Each card shows the document's title, its type, and the properties it applies to. Tap a card to open the document's page.
 
-**Finding things.** Search at the top looks at titles, what was read out of the file, and the original file name. The dropdown beside it narrows to one property, one entity, or Unfiled. On a desktop the rail on the left lists the kinds of documents (Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, Other) with counts; pick one to see its specific types. On a phone the same kinds are a row of chips you can scroll sideways. **Group by** adds section headers by type or by property when you want them; the default is a plain list.
+**Finding things.** Search at the top looks at titles, what was read out of the file, and the original file name. The dropdown beside it narrows to one property, one entity, or Unfiled. On a desktop the rail on the left lists the kinds of documents (Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, Property taxes, Other) with counts; pick one to see its specific types. Property taxes holds every tax statement PDF you upload on the Property Taxes page (each files itself here automatically and links through to its statement), plus tax receipts. On a phone the same kinds are a row of chips you can scroll sideways. **Group by** adds section headers by type or by property when you want them; the default is a plain list.
 
 ## Titles
 
@@ -277,13 +277,15 @@ If your tenant uses Turnrow's farm software, they can share part of their record
 
 The farmer decides what to share (fields only, plantings, yields, projected prices and yields) and can end the share at any time. When they do, the connection shows as ended and the data already shared stays on your side.
 
+Sharing settings are re-checked from the farm software on every sync, so a scope your farmer grants or revokes later takes effect on the next refresh with nothing to reconnect or set up on your side. The chips on each connection card show the current answer with the time it was last checked; a scope turned off leaves already-synced numbers visible, labeled with their as-of date. If the chips look wrong, press Refresh now and they update from the live answer; if a chip still reads not shared, the farm side genuinely has it off for this share (a farmer with several shares can grant the wrong one by mistake).
+
 ## Mapping fields
 
 After connecting, the app suggests which of the tenant's fields match your ag fields (by name and acres within ten percent). You confirm or ignore each suggestion; the app never confirms for you. Confirmed mappings power the Crops map layer, farm activity, and the tenant data panel on leases.
 
 ## Refreshing
 
-Data refreshes on a schedule and with the Refresh now button. When the farm software is unreachable, the last synced data still shows with a note.
+The connection's sync is the one way farm data enters Turnrow: it runs automatically every 6 hours and from the Refresh now button here (the mapping page's "Check for new shared fields" runs the same sync). Every page that shows farm data (Farm Data, the map's Crops layer, ag field pages, and each lease's Tenant Data panel) reads the same synced copy, so after one refresh every surface reflects it. When the farm software is unreachable, the last synced data still shows with a note; a problem fetching one part (say prices) appears on the connection card instead of failing quietly.
 
 ## Tenants come from the farm data
 
@@ -415,6 +417,12 @@ Agricultural leases are **cash** (per acre or lump sum), **flex** (a base rate p
 ## Uploading a lease
 
 Upload the signed lease as a PDF and the app reads the type, dates, acres, rent structure, payment schedule, and special provisions, and suggests a price method from the pricing clause. Fields it was unsure about are highlighted amber. Nothing saves until you review and confirm.
+
+New leases start with status **Active** (uploaded and manually entered alike); change it on the form or the lease page any time (draft, active, expired, terminated). Expired and terminated leases stop projecting income.
+
+## When tenant numbers change after you saved them
+
+Assumption values you filled from tenant data remember where they came from. After every sync, any such value whose tenant number has since changed gets a **Newer tenant data** chip on the lease list and lease page; a tenant price marked final shows the stronger **Final price available**. The assumptions section shows the saved and current numbers side by side with a one-tap **Accept** per value, and **Review tenant data updates** (linked from the lease list and the Income page) lists every changed value across leases with per-lease and accept-all buttons. Nothing ever changes a saved assumption by itself: every acceptance is your tap, and a value you hand-edited never gets flagged (hand edits always win).
 
 ## Government payments on share and flex leases
 
@@ -718,7 +726,7 @@ A statement whose lines do not add up to its total shows an amber chip with the 
 
 ## Uploading statements
 
-Upload one PDF with many statements in it, or several files, or photos. The app first sorts the pages into statements (a whole-account bill repeats its account number and total on every page, so ten pages become one statement), then reads each statement's header and lines. Handwritten notes on the pages are ignored. You review a list of the statements found (county, account, taxpayer and entity, year, total, lines, whether the lines reconcile), open any to check its lines, and confirm one at a time or all at once. Nothing saves without confirmation.
+Upload one PDF with many statements in it, or several files, or photos. The app first sorts the pages into statements (a whole-account bill repeats its account number and total on every page, so ten pages become one statement), then reads each statement's header and lines. Handwritten notes on the pages are ignored. You review a list of the statements found (county, account, taxpayer and entity, year, total, lines, whether the lines reconcile), open any to check its lines, and confirm one at a time or all at once. Nothing saves without confirmation. Each confirmed statement also files its source PDF in Documents under Property taxes, linked back to the statement; deleting a statement offers to remove the file too (a PDF shared by other statements stays).
 
 ## How parcels are matched
 

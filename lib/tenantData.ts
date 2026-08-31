@@ -115,42 +115,42 @@ export function buildTenantCropRows(args: {
 
     // Price: strictly this crop, prefer final then freshest as-of.
     // Practice rows of the same crop share it (prices are per crop).
+    // CACHED DATA OUTLIVES THE SCOPE: a price synced while the scope was
+    // on keeps rendering (with its as-of) after the farmer turns the
+    // scope off; "not_shared" is only the no-data-and-no-scope state.
     let priceCell: TenantCropRow["priceCell"] = null;
-    if (!anyPriceScope) {
+    const selected = selectPriceRows(
+      prices.filter(
+        (p) =>
+          p.crop_year === year &&
+          p.projected_avg_price !== null &&
+          sameCrop(p.crop, crop) &&
+          relevantConnectionIds.includes(p.farm_connection_id)
+      ),
+      tenantEntity
+    );
+    const row =
+      selected.rows
+        .sort(
+          (a, b) =>
+            Number(b.is_final) - Number(a.is_final) ||
+            (b.as_of ?? "").localeCompare(a.as_of ?? "")
+        )[0] ?? null;
+    if (row && row.projected_avg_price !== null) {
+      const cents = row.unit === "cents_per_lb";
+      priceCell = {
+        value: row.projected_avg_price,
+        unitLabel: cents ? "c/lb" : "$/bu",
+        fillValue: cents
+          ? Math.round((row.projected_avg_price / 100) * 10000) / 10000
+          : row.projected_avg_price,
+        isFinal: row.is_final,
+        asOf: row.as_of,
+        scope: selected.scope,
+        scopeLabel: priceScopeLabel(selected.scope, selected.entityName),
+      };
+    } else if (!anyPriceScope) {
       priceCell = "not_shared";
-    } else {
-      const selected = selectPriceRows(
-        prices.filter(
-          (p) =>
-            p.crop_year === year &&
-            p.projected_avg_price !== null &&
-            sameCrop(p.crop, crop) &&
-            priceScope.has(p.farm_connection_id) &&
-            relevantConnectionIds.includes(p.farm_connection_id)
-        ),
-        tenantEntity
-      );
-      const row =
-        selected.rows
-          .sort(
-            (a, b) =>
-              Number(b.is_final) - Number(a.is_final) ||
-              (b.as_of ?? "").localeCompare(a.as_of ?? "")
-          )[0] ?? null;
-      if (row && row.projected_avg_price !== null) {
-        const cents = row.unit === "cents_per_lb";
-        priceCell = {
-          value: row.projected_avg_price,
-          unitLabel: cents ? "c/lb" : "$/bu",
-          fillValue: cents
-            ? Math.round((row.projected_avg_price / 100) * 10000) / 10000
-            : row.projected_avg_price,
-          isFinal: row.is_final,
-          asOf: row.as_of,
-          scope: selected.scope,
-          scopeLabel: priceScopeLabel(selected.scope, selected.entityName),
-        };
-      }
     }
     const matchedLeaseCrop = matchCrop(crop, leaseCrops);
 
@@ -186,14 +186,14 @@ export function buildTenantCropRows(args: {
     }
 
     // Pre-harvest: the tenant's projected yields, split by practice
-    // when the farm data carries the breakout.
+    // when the farm data carries the breakout. Cached yields keep
+    // rendering after a scope is revoked, same as prices above.
     const projected = projectedYields.filter(
       (r) =>
         r.crop_year === year &&
         r.basis === "expected" &&
         r.yield_per_acre !== null &&
         sameCrop(r.crop, crop) &&
-        projectedYieldScope.has(r.farm_connection_id) &&
         relevantKeys.has(`${r.farm_connection_id}|${r.remote_field_id}`)
     );
     const withPractices = projected.filter(

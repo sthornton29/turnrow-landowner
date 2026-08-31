@@ -3,8 +3,8 @@ title: Leases
 route: /leases
 group: Leases
 order: 1
-updated: 2026-08-20
-keywords: lease, tenant, agricultural, hunting, cash rent, flex, crop share, terms, payment schedule, expected payments, record payment, insurance, auto renew, notice, leased acres, upload lease, ai extraction, special provisions
+updated: 2026-08-31
+keywords: lease, tenant, agricultural, hunting, cash rent, flex, crop share, terms, payment schedule, expected payments, record payment, insurance, auto renew, notice, leased acres, upload lease, ai extraction, special provisions, active, status, newer tenant data, final price, accept, updates
 ---
 ## Tenants and leases
 
@@ -15,6 +15,12 @@ Agricultural leases are **cash** (per acre or lump sum), **flex** (a base rate p
 ## Uploading a lease
 
 Upload the signed lease as a PDF and the app reads the type, dates, acres, rent structure, payment schedule, and special provisions, and suggests a price method from the pricing clause. Fields it was unsure about are highlighted amber. Nothing saves until you review and confirm.
+
+New leases start with status **Active** (uploaded and manually entered alike); change it on the form or the lease page any time (draft, active, expired, terminated). Expired and terminated leases stop projecting income.
+
+## When tenant numbers change after you saved them
+
+Assumption values you filled from tenant data remember where they came from. After every sync, any such value whose tenant number has since changed gets a **Newer tenant data** chip on the lease list and lease page; a tenant price marked final shows the stronger **Final price available**. The assumptions section shows the saved and current numbers side by side with a one-tap **Accept** per value, and **Review tenant data updates** (linked from the lease list and the Income page) lists every changed value across leases with per-lease and accept-all buttons. Nothing ever changes a saved assumption by itself: every acceptance is your tap, and a value you hand-edited never gets flagged (hand edits always win).
 
 ## Government payments on share and flex leases
 

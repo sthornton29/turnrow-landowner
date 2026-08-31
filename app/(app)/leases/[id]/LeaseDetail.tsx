@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   CROP_PRACTICE_LABELS,
   LEASE_STATUS_LABELS,
@@ -37,6 +37,14 @@ import {
 } from "@/lib/leasePricing";
 import { matchCrop } from "@/lib/crops";
 import { buildTenantCropRows, type TenantCropRow } from "@/lib/tenantData";
+import { leaseFarmScope } from "@/lib/leaseFarmScope";
+import {
+  DRIFT_FIELD_LABELS,
+  computeLeaseYearDrift,
+  driftKey,
+  driftSummary,
+} from "@/lib/assumptionDrift";
+import { acceptDriftRow, type DriftRow } from "@/lib/acceptDrift";
 import TenantDataPanel, { type PanelFill } from "@/components/leases/TenantDataPanel";
 import {
   RecipeComputeCard,
@@ -120,12 +128,13 @@ export default function LeaseDetail({
   >([]);
   const [marketingPrices, setMarketingPrices] = useState<TenantPriceRow[]>([]);
   const [projectedYields, setProjectedYields] = useState<ProjectedYieldRow[]>([]);
+  const [driftRows, setDriftRows] = useState<DriftRow[]>([]);
 
   const load = useCallback(async () => {
     const wantsFarm =
       lease.lease_type === "agricultural" &&
       (lease.rent_structure === "crop_share" || lease.rent_structure === "flex");
-    const [l, a, fm, fd, fc, mp, py] = await Promise.all([
+    const [l, a, fm, fd, fc, mp, py, dr] = await Promise.all([
       supabase.from("lease_lands").select("*").eq("lease_id", lease.id),
       supabase.from("lease_year_assumptions").select("*").eq("lease_id", lease.id).order("year"),
       wantsFarm
@@ -143,6 +152,9 @@ export default function LeaseDetail({
       wantsFarm
         ? supabase.from("farm_projected_yields").select("*")
         : Promise.resolve({ data: [] }),
+      wantsFarm
+        ? supabase.from("lease_assumption_drift").select("*").eq("lease_id", lease.id)
+        : Promise.resolve({ data: [] }),
     ]);
     setLands((l.data as LandLink[]) ?? []);
     setAssumptions((a.data as AssumptionRow[]) ?? []);
@@ -158,6 +170,7 @@ export default function LeaseDetail({
     );
     setMarketingPrices((mp.data as TenantPriceRow[]) ?? []);
     setProjectedYields((py.data as ProjectedYieldRow[]) ?? []);
+    setDriftRows((dr.data as DriftRow[]) ?? []);
   }, [supabase, lease.id, lease.lease_type, lease.rent_structure]);
 
   useEffect(() => {
@@ -232,36 +245,17 @@ export default function LeaseDetail({
   // Which farm connections and remote fields cover this lease's land
   // (shared by the actual-yield, tenant-price, and projected-yield
   // helpers).
-  const relevantFarm = useMemo(() => {
-    const keys = new Set<string>();
-    const connectionIds = new Set<string>();
-    const leasedFieldIds = new Set(lands.map((l) => l.field_id).filter(Boolean));
-    const wholePropertyIds = new Set(
-      lands.filter((l) => !l.field_id).map((l) => l.property_id)
-    );
-    const onLeaseMappings = farmMappings.filter((m) => {
-      const mappedField = m.local_field_id ? fieldById.get(m.local_field_id) : null;
-      return Boolean(
-        (m.local_field_id && leasedFieldIds.has(m.local_field_id)) ||
-          (mappedField && wholePropertyIds.has(mappedField.property_id)) ||
-          (m.local_property_id && wholePropertyIds.has(m.local_property_id))
-      );
-    });
-    // The tenant IS a farming entity: when linked, only that entity's
-    // fields on the lease land count. Fall back to every mapping on the
-    // land when none carries an entity (a pre-entity farm API).
-    const entityScoped = tenantEntity
-      ? onLeaseMappings.filter(
-          (m) => m.farm_connection_id === tenantEntity.connectionId && m.remote_entity_id === tenantEntity.entityId
-        )
-      : [];
-    const chosen = entityScoped.length > 0 ? entityScoped : onLeaseMappings;
-    for (const m of chosen) {
-      keys.add(`${m.farm_connection_id}|${m.remote_field_id}`);
-      connectionIds.add(m.farm_connection_id);
-    }
-    return { keys, connectionIds: Array.from(connectionIds), scopedToEntity: entityScoped.length > 0 };
-  }, [lands, farmMappings, fieldById, tenantEntity]);
+  const relevantFarm = useMemo(
+    () =>
+      leaseFarmScope({
+        lands,
+        mappings: farmMappings,
+        fieldPropertyById: new Map(fields.map((f) => [f.id, f.property_id])),
+        tenantEntity,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lands, farmMappings, fields, tenantEntity]
+  );
 
   const priceMethod: PriceMethod = lease.terms?.price_method ?? "manual";
   const priceScopedConnections = useMemo(
@@ -343,25 +337,6 @@ export default function LeaseDetail({
     setFillSignal({ year, fills, force, nonce: fillNonceRef.current });
   }
 
-  const [refreshingFarm, setRefreshingFarm] = useState(false);
-  async function refreshFarm() {
-    setRefreshingFarm(true);
-    try {
-      await Promise.all(
-        relevantFarm.connectionIds.map((id) =>
-          fetch("/api/farm/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ connection_id: id }),
-          })
-        )
-      );
-    } finally {
-      setRefreshingFarm(false);
-      load();
-    }
-  }
-
   const relevantConnections = farmConnections.filter((c) =>
     relevantFarm.connectionIds.includes(c.id)
   );
@@ -409,6 +384,35 @@ export default function LeaseDetail({
 
   // ------------------------------------------------------------- assumptions
 
+  // Reconcile this lease-year's drift flags against just-saved data, so
+  // a hand edit or an accept clears its flag immediately instead of at
+  // the next sync. Same comparator the sync uses.
+  async function reconcileYearDrift(year: number, data: YearAssumptions) {
+    const desired = computeLeaseYearDrift({
+      leaseId: lease.id,
+      year,
+      savedEntries: cropAssumptions(data),
+      tenantRows: tenantRowsByYear.get(year) ?? [],
+      connectionId: relevantFarm.connectionIds[0] ?? null,
+      syncedAt: farmLastSynced,
+    });
+    const desiredKeys = new Set(desired.map(driftKey));
+    const existing = driftRows.filter((d) => d.year === year);
+    const existingKeys = new Set(existing.map(driftKey));
+    const toUpsert = desired
+      .filter((d) => !existingKeys.has(driftKey(d)))
+      .map((d) => ({ organization_id: orgId, ...d }));
+    if (toUpsert.length > 0) {
+      await supabase
+        .from("lease_assumption_drift")
+        .upsert(toUpsert, { onConflict: "lease_id,year,crop,practice,field" });
+    }
+    const staleIds = existing.filter((d) => !desiredKeys.has(driftKey(d))).map((d) => d.id);
+    if (staleIds.length > 0) {
+      await supabase.from("lease_assumption_drift").delete().in("id", staleIds);
+    }
+  }
+
   async function saveAssumption(year: number, data: YearAssumptions) {
     const existing = assumptions.find((a) => a.year === year);
     if (existing) {
@@ -424,6 +428,17 @@ export default function LeaseDetail({
         data,
       });
     }
+    await reconcileYearDrift(year, data);
+    load();
+  }
+
+  // One tap on a drift line: rewrite the value + provenance the way a
+  // Use fill + Save would, drop the flag, reload.
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  async function acceptDrift(drift: DriftRow) {
+    setAcceptError(null);
+    const { error: err } = await acceptDriftRow(supabase, drift);
+    if (err) setAcceptError("Could not accept the update: " + err);
     load();
   }
 
@@ -478,6 +493,22 @@ export default function LeaseDetail({
               </option>
             ))}
           </select>
+          {driftRows.length > 0 ? (
+            <a
+              href="#assumptions"
+              className={
+                "rounded-full px-2.5 py-0.5 text-xs font-medium " +
+                (driftSummary(driftRows).hasFinalPrice
+                  ? "bg-pine-800 text-white"
+                  : "bg-amber-100 text-amber-800")
+              }
+              title="A synced tenant number differs from a saved assumption; review below"
+            >
+              {driftSummary(driftRows).hasFinalPrice
+                ? "Final price available"
+                : "Newer tenant data"}
+            </a>
+          ) : null}
           {tenant ? (
             <Link
               href={`/tenants/${tenant.id}`}
@@ -635,10 +666,11 @@ export default function LeaseDetail({
 
       {/* Per-year assumptions for flex / crop share */}
       {needsAssumptions && years.length > 0 ? (
-        <section className="space-y-2">
+        <section id="assumptions" className="space-y-2 scroll-mt-4">
           <h2 className="text-lg font-semibold text-gray-900">
             Projection assumptions by year
           </h2>
+          {acceptError ? <p className="text-sm text-red-600">{acceptError}</p> : null}
           <p className="text-sm text-gray-500">
             {lease.rent_structure === "flex"
               ? `Base rent is computed from the base rate and leased acres; enter your estimated bonus per year. Bonus: ${lease.terms?.bonus_description ?? "not described"}`
@@ -701,8 +733,6 @@ export default function LeaseDetail({
               canUse={lease.rent_structure === "crop_share"}
               savedEntriesByYear={savedEntriesByYear}
               onFill={handlePanelFill}
-              onRefresh={refreshFarm}
-              refreshing={refreshingFarm}
             />
           ) : null}
           <div className="space-y-2">
@@ -734,6 +764,8 @@ export default function LeaseDetail({
                   fillSignal={
                     fillSignal && fillSignal.year === year ? fillSignal : null
                   }
+                  driftRows={driftRows.filter((d) => d.year === year)}
+                  onAcceptDrift={acceptDrift}
                   onSave={(data) => saveAssumption(year, data)}
                 />
               );
@@ -815,6 +847,8 @@ function AssumptionRowEditor({
   rmaConfigFor,
   recipe = null,
   fillSignal = null,
+  driftRows = [],
+  onAcceptDrift,
   onSave,
 }: {
   year: number;
@@ -826,6 +860,8 @@ function AssumptionRowEditor({
   rmaConfigFor: (crop: string | null) => RmaBenchmarkConfig | null;
   recipe?: PriceRecipe | null;
   fillSignal?: { fills: PanelFill[]; force: boolean; nonce: number } | null;
+  driftRows?: DriftRow[];
+  onAcceptDrift?: (drift: DriftRow) => void;
   onSave: (data: YearAssumptions) => void;
 }) {
   const [bonus, setBonus] = useState<number | null>(value.bonus_estimate ?? null);
@@ -1118,6 +1154,54 @@ function AssumptionRowEditor({
                     {tagLine}
                   </span>
                 ) : null}
+                {driftRows
+                  .filter(
+                    (d) =>
+                      matchCrop(d.crop, [e.crop]) !== null &&
+                      d.practice === (e.practice ?? "blended")
+                  )
+                  .map((d) => (
+                    <span
+                      key={d.id}
+                      className="flex w-full basis-full flex-wrap items-center gap-1.5 pl-14 text-[11px]"
+                    >
+                      <span
+                        className={
+                          "rounded-full px-1.5 py-0.5 font-medium " +
+                          (d.is_final_price
+                            ? "bg-pine-800 text-white"
+                            : "bg-amber-100 text-amber-800")
+                        }
+                      >
+                        {d.is_final_price ? "FINAL" : "UPDATED"}
+                      </span>
+                      <span className="text-gray-600">
+                        {d.is_final_price
+                          ? `Final price now available: ${formatDollars(d.tenant_value)} (you saved ${formatDollars(d.committed_value)})`
+                          : `Tenant now reports ${DRIFT_FIELD_LABELS[d.field]} ${
+                              d.field === "expected_price"
+                                ? formatDollars(d.tenant_value)
+                                : formatNumber(d.tenant_value)
+                            } (you saved ${
+                              d.field === "expected_price"
+                                ? formatDollars(d.committed_value)
+                                : formatNumber(d.committed_value)
+                            })`}
+                        {d.tenant_as_of
+                          ? ` as of ${new Date(d.tenant_as_of).toLocaleDateString()}`
+                          : ""}
+                      </span>
+                      {onAcceptDrift ? (
+                        <button
+                          onClick={() => onAcceptDrift(d)}
+                          className="rounded border border-kelly-500 px-1.5 py-0.5 font-medium text-kelly-700 hover:bg-kelly-100"
+                          title="Update the saved assumption to this value (saves immediately)"
+                        >
+                          Accept
+                        </button>
+                      ) : null}
+                    </span>
+                  ))}
                 {helperFor(i) ? (
                   <div className="w-full basis-full pl-14">{helperFor(i)}</div>
                 ) : null}

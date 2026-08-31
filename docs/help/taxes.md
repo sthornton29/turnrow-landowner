@@ -3,7 +3,7 @@ title: Property taxes
 route: /taxes
 group: Property Taxes
 order: 1
-updated: 2026-08-30
+updated: 2026-08-31
 keywords: property tax, statement, upload, account, parcel match, PPIN, identifiers, lines, reconcile, completeness, unpaid, delinquent, due date, batch pay, check number, county calendar, assessed value, appraised value, personal property, tax year, entity, taxpayer, change report, year over year, effective rate, current use, class iii, homestead, exemption, appeal, spike, pdf
 ---
 ## What this page is for
@@ -20,7 +20,7 @@ A statement whose lines do not add up to its total shows an amber chip with the 
 
 ## Uploading statements
 
-Upload one PDF with many statements in it, or several files, or photos. The app first sorts the pages into statements (a whole-account bill repeats its account number and total on every page, so ten pages become one statement), then reads each statement's header and lines. Handwritten notes on the pages are ignored. You review a list of the statements found (county, account, taxpayer and entity, year, total, lines, whether the lines reconcile), open any to check its lines, and confirm one at a time or all at once. Nothing saves without confirmation.
+Upload one PDF with many statements in it, or several files, or photos. The app first sorts the pages into statements (a whole-account bill repeats its account number and total on every page, so ten pages become one statement), then reads each statement's header and lines. Handwritten notes on the pages are ignored. You review a list of the statements found (county, account, taxpayer and entity, year, total, lines, whether the lines reconcile), open any to check its lines, and confirm one at a time or all at once. Nothing saves without confirmation. Each confirmed statement also files its source PDF in Documents under Property taxes, linked back to the statement; deleting a statement offers to remove the file too (a PDF shared by other statements stays).
 
 ## How parcels are matched
 

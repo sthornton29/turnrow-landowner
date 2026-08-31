@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -78,7 +78,17 @@ export default function TaxStatusClient({
   useEffect(() => {
     if (urlYear > 1900) setYear(urlYear);
   }, [urlYear]);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // A documents-page deep link (?statement=<id>) opens that statement
+  // and scrolls it into view once.
+  const urlStatement = searchParams.get("statement");
+  const [expanded, setExpanded] = useState<string | null>(urlStatement);
+  const scrolledToStatement = useRef(false);
+  const statementScrollRef = useCallback((el: HTMLLIElement | null) => {
+    if (el && !scrolledToStatement.current) {
+      scrolledToStatement.current = true;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, []);
   const [recordingFor, setRecordingFor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
@@ -283,7 +293,18 @@ export default function TaxStatusClient({
       .eq("entity_type", "tax_statement")
       .eq("entity_id", statement.id);
     if (docs && docs.length > 0) {
-      await supabase.storage.from("documents").remove(docs.map((d) => d.storage_path as string));
+      // A multi-statement source PDF shares ONE storage object across the
+      // sibling statements' documents rows; only remove paths no other
+      // row (any entity) still references.
+      const paths = Array.from(new Set(docs.map((d) => d.storage_path as string)));
+      const { data: others } = await supabase
+        .from("documents")
+        .select("storage_path")
+        .in("storage_path", paths)
+        .not("id", "in", `(${docs.map((d) => d.id as string).join(",")})`);
+      const stillReferenced = new Set((others ?? []).map((o) => o.storage_path as string));
+      const removable = paths.filter((p) => !stillReferenced.has(p));
+      if (removable.length > 0) await supabase.storage.from("documents").remove(removable);
       await supabase.from("documents").delete().in("id", docs.map((d) => d.id as string));
     }
     await supabase.from("tax_statements").delete().eq("id", statement.id);
@@ -635,7 +656,11 @@ export default function TaxStatusClient({
               const unmatched = sLines.filter((l) => l.line_type === "real_property" && !l.parcel_id).length;
               const statementPayments = payments.filter((p) => p.tax_statement_id === s.id);
               return (
-                <li key={s.id} className="rounded-xl border border-gray-200 bg-white p-3">
+                <li
+                  key={s.id}
+                  ref={s.id === urlStatement ? statementScrollRef : undefined}
+                  className="rounded-xl border border-gray-200 bg-white p-3"
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     {status !== "paid" ? (
                       <input

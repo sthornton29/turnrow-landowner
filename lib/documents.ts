@@ -33,6 +33,8 @@ export type DocType =
   | "insurance_policy"
   | "hunting_agreement"
   | "current_use_application"
+  | "tax_statement"
+  | "tax_receipt"
   | "other";
 
 export type DocGroup =
@@ -42,6 +44,7 @@ export type DocGroup =
   | "government"
   | "valuation"
   | "agreements"
+  | "taxes"
   | "other";
 
 export const DOC_GROUP_LABELS: Record<DocGroup, string> = {
@@ -51,6 +54,7 @@ export const DOC_GROUP_LABELS: Record<DocGroup, string> = {
   government: "Government & conservation",
   valuation: "Valuation & management",
   agreements: "Insurance & agreements",
+  taxes: "Property taxes",
   other: "Other",
 };
 
@@ -83,6 +87,8 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
   insurance_policy: "Insurance policy",
   hunting_agreement: "Hunting agreement",
   current_use_application: "Current use application",
+  tax_statement: "Tax statement",
+  tax_receipt: "Tax receipt",
   other: "Other",
 };
 
@@ -113,6 +119,8 @@ export const DOC_TYPE_GROUP: Record<DocType, DocGroup> = {
   insurance_policy: "agreements",
   hunting_agreement: "agreements",
   current_use_application: "agreements",
+  tax_statement: "taxes",
+  tax_receipt: "taxes",
   other: "other",
 };
 

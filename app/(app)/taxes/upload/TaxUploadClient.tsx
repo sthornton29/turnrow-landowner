@@ -470,7 +470,7 @@ export default function TaxUploadClient({
     const job = files.find((f) => f.localId === s.fileLocalId);
     if (job?.storagePath) {
       const title = `${county ?? "County"} County property tax ${s.taxYear}${account ? ` (${account})` : ""}`;
-      const { data: doc } = await supabase
+      const { data: doc, error: docErr } = await supabase
         .from("documents")
         .insert({
           organization_id: orgId,
@@ -480,13 +480,18 @@ export default function TaxUploadClient({
           storage_path: job.storagePath,
           content_type: job.file.type || null,
           size_bytes: job.file.size,
-          doc_type: "other",
+          doc_type: "tax_statement",
           title,
           title_reviewed: true,
         })
         .select("id")
         .single();
-      if (doc?.id) await supabase.from("tax_statements").update({ source_document_id: doc.id }).eq("id", statementId);
+      if (docErr || !doc) {
+        await rollback();
+        patchStatement(s.localId, { status: "review", error: "Could not attach the statement file: " + (docErr?.message ?? "") });
+        return;
+      }
+      await supabase.from("tax_statements").update({ source_document_id: doc.id }).eq("id", statementId);
     }
 
     // Lines.

@@ -18,6 +18,30 @@ interface Connection extends FarmConnectionRow {
   // The share's farming entities (migration 0031); empty on a
   // pre-entity farm API.
   entities?: Array<{ id: string; name: string; field_count?: number | null }> | null;
+  // When the live handshake last answered (the scope chips show the
+  // LIVE state as of this moment; migration 0040).
+  scopes_checked_at?: string | null;
+  // Per-area outcome of the last sync run, written by lib/farmSync.ts.
+  sync_detail?: {
+    prices?: { state: string; message?: string; rows?: number; at: string };
+    yields?: { state: string; message?: string; rows?: number; at: string };
+  } | null;
+}
+
+// A fetch problem on one optional area (prices/yields) worth an amber
+// line on the card. Scope-off is quiet (the chip already reads off).
+function areaProblems(c: Connection): string[] {
+  const out: string[] = [];
+  for (const [area, label] of [
+    ["prices", "Projected prices"],
+    ["yields", "Projected yields"],
+  ] as const) {
+    const d = c.sync_detail?.[area];
+    if (d?.state === "error") out.push(`${label}: ${d.message ?? "the last fetch failed"}`);
+    if (d?.state === "scope_off")
+      out.push(`${label}: the farm's endpoints report this scope off (the handshake disagreed; it will settle on the next sync).`);
+  }
+  return out;
 }
 
 export default function FarmsClient({
@@ -43,7 +67,7 @@ export default function FarmsClient({
     const { data } = await supabase
       .from("farm_connections")
       .select(
-        "id, label, status, scopes, operation_name, landowner_name, field_count, entities, last_synced_at, last_error, created_at"
+        "id, label, status, scopes, scopes_checked_at, sync_detail, operation_name, landowner_name, field_count, entities, last_synced_at, last_error, created_at"
       )
       .order("created_at");
     setConnections((data as Connection[]) ?? []);
@@ -212,6 +236,14 @@ export default function FarmsClient({
                       {label}
                     </span>
                   ))}
+                  {c.scopes_checked_at ? (
+                    <span
+                      className="self-center text-[10px] text-gray-400"
+                      title="Scopes are re-read from the farm software on every sync; granting or revoking there takes effect on the next sync with nothing to do here."
+                    >
+                      checked {new Date(c.scopes_checked_at).toLocaleString()}
+                    </span>
+                  ) : null}
                 </span>
                 {(c.entities ?? []).length > 0 ? (
                   <span className="basis-full text-xs text-gray-600">
@@ -231,6 +263,33 @@ export default function FarmsClient({
                 <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
                   {c.last_error}
                 </p>
+              ) : null}
+              {areaProblems(c).map((p) => (
+                <p
+                  key={p}
+                  className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800"
+                >
+                  {p}
+                </p>
+              ))}
+              {c.sync_detail && (c.sync_detail.prices || c.sync_detail.yields) ? (
+                <details className="mt-2 text-xs text-gray-500">
+                  <summary className="cursor-pointer select-none">Sync detail</summary>
+                  <div className="mt-1 space-y-0.5 font-mono text-[11px]">
+                    {(["prices", "yields"] as const).map((area) => {
+                      const d = c.sync_detail?.[area];
+                      if (!d) return null;
+                      return (
+                        <p key={area}>
+                          {area}: {d.state}
+                          {typeof d.rows === "number" ? ` (${d.rows} rows)` : ""}
+                          {d.message ? ` - ${d.message}` : ""}
+                          {d.at ? ` @ ${new Date(d.at).toLocaleString()}` : ""}
+                        </p>
+                      );
+                    })}
+                  </div>
+                </details>
               ) : null}
               <div className="mt-3 flex flex-wrap gap-3 text-sm">
                 <Link

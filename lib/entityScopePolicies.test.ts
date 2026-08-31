@@ -20,10 +20,17 @@ const sql37 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0037_entity_scope_read_after_write.sql"),
   "utf8"
 );
-const sql = sql34 + sql37;
+// 0040 adds lease_assumption_drift with its own restrictive policy in
+// the same shape; the hoist and cast rules cover it too.
+const sql40 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0040_farm_sync_drift.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql40;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
-  sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope"));
+  sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
+  sql40.slice(sql40.indexOf("drop policy if exists lease_assumption_drift_all"));
 
 // The scoped-table list. Deliberately absent (documented in the
 // migration header): tenants, farm_connections (reads), county_tax_defaults,
@@ -49,6 +56,7 @@ const SCOPED_TABLES = [
   "leases",
   "lease_lands",
   "lease_year_assumptions",
+  "lease_assumption_drift",
   "expected_payments",
   "payments",
   "timber_sales",

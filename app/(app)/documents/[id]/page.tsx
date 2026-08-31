@@ -82,7 +82,7 @@ async function primaryAttachment(
     const who = data ? [data.county, data.account_number ?? data.taxpayer_name_printed].filter(Boolean).join(", ") : "";
     return {
       label: data ? `${data.tax_year} tax statement${who ? ` (${who})` : ""}` : "Tax statement",
-      href: data ? `/taxes?year=${data.tax_year}` : "/taxes",
+      href: data ? `/taxes?year=${data.tax_year}&statement=${entityId}` : "/taxes",
     };
   }
   const s = simple[entityType];

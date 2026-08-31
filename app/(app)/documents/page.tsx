@@ -88,6 +88,7 @@ export default async function DocumentsPage() {
   const parcelProperty = new Map(
     (parcels.data ?? []).map((p) => [p.id, { property_id: p.property_id, number: p.parcel_number }])
   );
+  const statementYear = new Map((taxStatements.data ?? []).map((t) => [t.id, t.tax_year]));
   push(
     "tax_statement",
     (taxStatements.data ?? []).map((t) => {
@@ -103,7 +104,7 @@ export default async function DocumentsPage() {
       };
     }),
     (r) => r.name ?? "",
-    () => "/taxes"
+    (r) => `/taxes?year=${statementYear.get(r.id)}&statement=${r.id}`
   );
 
   return (

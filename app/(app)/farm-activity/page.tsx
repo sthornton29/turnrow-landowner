@@ -53,7 +53,9 @@ export default async function FarmActivityPage({
     supabase
       .from("farm_connections")
       .select("id, label, scopes, status, operation_name, last_synced_at, last_error, entities"),
-    supabase.from("field_mappings").select("*"),
+    // Confirmed only, like every other surface: a suggested (unreviewed)
+    // mapping must never attribute farm data to a property.
+    supabase.from("field_mappings").select("*").eq("status", "confirmed"),
     supabase.from("farm_field_data").select("*").order("crop_year", { ascending: false }),
     supabase.from("fields").select("id, name, property_id"),
     supabase.from("properties").select("id, name, entity_id").order("name"),

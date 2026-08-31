@@ -10,6 +10,7 @@ export const GROUP_CLASS: Record<string, string> = {
   government: "bg-emerald-50 text-emerald-800 border-emerald-200",
   valuation: "bg-violet-50 text-violet-800 border-violet-200",
   agreements: "bg-indigo-50 text-indigo-800 border-indigo-200",
+  taxes: "bg-teal-50 text-teal-800 border-teal-200",
   other: "bg-gray-100 text-gray-600 border-gray-200",
 };
 

@@ -1,6 +1,107 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-30 night (MAP NAME LABEL TOGGLES + NEIGHBORS
+Last updated: 2026-08-31 (FARM SYNC SCOPES LIVE + NOTHING SILENT, TENANT
+DATA DRIFT REVIEW, TAX DOCUMENTS CATEGORY, LEASES BORN ACTIVE.
+THE FARM DATA FLOW, one paragraph every future feature follows: the farm
+partner API is read ONLY by lib/farmSync.ts syncConnection (cron every 6
+hours, the connection's Refresh now button, and connect; the manual POST
+now verifies the user then runs under the SERVICE ROLE exactly like the
+cron, because a user-role member's session could not even update the
+connection row under 0034 RLS); the sync starts EVERY run with the live
+GET /handshake and gates the prices/yields fetches on that answer, so a
+scope granted or revoked farm-side takes effect on the very next sync
+with no reconnect; farm_connections.scopes is a pure DISPLAY CACHE of
+that live answer, rewritten with scopes_checked_at right after the
+handshake; the sync is the ONLY writer of the cache tables
+(farm_field_data, farm_marketing_prices, farm_projected_yields), once
+per connection however many leases share it, and EVERY surface (Farm
+Data, dashboard, map Crops layer, field pages, every lease's Tenant
+Data panel) renders straight from that cache (the panel's per-lease
+Refresh button is GONE; the only refresh is the connection's); the only
+copies are user-confirmed lease assumptions carrying per-value
+provenance {kind, as_of}, and after each sync recomputeOrgDrift flags
+every committed tenant-sourced value that now differs from the cache
+for explicit one-tap acceptance. DIAGNOSIS THAT DROVE IT (Martin
+Trusts: prices/yields scopes granted after connecting never arrived):
+the landowner side was already live-gating; the farm-side handshake
+itself reports projected_prices false for that share (verified by
+calling /handshake with the decrypted token; the two sibling shares
+report true), so the grant never landed on that share's row farm-side.
+The fixes make such states VISIBLE: every Supabase write in the sync
+goes through must() (a rejected write fails the sync into last_error;
+before, all 11 writes discarded their errors and a sync that wrote
+nothing reported ok), prices/yields fetch outcomes land in
+farm_connections.sync_detail (ok | off | scope_off | error, with rows
+and message; scope_off resurrects the dead FarmApiError.isScopeOff and
+corrects the chip instead of erroring; other fetch errors show an amber
+line, never fail the sync), the card shows scope chips from the
+live-refreshed cache with "checked <time>" plus a dev-visible Sync
+detail block, the cron retries status='error' connections (only
+revoked is skipped; one transient failure used to park a connection
+outside the cron forever), and cached prices/yields KEEP RENDERING
+after a scope is revoked, labeled by their as-of ("Not shared" is only
+the no-data state; lib/tenantData.ts no longer drops cached rows on
+scope-off). Fixture test lib/farmSyncScopes.test.ts flips scopes
+between runs (grant-later fetches, revoke-later keeps rows, scope-403,
+error surfacing) over lib/testUtils/fakeDb.ts, a multi-table in-memory
+supabase fake grown from the fakeTenants pattern.
+DRIFT (migration 0040): lease_assumption_drift, one row per committed
+tenant-sourced assumption value that differs from what Use would fill
+today, unique (lease_id, year, crop, practice, field) with practice
+'blended' for null so plain upsert works; org RLS + restrictive
+entity-scope policy in the 0034 lease-chain shape (mirrored in
+entityScopePolicies.test.ts). Only values whose sources tag says
+tenant_* can drift (hand edits clear the tag and never flag); the
+tenant side value is exactly the Use fill (plantedAcres,
+yieldCell.value, priceCell.fillValue in dollars) matched by matchCrop +
+practice, 1e-4 float epsilon; a vanished tenant row is NOT drift (the
+as-of label carries the story) and reconciles any stale flag away.
+recomputeOrgDrift (lib/assumptionDriftSync.ts) runs at the end of every
+sync (failure never fails the sync), filters organization_id explicitly
+on every query (service-role safe), and upserts changed rows/deletes
+stale ones (detected_at only moves when values change); the lease page
+reconciles its own lease-year on every assumption save so hand edits
+clear flags immediately. The matching layer is extracted verbatim to
+lib/leaseFarmScope.ts (leaseFarmScope, shared by LeaseDetail and the
+sync). SURFACES: amber "Newer tenant data" / dark "Final price
+available" (is_final) chips on lease list rows and the lease header
+linking #assumptions; per-value "Tenant now reports X (you saved Y)
+[Accept]" lines under the crop sub-row's provenance line; /leases/updates
+("Review tenant data updates", linked from a lease-list banner and a
+quiet gray income-page note under the projection note) lists every
+drifted value grouped by lease with Accept per value, per lease, and
+all; accepting runs lib/acceptDrift.ts acceptDriftRow, which re-reads
+the row, guards the committed value still matches (else drops the stale
+flag), rewrites value + {kind, as_of} EXACTLY like a Use fill + Save
+(normalizeCropEntries factored into lib/leaseLogic.ts so both writers
+agree), and deletes the flag; one tap saves immediately because the
+drift line IS the review. Also: /farm-activity now feeds rollups
+CONFIRMED mappings only (it was the one surface passing suggested
+mappings into property attribution). Tests: leaseFarmScope,
+assumptionDrift (epsilon, final flag, cents/lb dollars, vanished rows,
+practice + synonym matching), assumptionDriftSync (idempotent
+reconcile, org-filter assertion per read), acceptDrift (provenance
+rewrite, stale guard, legacy shape upgrade).
+TAX DOCUMENTS (migration 0039): documents doc_type gains tax_statement
++ tax_receipt in a new "Property taxes" group (lib/documents.ts, first
+taxonomy extension since 0020; check constraint rebuilt; chips/icons/AI
+enums follow automatically); the tax batch upload writes its documents
+row as tax_statement (was the repo's only hard-coded doc_type "other")
+and now CHECKS the insert error (rollback + review status instead of a
+silently orphaned PDF); 0039 backfills doc_type on every existing
+statement document, links tax_statements.source_document_id where null
+(oldest match), and synthesizes titles for pre-0030 rows; documents
+deep-link /taxes?year=Y&statement=<id> and TaxStatusClient expands and
+scrolls to that statement; deleteStatement no longer removes a storage
+object other statements' documents rows still reference (the shared
+multi-statement PDF bug). LEASES BORN ACTIVE: LeaseForm's status
+default for NEW leases is "active" (manual and AI-extracted; the status
+select still offers draft before first save; no existing lease
+touched; income already treats draft like active and skips
+expired/terminated, unchanged). Help: farms.md (live scope story, one
+refresh path), leases.md (active default, drift review), documents.md
+(Property taxes group), taxes.md (PDF lands in Documents).)
+Earlier, 2026-08-30 night (MAP NAME LABEL TOGGLES + NEIGHBORS
 OVERLAY. LABELS: two persisted switches in a new Labels section of the
 Layers box (turnrow.map.labels.v1, both default on): "Property names"
 (property-labels) and "Field names" covering EVERY sub-property name
@@ -240,6 +341,35 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
+000000000. Run 0039_tax_documents.sql, then 0040_farm_sync_drift.sql in
+   Supabase, IN THAT ORDER, BEFORE this deploy goes live (2026-08-31;
+   NEITHER RUN at the time of writing).
+   * 0039 (tax documents): rebuilds the documents doc_type check with
+     tax_statement/tax_receipt and backfills every existing statement
+     document into the new Property taxes group (doc_type, missing
+     source_document_id links, titles for pre-0030 rows). A deploy
+     without it breaks the tax upload's documents insert (23514) and
+     the taxonomy stays absent from the rail.
+   * 0040 (farm sync state + drift): farm_connections.scopes_checked_at
+     and sync_detail, plus the lease_assumption_drift table with its
+     RLS. A deploy without it BREAKS EVERY SYNC (the sync writes the
+     new columns through must() and now fails loudly) and the lease
+     list/lease page/income/updates queries of the drift table.
+   AFTER the deploy: press Refresh now on each connection (or wait for
+   the cron). MARTIN TRUSTS SPECIFICALLY: the landowner side was not
+   the blocker; the farm-side share row still reports projected_prices
+   and projected_yields FALSE (verified live against /handshake on
+   2026-08-31). Open the FARM software's share settings, flip the two
+   scopes on the Martin Trusts share, reload to confirm they stuck,
+   then Refresh now here; prices and yields arrive in that one sync.
+   Then test: flip a scope off farm-side and watch the chip go gray
+   with a fresh "checked" time on the next sync while cached numbers
+   stay visible with their as-of; edit a tenant projected price
+   farm-side, Refresh, and find the drift chip on the right lease with
+   one-tap Accept (and the same row on /leases/updates); confirm a tax
+   statement upload files its PDF under Documents > Property taxes and
+   links back to the statement; create a lease and see it born Active.
+
 00000000. Run 0038_gis_service_extents.sql in Supabase BEFORE this
    deploy goes live (2026-08-30; NOT YET RUN at the time of writing):
    adds nullable extent_xmin/ymin/xmax/ymax to county_gis_services
@@ -458,7 +588,16 @@ and Postgres row level security guarantees each org sees only its own data.
   flags, property/county scoping), owner-cluster ranking (pinning,
   cutoff, best-variant scoring), assistant SQL guard mirror, assistant tool
   schemas, help route matching and search and nav coverage, the
-  entity-scope policy mirror of migration 0034); plus the RLS_TEST=1
+  entity-scope policy mirror of migrations 0034 + 0040, the farm sync
+  scope-flip fixture (grant-later fetches, revoke-later keeps cached
+  rows, scope-403 correction, write-error surfacing, over the
+  lib/testUtils/fakeDb.ts multi-table in-memory supabase fake), the
+  lease-to-cache matching layer (leaseFarmScope), the tenant-data drift
+  comparator (tenant-tag-only, epsilon, final flag, cents/lb dollars,
+  vanished rows, practice and synonym matching), the org drift
+  recompute (idempotent reconcile, explicit org filter per read), and
+  the drift accept primitive (provenance rewrite, stale guard, legacy
+  single-crop upgrade)); plus the RLS_TEST=1
   gated live isolation suite (lib/entityScope.live.test.ts, the
   repo's first database-touching test, taxFixtures.live pattern:
   provisions and removes its own scratch org)
@@ -1046,11 +1185,14 @@ missing unique (id, organization_id) on parcels):
   billing key for the year is skipped with a link to /taxes; a line
   duplicate (the partial unique index) rolls the statement insert
   back. Confirm writes the header, the documents row (entity_type
-  tax_statement, title "<County> County property tax <year>
-  (<account>)") as source_document_id, the lines, then the learning.
+  tax_statement, doc_type tax_statement since 0039, title "<County>
+  County property tax <year> (<account>)"; a failed documents insert
+  now rolls the statement back and surfaces) as source_document_id, the
+  lines, then the learning.
   /taxes lists statement cards with expandable lines, an Unmatched
   LINES section with Match to parcel (learning on confirm), payments
-  at statement level, ?year= honored, delete removes the attached
+  at statement level, ?year= and ?statement= (expand + scroll, the
+  documents deep link) honored, delete removes the attached
   documents and says so. FIXTURES: fixtures/tax-statements/ holds the
   three real 2024 statements (Lawrence whole-account, Colbert PPIN
   only, Morgan parcel + key + receipt); lib/taxFixtures.live.test.ts
@@ -1197,20 +1339,32 @@ Phase 6 server pieces:
   fields, plantings, production) with a 15s timeout; 403 share_revoked is
   recognized and mapped to a friendly "your farmer ended this share"
   state (connection status revoked, data retained).
-- lib/farmSync.ts: syncConnection decrypts the token, pulls handshake +
-  current-year plantings/production, upserts farm_field_data (via the
-  pure buildFarmFieldRow, unit tested in farmSync.test.ts so the
+- lib/farmSync.ts: syncConnection decrypts the token, reads the LIVE
+  handshake FIRST and immediately rewrites the stored scopes display
+  cache (+ scopes_checked_at, migration 0040), pulls current-year
+  plantings/production, upserts farm_field_data (via the pure
+  buildFarmFieldRow, unit tested in farmSync.test.ts so the
   harvest_status flag round-trips exactly as the partner API sent it,
-  null on a pre-addendum payload), refreshes mappings, records
-  last_error on failure. Used by connect, the manual Refresh now
-  button, and the cron.
+  null on a pre-addendum payload), fetches marketing prices and
+  projected yields when the live scopes grant them (outcomes recorded
+  in sync_detail: ok | off | scope_off | error; a scope-403 corrects
+  the displayed chip via FarmApiError.isScopeOff; other fetch errors
+  never fail the sync), refreshes mappings, syncs tenants from
+  entities, runs recomputeOrgDrift, and records last_error on failure.
+  EVERY database write goes through must() and a rejected write fails
+  the sync loudly (2026-08-31; before that all 11 writes discarded
+  their errors). Used by connect, the manual Refresh now button, and
+  the cron. Scope-flip fixture: lib/farmSyncScopes.test.ts.
 - /api/farm/connect: POST a TRW-XXXX-XXXX-XXXX code; redeems it (one-time
   on the farm side), encrypts the returned token, creates the connection,
   runs the first sync.
-- /api/farm/sync: POST (signed-in user, one or all connections) and GET
-  (Vercel cron, Bearer CRON_SECRET, service-role client). vercel.json
-  schedules it every 6 hours; proxy.ts exempts the path from auth
-  redirects.
+- /api/farm/sync: POST (signed-in user picks the connections through
+  RLS, then the sync itself runs on the SERVICE ROLE like the cron, so
+  a user-role member's refresh is not silently rejected by 0034's
+  admin-only farm_connections writes) and GET (Vercel cron, Bearer
+  CRON_SECRET, service-role client; syncs every NON-REVOKED connection
+  so an error status retries every run). vercel.json schedules it every
+  6 hours; proxy.ts exempts the path from auth redirects.
 
 Entity level (migrations 0007 and 0009; org RLS, same policy pattern):
 
@@ -1424,9 +1578,12 @@ right source, always reviewed (amber until saved) and never auto-saved:
   are NEVER practice-split: the partner /production payload carries no
   breakout, so a harvested crop collapses to one blended ACTUAL row
   (never fabricated; a farm-side API addition is the path to split
-  actuals). Scope not granted renders a quiet "Not shared" (tooltip:
-  the farmer controls sharing); crop/acres always work. Reads the local
-  sync cache, shows last-synced, Refresh reuses /api/farm/sync. Fills:
+  actuals). Scope not granted renders a quiet "Not shared" ONLY when
+  nothing is cached (tooltip: the farmer controls sharing); cached
+  numbers outlive a revoked scope, labeled by their as-of; crop/acres
+  always work. Reads the local sync cache and shows last-synced; the
+  panel's own Refresh button was REMOVED 2026-08-31 (the only refresh
+  is the connection's: cron + Refresh now on /farms). Fills:
   "Use all" fills matched crops (or every crop when the year is empty),
   plus per-row and per-cell Use buttons; every filled value lands amber
   and saves only when the row is saved. NO SILENT OVERWRITE: Use all
@@ -1670,7 +1827,7 @@ Functions and views:
     beside it (Unfiled, then Properties and Entities optgroups; value
     p:<id> / e:<id> / unfiled). TYPE NAVIGATION replaces the old
     always-on group headers: a slim left rail on desktop (All plus the
-    seven taxonomy groups with counts; the selected group expands its
+    eight taxonomy groups with counts; the selected group expands its
     types with counts) and horizontally scrolling chip rows on mobile
     (groups, then the selected group's types). Counts reflect the
     search and property filter but not the type filter. GROUP BY
@@ -2799,7 +2956,7 @@ Functions and views:
   the easement catalog and migration and for circle geometry/sync.
   Described above.
 - Post-Phase 6j (DONE, 2026-08-20, migrations 0020 + 0021 + 0022):
-  DOCUMENT VAULT (27-type taxonomy in seven groups, a Documents nav
+  DOCUMENT VAULT (29-type taxonomy in eight groups since 0039, a Documents nav
   page with filters, search, and upload, AI classification as a
   confirm-or-override chip, per-type scans with amber review stored
   on the document, a bulk re-type backfill, and PLOT BOUNDARY FROM A

@@ -10,6 +10,7 @@ const GROUP_ICON_CLASS: Record<DocGroup, string> = {
   government: "bg-emerald-50 text-emerald-700",
   valuation: "bg-violet-50 text-violet-700",
   agreements: "bg-indigo-50 text-indigo-700",
+  taxes: "bg-teal-50 text-teal-700",
   other: "bg-gray-100 text-gray-500",
 };
 
@@ -58,6 +59,13 @@ function Path({ group }: { group: DocGroup }) {
         <>
           <path d="M4 20l4-1 11-11-3-3L5 16z" />
           <path d="M13 7l3 3" />
+        </>
+      );
+    case "taxes": // receipt with lines
+      return (
+        <>
+          <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5L10 21l-2-1.5L6 21z" />
+          <path d="M9 8h6M9 12h6" />
         </>
       );
     default: // generic file

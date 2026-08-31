@@ -12,7 +12,7 @@ import {
   scanKindFor,
 } from "./documents";
 
-// The list migration 0020's check constraint allows.
+// The list migration 0020's check constraint allows, as widened by 0039.
 const SQL_TYPES = [
   "deed_warranty", "deed_quitclaim", "deed_timber", "deed_mineral",
   "title_insurance", "title_opinion", "closing_statement", "probate_estate",
@@ -22,13 +22,14 @@ const SQL_TYPES = [
   "wetland_determination", "hel_determination",
   "appraisal", "timber_cruise", "management_plan", "soil_survey",
   "insurance_policy", "hunting_agreement", "current_use_application",
+  "tax_statement", "tax_receipt",
   "other",
 ];
 
 describe("document taxonomy", () => {
   it("matches the migration check constraint exactly", () => {
     expect([...DOC_TYPES].sort()).toEqual([...SQL_TYPES].sort());
-    expect(DOC_TYPES).toHaveLength(27);
+    expect(DOC_TYPES).toHaveLength(29);
   });
 
   it("labels and groups every type; every group has types and a label", () => {
@@ -58,6 +59,8 @@ describe("document taxonomy", () => {
     expect(scanKindFor("fsa_156ez")).toBe("fsa_156ez");
     expect(scanKindFor("hel_determination")).toBe("determination");
     expect(scanKindFor("appraisal")).toBe("generic");
+    expect(scanKindFor("tax_statement")).toBe("generic");
+    expect(scanKindFor("tax_receipt")).toBe("generic");
     expect(scanKindFor("other")).toBe("generic");
   });
 

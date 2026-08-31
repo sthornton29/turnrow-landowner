@@ -119,7 +119,9 @@ export default function LeaseForm({
     lease?.lease_type ?? prefill?.lease_type ?? "agricultural"
   );
   const [name, setName] = useState(lease?.name ?? prefill?.name ?? "");
-  const [status, setStatus] = useState<LeaseStatus>(lease?.status ?? "draft");
+  // New leases (manual and AI-extracted alike) start ACTIVE; the select
+  // below still lets the user pick draft before the first save.
+  const [status, setStatus] = useState<LeaseStatus>(lease?.status ?? "active");
   const [startDate, setStartDate] = useState(lease?.start_date ?? prefill?.start_date ?? "");
   const [endDate, setEndDate] = useState(lease?.end_date ?? prefill?.end_date ?? "");
   const [autoRenew, setAutoRenew] = useState(lease?.auto_renew ?? prefill?.auto_renew ?? false);

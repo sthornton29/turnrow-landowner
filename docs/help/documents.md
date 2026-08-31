@@ -3,14 +3,14 @@ title: Documents
 route: /documents
 group: Documents
 order: 1
-updated: 2026-08-21
-keywords: documents, vault, land index, aliases, also called, evidence, retry, upload, drop, deed, warranty, quitclaim, title insurance, survey, plat, legal description, easement deed, mortgage, fsa 156, crp, nrcs, wetland determination, hel, appraisal, timber cruise, management plan, insurance policy, hunting agreement, current use, classify, type, scan, extract, search, retype, rename, title, review titles, replace file, versions, notes, photos, delete, unfiled, manual, document page
+updated: 2026-08-31
+keywords: documents, vault, land index, aliases, also called, evidence, retry, upload, drop, deed, warranty, quitclaim, title insurance, survey, plat, legal description, easement deed, mortgage, fsa 156, crp, nrcs, wetland determination, hel, appraisal, timber cruise, management plan, insurance policy, hunting agreement, current use, tax statement, tax receipt, property taxes, classify, type, scan, extract, search, retype, rename, title, review titles, replace file, versions, notes, photos, delete, unfiled, manual, document page
 ---
 ## The vault
 
 Every file you attach anywhere (property, parcel, lease, timber sale, easement, asset, entity, tax statement) lives in Documents as one list, newest first. Each card shows the document's title, its type, and the properties it applies to. Tap a card to open the document's page.
 
-**Finding things.** Search at the top looks at titles, what was read out of the file, and the original file name. The dropdown beside it narrows to one property, one entity, or Unfiled. On a desktop the rail on the left lists the kinds of documents (Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, Other) with counts; pick one to see its specific types. On a phone the same kinds are a row of chips you can scroll sideways. **Group by** adds section headers by type or by property when you want them; the default is a plain list.
+**Finding things.** Search at the top looks at titles, what was read out of the file, and the original file name. The dropdown beside it narrows to one property, one entity, or Unfiled. On a desktop the rail on the left lists the kinds of documents (Title and ownership, Surveys and legal, Encumbrances and debt, Government and conservation, Valuation and management, Insurance and agreements, Property taxes, Other) with counts; pick one to see its specific types. Property taxes holds every tax statement PDF you upload on the Property Taxes page (each files itself here automatically and links through to its statement), plus tax receipts. On a phone the same kinds are a row of chips you can scroll sideways. **Group by** adds section headers by type or by property when you want them; the default is a plain list.
 
 ## Titles
 
