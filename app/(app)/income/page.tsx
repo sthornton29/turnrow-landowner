@@ -8,13 +8,13 @@ import {
   emptyTotals,
   informationalGovPayments,
   loadIncomeInputs,
-  projectedLeaseYears,
   summarizeByYear,
   sumPropertyScope,
   type IncomeType,
   type PropertyTotals,
   govShareRows,
 } from "@/lib/income";
+import { cropAssumptions } from "@/lib/leaseLogic";
 import RentUpload from "@/components/payments/RentUpload";
 import EntityFilterChips from "@/components/entities/EntityFilterChips";
 
@@ -35,22 +35,25 @@ export default async function IncomePage({
   const { supabase, profile } = await requireOrg();
   const { year: yearParam, entity: entityParam } = await searchParams;
 
-  const [inputs, { data: properties }, { data: entities }, { data: driftLeases }] = await Promise.all([
+  const [inputs, { data: properties }, { data: entities }] = await Promise.all([
     loadIncomeInputs(supabase),
     supabase.from("properties").select("id, name, entity_id").order("name"),
     supabase.from("entities").select("id, name").order("name"),
-    supabase.from("lease_assumption_drift").select("lease_id"),
   ]);
-  // Leases whose committed tenant-sourced assumptions have newer synced
-  // numbers: projections resting on them get a quiet staleness note
-  // (advisory only; no number on this page changes).
-  const driftedLeaseIds = new Set(
-    ((driftLeases ?? []) as Array<{ lease_id: string }>).map((d) => d.lease_id)
-  );
-  const projectionsByLease = projectedLeaseYears(inputs);
-  const staleProjection = Array.from(driftedLeaseIds).some((id) =>
-    projectionsByLease.get(id)?.size ? true : false
-  );
+  // Which assumption values behind the projections came from tenant
+  // data (they fill and refresh automatically every sync): drives the
+  // wording of the projection note below so the reader knows these
+  // figures rest on the tenant's own projections.
+  const tenantKinds = new Set<string>();
+  for (const a of inputs.assumptions) {
+    for (const e of cropAssumptions(a.data)) {
+      for (const s of Object.values(e.sources ?? {})) {
+        if (s?.kind) tenantKinds.add(s.kind);
+      }
+    }
+  }
+  const usesTenantData = tenantKinds.size > 0;
+  const hasFinalPrices = tenantKinds.has("tenant_final");
 
   const byYear = summarizeByYear(inputs);
   const currentYear = new Date().getFullYear();
@@ -282,22 +285,26 @@ export default async function IncomePage({
         {totals.hasProjection ? (
           <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">
             Expected includes PROJECTED rent, computed from lease terms and
-            each year{"'"}s assumptions (your tenant{"'"}s prices and yields).
-            Projections change as those numbers update. Generating a lease
-            {"'"}s expected payments replaces its projection with the payment
-            schedule.
-          </p>
-        ) : null}
-        {staleProjection ? (
-          <p className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-600">
-            Some projected amounts rest on assumptions with newer tenant
-            data.{" "}
-            <Link
-              href="/leases/updates"
-              className="font-medium text-kelly-700 hover:underline"
-            >
-              Review tenant data updates
-            </Link>
+            each year{"'"}s assumptions.
+            {usesTenantData ? (
+              <>
+                {" "}
+                Those assumptions are based on your tenant{"'"}s own
+                PROJECTED prices and yields where shared; they fill in and
+                update automatically with every sync, so these figures are
+                estimates that will move as your tenant revises projections
+                {hasFinalPrices
+                  ? " (prices your farmer has marked final are settlement numbers, not projections)"
+                  : ""}
+                . Each lease shows every value{"'"}s source and as-of date,
+                and a value you enter by hand there is never changed
+                automatically.
+              </>
+            ) : (
+              <> Projections change as those numbers update.</>
+            )}{" "}
+            Generating a lease{"'"}s expected payments replaces its
+            projection with the payment schedule.
           </p>
         ) : null}
         <div className="overflow-x-auto">

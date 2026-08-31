@@ -4,7 +4,7 @@ route: /leases
 group: Leases
 order: 1
 updated: 2026-08-31
-keywords: lease, tenant, agricultural, hunting, cash rent, flex, crop share, terms, payment schedule, expected payments, record payment, insurance, auto renew, notice, leased acres, upload lease, ai extraction, special provisions, active, status, newer tenant data, final price, accept, updates
+keywords: lease, tenant, agricultural, hunting, cash rent, flex, crop share, terms, payment schedule, expected payments, record payment, insurance, auto renew, notice, leased acres, upload lease, ai extraction, special provisions, active, status, tenant data, automatic, projections, final price, hand edit
 ---
 ## Tenants and leases
 
@@ -18,9 +18,11 @@ Upload the signed lease as a PDF and the app reads the type, dates, acres, rent 
 
 New leases start with status **Active** (uploaded and manually entered alike); change it on the form or the lease page any time (draft, active, expired, terminated). Expired and terminated leases stop projecting income.
 
-## When tenant numbers change after you saved them
+## Tenant data flows in by itself
 
-Assumption values you filled from tenant data remember where they came from. After every sync, any such value whose tenant number has since changed gets a **Newer tenant data** chip on the lease list and lease page; a tenant price marked final shows the stronger **Final price available**. The assumptions section shows the saved and current numbers side by side with a one-tap **Accept** per value, and **Review tenant data updates** (linked from the lease list and the Income page) lists every changed value across leases with per-lease and accept-all buttons. Nothing ever changes a saved assumption by itself: every acceptance is your tap, and a value you hand-edited never gets flagged (hand edits always win).
+On a crop share lease whose land is mapped to a farm connection, the projection assumptions fill themselves: planted acres, the tenant's projected (or actual) yields, and the tenant's projected prices flow in automatically with every sync, and keep updating as the tenant revises them. A price the farmer marks final replaces the projection automatically and is labeled FINAL. There is nothing to allow per lease; a new lease picks its numbers up on the next sync (or press Refresh now on the Farm connections page).
+
+Every automatic value shows its source and as-of date in small print under the crop row, so you always know which numbers are the tenant's projections. **Your edits always win**: type over any value and it becomes yours, never replaced by a sync. Once you hand-touch a year, the app also stops adding new crop rows to it (the tenant panel above the rows still shows everything shared, with Use buttons to take a tenant number back). The Income page says plainly when its expected figures rest on tenant projections.
 
 ## Government payments on share and flex leases
 

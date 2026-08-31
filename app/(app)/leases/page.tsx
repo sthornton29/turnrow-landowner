@@ -19,7 +19,7 @@ export default async function LeasesPage() {
   // (RLS enforces it; migration 0034).
   const isAdmin = profile.role === "admin";
 
-  const [{ data: leases }, { data: tenants }, { data: lands }, { data: drift }] = await Promise.all([
+  const [{ data: leases }, { data: tenants }, { data: lands }] = await Promise.all([
     supabase
       .from("leases")
       .select("id, tenant_id, lease_type, name, status, start_date, end_date")
@@ -27,7 +27,6 @@ export default async function LeasesPage() {
       .order("end_date", { ascending: false }),
     supabase.from("tenants").select("id, name"),
     supabase.from("lease_lands").select("lease_id, leased_acres"),
-    supabase.from("lease_assumption_drift").select("lease_id, is_final_price"),
   ]);
 
   const tenantName = new Map((tenants ?? []).map((t) => [t.id, t.name]));
@@ -35,17 +34,6 @@ export default async function LeasesPage() {
   for (const l of lands ?? []) {
     acresByLease.set(l.lease_id, (acresByLease.get(l.lease_id) ?? 0) + (l.leased_acres ?? 0));
   }
-  // Tenant-data drift chips: synced tenant numbers that differ from a
-  // committed assumption (written after each sync; accepted per value).
-  const driftByLease = new Map<string, { count: number; final: boolean }>();
-  for (const d of (drift ?? []) as Array<{ lease_id: string; is_final_price: boolean }>) {
-    const cur = driftByLease.get(d.lease_id) ?? { count: 0, final: false };
-    driftByLease.set(d.lease_id, {
-      count: cur.count + 1,
-      final: cur.final || d.is_final_price,
-    });
-  }
-  const driftTotal = (drift ?? []).length;
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
@@ -69,21 +57,6 @@ export default async function LeasesPage() {
         ) : null}
       </div>
 
-      {driftTotal > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <span>
-            {driftTotal} tenant data update{driftTotal === 1 ? "" : "s"} to
-            review across your leases.
-          </span>
-          <Link
-            href="/leases/updates"
-            className="font-semibold text-kelly-700 hover:underline"
-          >
-            Review
-          </Link>
-        </div>
-      ) : null}
-
       {(leases ?? []).length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
           No leases yet. Create one by uploading the lease document (the AI
@@ -105,22 +78,6 @@ export default async function LeasesPage() {
                 >
                   {LEASE_STATUS_LABELS[l.status as LeaseStatus] ?? l.status}
                 </span>
-                {driftByLease.has(l.id) ? (
-                  <Link
-                    href={`/leases/${l.id}#assumptions`}
-                    className={
-                      "rounded-full px-2 py-0.5 text-xs font-medium " +
-                      (driftByLease.get(l.id)!.final
-                        ? "bg-pine-800 text-white"
-                        : "bg-amber-100 text-amber-800")
-                    }
-                    title="A synced tenant number differs from a saved assumption on this lease"
-                  >
-                    {driftByLease.get(l.id)!.final
-                      ? "Final price available"
-                      : "Newer tenant data"}
-                  </Link>
-                ) : null}
                 <span className="ml-auto text-sm text-gray-500">
                   {tenantName.get(l.tenant_id) ?? "Unknown tenant"}
                   {" · "}

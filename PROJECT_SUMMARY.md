@@ -18,10 +18,10 @@ per connection however many leases share it, and EVERY surface (Farm
 Data, dashboard, map Crops layer, field pages, every lease's Tenant
 Data panel) renders straight from that cache (the panel's per-lease
 Refresh button is GONE; the only refresh is the connection's); the only
-copies are user-confirmed lease assumptions carrying per-value
-provenance {kind, as_of}, and after each sync recomputeOrgDrift flags
-every committed tenant-sourced value that now differs from the cache
-for explicit one-tap acceptance. DIAGNOSIS THAT DROVE IT (Martin
+copies are lease assumptions carrying per-value provenance {kind,
+as_of}, AUTO-FILLED and AUTO-REFRESHED from the cache after every sync
+(hand-edited values are never touched; see TENANT DATA FLOWS IN
+AUTOMATICALLY below). DIAGNOSIS THAT DROVE IT (Martin
 Trusts: prices/yields scopes granted after connecting never arrived):
 the landowner side was already live-gating; the farm-side handshake
 itself reports projected_prices false for that share (verified by
@@ -45,43 +45,50 @@ scope-off). Fixture test lib/farmSyncScopes.test.ts flips scopes
 between runs (grant-later fetches, revoke-later keeps rows, scope-403,
 error surfacing) over lib/testUtils/fakeDb.ts, a multi-table in-memory
 supabase fake grown from the fakeTenants pattern.
-DRIFT (migration 0040): lease_assumption_drift, one row per committed
-tenant-sourced assumption value that differs from what Use would fill
-today, unique (lease_id, year, crop, practice, field) with practice
-'blended' for null so plain upsert works; org RLS + restrictive
-entity-scope policy in the 0034 lease-chain shape (mirrored in
-entityScopePolicies.test.ts). Only values whose sources tag says
-tenant_* can drift (hand edits clear the tag and never flag); the
-tenant side value is exactly the Use fill (plantedAcres,
-yieldCell.value, priceCell.fillValue in dollars) matched by matchCrop +
-practice, 1e-4 float epsilon; a vanished tenant row is NOT drift (the
-as-of label carries the story) and reconciles any stale flag away.
-recomputeOrgDrift (lib/assumptionDriftSync.ts) runs at the end of every
-sync (failure never fails the sync), filters organization_id explicitly
-on every query (service-role safe), and upserts changed rows/deletes
-stale ones (detected_at only moves when values change); the lease page
-reconciles its own lease-year on every assumption save so hand edits
-clear flags immediately. The matching layer is extracted verbatim to
-lib/leaseFarmScope.ts (leaseFarmScope, shared by LeaseDetail and the
-sync). SURFACES: amber "Newer tenant data" / dark "Final price
-available" (is_final) chips on lease list rows and the lease header
-linking #assumptions; per-value "Tenant now reports X (you saved Y)
-[Accept]" lines under the crop sub-row's provenance line; /leases/updates
-("Review tenant data updates", linked from a lease-list banner and a
-quiet gray income-page note under the projection note) lists every
-drifted value grouped by lease with Accept per value, per lease, and
-all; accepting runs lib/acceptDrift.ts acceptDriftRow, which re-reads
-the row, guards the committed value still matches (else drops the stale
-flag), rewrites value + {kind, as_of} EXACTLY like a Use fill + Save
-(normalizeCropEntries factored into lib/leaseLogic.ts so both writers
-agree), and deletes the flag; one tap saves immediately because the
-drift line IS the review. Also: /farm-activity now feeds rollups
-CONFIRMED mappings only (it was the one surface passing suggested
-mappings into property attribution). Tests: leaseFarmScope,
-assumptionDrift (epsilon, final flag, cents/lb dollars, vanished rows,
-practice + synonym matching), assumptionDriftSync (idempotent
-reconcile, org-filter assertion per read), acceptDrift (provenance
-rewrite, stale guard, legacy shape upgrade).
+TENANT DATA FLOWS IN AUTOMATICALLY (same day, per Stuart: "I don't
+want to have to go into each lease and allow use of projected prices
+and yields"; this superseded a drift-review design built hours earlier
+- 0040's lease_assumption_drift table, its chips, /leases/updates, and
+the accept flow were REMOVED before anyone used them, and migration
+0041 drops the table): lib/tenantAutoFill.ts autoFillTenantAssumptions
+runs at the end of every sync (failure never fails the sync; explicit
+organization_id filter on every query, service-role safe) and, for
+every draft/active crop-share ag lease, per term year with tenant rows,
+fills and refreshes lease_year_assumptions through the SAME matching
+layer as the panel (lib/leaseFarmScope.ts leaseFarmScope, extracted
+verbatim from LeaseDetail and shared) and the SAME value semantics as a
+Use fill (autoFillYearEntries + tenantFillFor: plantedAcres as
+tenant_actual, yieldCell.value as tenant_projected/actual,
+priceCell.fillValue in DOLLARS as tenant_projected/final with the price
+row's own as_of; normalizeCropEntries in lib/leaseLogic.ts keeps the
+saved shape identical to the editor's save). THE ONE SAFETY RULE: a
+value with no provenance tag (hand-entered, or hand-edited - editing
+clears the tag) is NEVER touched; only empty and tenant-tagged values
+fill/refresh, and unchanged values are not rewritten (as_of stays put,
+no updated_at churn). Crop LIST ownership: a year whose entries are all
+tenant-managed (every value empty or tagged, no shared expenses) gets
+missing tenant crops added automatically, including practice-split
+irrigated/dryland entries and brand-new lease-years (row inserted);
+once the user hand-touches anything in a year, the year's crop list is
+theirs and only matched entries keep refreshing. Entries whose tenant
+row vanished keep their last values and as-of labels. A new lease picks
+its numbers up on the next sync or Refresh now. TRANSPARENCY: the
+income page's projection banner now says, when any assumption value
+carries a tenant tag, that the figures rest on the tenant's OWN
+projected prices and yields, auto-updating each sync, with final prices
+called out as settlement numbers; the lease assumptions section carries
+a standing note ("your tenant's shared numbers fill these rows and
+update automatically... edit any value to take it over by hand") and
+every value keeps its source + as-of line. The Tenant Data panel and
+its Use buttons remain (the way to take a tenant number back after a
+hand edit). Also: /farm-activity now feeds rollups CONFIRMED mappings
+only (it was the one surface passing suggested mappings into property
+attribution). Tests: leaseFarmScope, tenantAutoFill (pure fill
+semantics: empty-year creation with tags, tagged-refresh vs
+hand-edit-wins, unchanged-keeps-as-of, hand-touched year freezes the
+crop list, practice splits; sync pass: zero-tap row creation,
+idempotent then refresh-on-cache-move incl. final flip, hand-edit
+preserved, org-filter assertion per read).
 TAX DOCUMENTS (migration 0039): documents doc_type gains tax_statement
 + tax_receipt in a new "Property taxes" group (lib/documents.ts, first
 taxonomy extension since 0020; check constraint rebuilt; chips/icons/AI
@@ -341,20 +348,34 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 
 ## DEPLOY CHECKLIST (this release)
 
+0000000000. Run 0041_drop_lease_assumption_drift.sql in Supabase
+   (2026-08-31; NOT YET RUN at the time of writing; order relative to
+   the deploy does not matter - the drift table's readers and writers
+   were all removed in the same change, so the table is simply unused
+   until dropped). It drops 0040's lease_assumption_drift; the design
+   changed the same day it shipped (tenant data now flows into lease
+   assumptions automatically instead of waiting for per-value
+   acceptance). 0040's farm_connections columns stay. AFTER the deploy
+   press Refresh now on a connection and open a crop-share lease: its
+   assumption rows fill themselves from the tenant data (source + as-of
+   under each value), hand-edit one value and Refresh again to see the
+   edit survive, and check the Income page banner now explains the
+   figures rest on the tenant's projections.
+
 000000000. Run 0039_tax_documents.sql, then 0040_farm_sync_drift.sql in
-   Supabase, IN THAT ORDER, BEFORE this deploy goes live (2026-08-31;
-   NEITHER RUN at the time of writing).
+   Supabase, IN THAT ORDER, BEFORE the deploy goes live (BOTH RUN
+   2026-08-31 per Stuart).
    * 0039 (tax documents): rebuilds the documents doc_type check with
      tax_statement/tax_receipt and backfills every existing statement
      document into the new Property taxes group (doc_type, missing
      source_document_id links, titles for pre-0030 rows). A deploy
      without it breaks the tax upload's documents insert (23514) and
      the taxonomy stays absent from the rail.
-   * 0040 (farm sync state + drift): farm_connections.scopes_checked_at
-     and sync_detail, plus the lease_assumption_drift table with its
-     RLS. A deploy without it BREAKS EVERY SYNC (the sync writes the
-     new columns through must() and now fails loudly) and the lease
-     list/lease page/income/updates queries of the drift table.
+   * 0040 (farm sync state): farm_connections.scopes_checked_at and
+     sync_detail. A deploy without it BREAKS EVERY SYNC (the sync
+     writes the new columns through must() and now fails loudly). The
+     lease_assumption_drift table 0040 also created is unused and
+     dropped by 0041 (design superseded the same day).
    AFTER the deploy: press Refresh now on each connection (or wait for
    the cron). MARTIN TRUSTS SPECIFICALLY: the landowner side was not
    the blocker; the farm-side share row still reports projected_prices
@@ -365,8 +386,8 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
    Then test: flip a scope off farm-side and watch the chip go gray
    with a fresh "checked" time on the next sync while cached numbers
    stay visible with their as-of; edit a tenant projected price
-   farm-side, Refresh, and find the drift chip on the right lease with
-   one-tap Accept (and the same row on /leases/updates); confirm a tax
+   farm-side, Refresh, and watch the right lease's assumption row
+   update itself (source + as-of line under the value); confirm a tax
    statement upload files its PDF under Documents > Property taxes and
    links back to the statement; create a lease and see it born Active.
 
@@ -588,16 +609,15 @@ and Postgres row level security guarantees each org sees only its own data.
   flags, property/county scoping), owner-cluster ranking (pinning,
   cutoff, best-variant scoring), assistant SQL guard mirror, assistant tool
   schemas, help route matching and search and nav coverage, the
-  entity-scope policy mirror of migrations 0034 + 0040, the farm sync
+  entity-scope policy mirror of migration 0034, the farm sync
   scope-flip fixture (grant-later fetches, revoke-later keeps cached
   rows, scope-403 correction, write-error surfacing, over the
   lib/testUtils/fakeDb.ts multi-table in-memory supabase fake), the
-  lease-to-cache matching layer (leaseFarmScope), the tenant-data drift
-  comparator (tenant-tag-only, epsilon, final flag, cents/lb dollars,
-  vanished rows, practice and synonym matching), the org drift
-  recompute (idempotent reconcile, explicit org filter per read), and
-  the drift accept primitive (provenance rewrite, stale guard, legacy
-  single-crop upgrade)); plus the RLS_TEST=1
+  lease-to-cache matching layer (leaseFarmScope), and the tenant data
+  auto-fill (pure fill semantics incl. hand-edit-wins and the
+  hand-touched-year crop-list freeze, plus the whole-org sync pass:
+  zero-tap row creation, idempotence, refresh on cache movement,
+  explicit org filter per read)); plus the RLS_TEST=1
   gated live isolation suite (lib/entityScope.live.test.ts, the
   repo's first database-touching test, taxFixtures.live pattern:
   provisions and removes its own scratch org)
@@ -1350,7 +1370,9 @@ Phase 6 server pieces:
   in sync_detail: ok | off | scope_off | error; a scope-403 corrects
   the displayed chip via FarmApiError.isScopeOff; other fetch errors
   never fail the sync), refreshes mappings, syncs tenants from
-  entities, runs recomputeOrgDrift, and records last_error on failure.
+  entities, runs autoFillTenantAssumptions (tenant data into lease
+  assumptions, hand edits never touched), and records last_error on
+  failure.
   EVERY database write goes through must() and a rejected write fails
   the sync loudly (2026-08-31; before that all 11 writes discarded
   their errors). Used by connect, the manual Refresh now button, and

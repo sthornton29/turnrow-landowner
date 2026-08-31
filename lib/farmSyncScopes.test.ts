@@ -46,8 +46,8 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/farmCrypto", () => ({ decryptSecret: () => "token" }));
-vi.mock("@/lib/assumptionDriftSync", () => ({
-  recomputeOrgDrift: vi.fn(async () => ({ leases: 0, rows: 0 })),
+vi.mock("@/lib/tenantAutoFill", () => ({
+  autoFillTenantAssumptions: vi.fn(async () => ({ leases: 0, values: 0 })),
 }));
 vi.mock("@/lib/farmApi", async (importOriginal) => {
   const orig = await importOriginal<typeof import("./farmApi")>();

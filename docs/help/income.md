@@ -16,7 +16,7 @@ The entity chips are a multi-select: tap one or more entities (or "No entity") a
 
 ## Projected vs received
 
-- **Expected** comes from generated payment schedules where they exist, otherwise from each lease's terms and year assumptions. A banner notes when part of the year is a projection.
+- **Expected** comes from generated payment schedules where they exist, otherwise from each lease's terms and year assumptions. A banner notes when part of the year is a projection, and says so when those assumptions rest on your tenant's own projected prices and yields (they flow in and update automatically each sync; values you enter by hand on a lease are never changed).
 - **Received** is what you recorded: lease payments by date received, timber settlements, and government payments.
 - Amounts split across properties by leased acres for leases and by linked stand acres for timber. Land with no link shows as unassigned so it is never hidden.
 

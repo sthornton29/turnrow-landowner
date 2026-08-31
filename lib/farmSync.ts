@@ -33,7 +33,7 @@ import {
 } from "@/lib/farmApi";
 import { suggestLocalField } from "@/lib/farmDisplay";
 import { normalizeOwnerName } from "@/lib/ownerNames";
-import { recomputeOrgDrift } from "@/lib/assumptionDriftSync";
+import { autoFillTenantAssumptions } from "@/lib/tenantAutoFill";
 
 interface ConnectionRow {
   id: string;
@@ -68,8 +68,9 @@ export interface SyncResult {
   plantings?: number;
   // Tenants rows created or linked from the share's farming entities.
   tenants?: { created: number; linked: number };
-  // Post-sync tenant-data drift recompute (see lib/assumptionDriftSync.ts).
-  drift?: { leases: number; rows: number };
+  // Post-sync auto-fill of lease assumption values from the fresh cache
+  // (see lib/tenantAutoFill.ts; hand-edited values are never touched).
+  autofill?: { leases: number; values: number };
 }
 
 // Throw on a rejected write. Before this existed, every insert/update in
@@ -446,16 +447,17 @@ export async function syncConnection(
     // becomes (or links to) a tenant record on the landowner side.
     const tenants = await syncTenantsFromEntities(supabase, connection, handshake.entities ?? [], handshake.operation_name);
 
-    // Tenant-data drift bookkeeping (lease assumptions vs the fresh
-    // cache). Derived data: its failure never fails a sync.
-    let drift: { leases: number; rows: number } | undefined;
+    // Tenant data flows into lease assumptions automatically (empty and
+    // tenant-tagged values only; hand edits always win). Derived
+    // bookkeeping: its failure never fails a sync.
+    let autofill: { leases: number; values: number } | undefined;
     try {
-      drift = await recomputeOrgDrift(supabase, connection.organization_id);
+      autofill = await autoFillTenantAssumptions(supabase, connection.organization_id);
     } catch (err) {
-      console.error("[farm-sync] drift recompute failed:", err instanceof Error ? err.message : err);
+      console.error("[farm-sync] assumption auto-fill failed:", err instanceof Error ? err.message : err);
     }
 
-    return { connectionId: connection.id, ok: true, fields: fieldCount, plantings: plantings.length, tenants, drift };
+    return { connectionId: connection.id, ok: true, fields: fieldCount, plantings: plantings.length, tenants, autofill };
   } catch (err) {
     const revoked = err instanceof FarmApiError && err.isRevoked;
     const message =

@@ -1,7 +1,7 @@
 // Which farm connections and remote fields cover one lease's land. This
 // is THE matching layer between a lease and the synced farm cache,
-// extracted verbatim from the lease page so the post-sync drift
-// recompute (lib/assumptionDriftSync.ts) and the page resolve the exact
+// extracted verbatim from the lease page so the post-sync assumption
+// auto-fill (lib/tenantAutoFill.ts) and the page resolve the exact
 // same rows. Pure; unit tested in leaseFarmScope.test.ts.
 
 import type { TenantEntityRef } from "@/lib/leasePricing";
