@@ -81,6 +81,38 @@ export async function fetchLayerInfo(serviceUrl: string, layerId: number) {
   };
 }
 
+// Fetch a layer's coverage extent in WGS84 by asking the server itself
+// (query with returnExtentOnly and outSR=4326), so State Plane and Web
+// Mercator layers come back already in lon/lat with no local projection
+// math. Returns null when the server answers without a usable extent
+// (the caller keeps whatever extent it already had).
+export async function fetchLayerExtent(
+  serviceUrl: string,
+  layerId: number
+): Promise<[number, number, number, number] | null> {
+  const params = new URLSearchParams({
+    where: "1=1",
+    returnExtentOnly: "true",
+    outSR: "4326",
+    f: "json",
+  });
+  const body = await fetchJson(`${serviceUrl}/${layerId}/query?${params}`);
+  const extent = body.extent as Record<string, unknown> | undefined;
+  if (!extent) return null;
+  const nums = [extent.xmin, extent.ymin, extent.xmax, extent.ymax].map(Number);
+  if (nums.some((n) => !Number.isFinite(n))) return null;
+  const [xmin, ymin, xmax, ymax] = nums;
+  // Sanity: must be plausible lon/lat and a real area, or a server that
+  // ignored outSR would poison the registry with projected coordinates.
+  if (
+    xmin < -180 || xmax > 180 || ymin < -90 || ymax > 90 ||
+    xmin >= xmax || ymin >= ymax
+  ) {
+    return null;
+  }
+  return [xmin, ymin, xmax, ymax];
+}
+
 export function escapeSqlLiteral(value: string): string {
   return value.replace(/'/g, "''");
 }

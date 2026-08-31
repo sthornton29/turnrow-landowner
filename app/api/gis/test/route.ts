@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   GisError,
+  fetchLayerExtent,
   normalizeFeatures,
   queryLayerFeatures,
 } from "@/lib/gisServer";
 
 // Platform admin: run a one-record test query through proposed field
-// mappings and return the normalized sample for verification.
+// mappings and return the normalized sample for verification, plus the
+// layer's WGS84 coverage extent (migration 0038) so the add/verify and
+// Re-verify flows capture it for the map's Neighbors overlay.
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -38,12 +41,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { features } = await queryLayerFeatures({
-      serviceUrl: String(body.service_url ?? ""),
-      layerId: Number(body.layer_id ?? 0),
-      where: "1=1",
-      maxFeatures: 1,
-    });
+    // The extent is best-effort: a server that cannot answer
+    // returnExtentOnly still verifies (extent stays null and the
+    // Neighbors overlay skips it, stated in the admin UI).
+    const [{ features }, extent] = await Promise.all([
+      queryLayerFeatures({
+        serviceUrl: String(body.service_url ?? ""),
+        layerId: Number(body.layer_id ?? 0),
+        where: "1=1",
+        maxFeatures: 1,
+      }),
+      fetchLayerExtent(
+        String(body.service_url ?? ""),
+        Number(body.layer_id ?? 0)
+      ).catch(() => null),
+    ]);
     const normalized = normalizeFeatures(
       features,
       mapping,
@@ -65,6 +77,8 @@ export async function POST(request: Request) {
         situs: sample.situs,
         has_geometry: !!sample.geometry,
       },
+      // [west, south, east, north] WGS84, or null when unavailable.
+      extent,
     });
   } catch (err) {
     const status = err instanceof GisError ? err.status : 502;

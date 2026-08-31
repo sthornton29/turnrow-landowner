@@ -54,6 +54,10 @@ export default function AdminGisClient({
     notes: "",
   });
   const [sample, setSample] = useState<Sample | null>(null);
+  // Layer coverage extent ([west, south, east, north] WGS84) captured by
+  // the test query; saved with the row so the Neighbors overlay knows
+  // which viewports this service covers. Null = server would not say.
+  const [extent, setExtent] = useState<[number, number, number, number] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rowMessage, setRowMessage] = useState<Record<string, string>>({});
@@ -72,6 +76,7 @@ export default function AdminGisClient({
     setPasteUrl("");
     setLayerInfo(null);
     setSample(null);
+    setExtent(null);
     setError(null);
     setForm({
       state: "AL",
@@ -134,10 +139,12 @@ export default function AdminGisClient({
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Test query failed.");
       setSample(body.sample as Sample);
+      setExtent((body.extent as [number, number, number, number] | null) ?? null);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Test query failed.");
       setSample(null);
+      setExtent(null);
       return false;
     } finally {
       setBusy(null);
@@ -166,6 +173,16 @@ export default function AdminGisClient({
       status: verified ? "active" : "untested",
       last_verified_at: verified ? new Date().toISOString() : null,
       notes: form.notes.trim() || null,
+      // Only write extent columns when the test captured one, so an
+      // edit-and-save without a fresh test keeps the stored extent.
+      ...(extent
+        ? {
+            extent_xmin: extent[0],
+            extent_ymin: extent[1],
+            extent_xmax: extent[2],
+            extent_ymax: extent[3],
+          }
+        : {}),
     };
     const { error: err } =
       editingId && editingId !== "new"
@@ -194,6 +211,7 @@ export default function AdminGisClient({
       notes: s.notes ?? "",
     });
     setSample(null);
+    setExtent(null);
     await fetchLayer(`${s.service_url}/${s.layer_id}`);
   }
 
@@ -219,9 +237,23 @@ export default function AdminGisClient({
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "failed");
+      const ext = (body.extent as [number, number, number, number] | null) ?? null;
       await supabase
         .from("county_gis_services")
-        .update({ status: "active", last_verified_at: new Date().toISOString() })
+        .update({
+          status: "active",
+          last_verified_at: new Date().toISOString(),
+          // Backfill the coverage extent (migration 0038); a null answer
+          // keeps whatever the row already has.
+          ...(ext
+            ? {
+                extent_xmin: ext[0],
+                extent_ymin: ext[1],
+                extent_xmax: ext[2],
+                extent_ymax: ext[3],
+              }
+            : {}),
+        })
         .eq("id", s.id);
       setRowMessage((m) => ({
         ...m,
@@ -409,6 +441,11 @@ export default function AdminGisClient({
               {s.last_verified_at ? (
                 <span className="text-xs text-gray-400">
                   verified {s.last_verified_at.slice(0, 10)}
+                </span>
+              ) : null}
+              {s.extent_xmin === null ? (
+                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  no coverage extent (re-verify to enable Neighbors)
                 </span>
               ) : null}
               <span className="ml-auto flex gap-3 text-sm">

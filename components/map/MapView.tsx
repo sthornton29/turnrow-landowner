@@ -110,7 +110,12 @@ import type {
   EasementGeo,
   WetlandGeo,
 } from "@/types/db";
-import LayerToggle from "./LayerToggle";
+import LayerToggle, { type LabelVisibility } from "./LayerToggle";
+import NeighborPanel, {
+  type NeighborInfo,
+  type NeighborServiceInfo,
+} from "./NeighborPanel";
+import { parcelKey } from "@/lib/parcelNumber";
 import {
   ItemTree,
   PropertyChips,
@@ -214,6 +219,47 @@ function loadMapFilter(): Set<string> {
     return new Set();
   }
 }
+
+// Name label toggles, persisted like the layer toggles: property names
+// and one switch for every sub-property item's name label. A label
+// renders only when its layer is on AND its label toggle is on.
+const LABEL_DEFAULTS: LabelVisibility = { property: true, items: true };
+const LABEL_STORAGE_KEY = "turnrow.map.labels.v1";
+
+function loadLabelVisibility(): LabelVisibility {
+  if (typeof window === "undefined") return LABEL_DEFAULTS;
+  try {
+    const raw = window.localStorage.getItem(LABEL_STORAGE_KEY);
+    if (!raw) return LABEL_DEFAULTS;
+    return { ...LABEL_DEFAULTS, ...(JSON.parse(raw) as Partial<LabelVisibility>) };
+  } catch {
+    return LABEL_DEFAULTS;
+  }
+}
+
+// Neighbors overlay: surrounding tax parcels and owners from the
+// county's public GIS, EPHEMERAL (rendered, never persisted; nothing
+// enters the database except through the deliberate import flow).
+// Off by default: it fetches from county servers, so it is an opt-in.
+const NEIGHBORS_STORAGE_KEY = "turnrow.map.neighbors.v1";
+const NEIGHBORS_NOTE_KEY = "turnrow.map.neighborsNote.v1";
+// The overlay activates only past a zoom where parcel counts are sane
+// (roughly a section or two across); owner labels wait even longer.
+const NEIGHBORS_MIN_ZOOM = 13;
+const NEIGHBORS_LABEL_MIN_ZOOM = 15;
+const NEIGHBORS_DEBOUNCE_MS = 400;
+const NEIGHBORS_CACHE_MS = 5 * 60 * 1000;
+
+function loadNeighborsOn(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(NEIGHBORS_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+type NeighborsStatus = "idle" | "zoom" | "loading" | "ok" | "uncovered" | "error";
 
 function geomOf(row: AnyGeoRow): Geometry | null {
   // Easement rows carry BOTH geometry keys (line OR polygon per
@@ -440,6 +486,37 @@ export default function MapView({
       // Private browsing without storage: toggles just do not persist.
     }
   }, [visibility]);
+  const [labelVisibility, setLabelVisibility] = useState<LabelVisibility>(loadLabelVisibility);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify(labelVisibility));
+    } catch {
+      // Private browsing without storage: toggles just do not persist.
+    }
+  }, [labelVisibility]);
+
+  // ------------------------------------------------------------ neighbors
+  const [neighborsOn, setNeighborsOn] = useState<boolean>(loadNeighborsOn);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(NEIGHBORS_STORAGE_KEY, String(neighborsOn));
+    } catch {
+      // Private browsing without storage: the toggle does not persist.
+    }
+  }, [neighborsOn]);
+  const [neighborsNoteOpen, setNeighborsNoteOpen] = useState(false);
+  const [neighborsStatus, setNeighborsStatus] = useState<NeighborsStatus>("idle");
+  const [neighborServices, setNeighborServices] = useState<NeighborServiceInfo[]>([]);
+  const [neighborsFetchedAt, setNeighborsFetchedAt] = useState<Date | null>(null);
+  const [selectedNeighbor, setSelectedNeighbor] = useState<NeighborInfo | null>(null);
+  const neighborsAbortRef = useRef<AbortController | null>(null);
+  const neighborsTimerRef = useRef<number | null>(null);
+  // The last fetched (padded) extent: a pan that stays inside it within
+  // the TTL re-renders from the already-loaded source, no network.
+  const neighborsCacheRef = useRef<{ bbox: [number, number, number, number]; at: number } | null>(null);
+  // The user's own parcels never render in the overlay (they are on the
+  // map in their own style); dedupe by the canonical parcel number form.
+  const ownParcelKeysRef = useRef<Set<string>>(new Set());
   // The live map filter: hidden "entityType:id" keys, persisted like
   // the layer toggles. Layer toggles stay the coarse control this
   // composes with (a hidden LAYER hides everything of that type; the
@@ -768,6 +845,136 @@ export default function MapView({
     return entities.find((e) => e.id === entityId)?.name ?? null;
   }, [selected, selectedRow, entities]);
 
+  // ------------------------------------------------------- neighbors fetch
+
+  useEffect(() => {
+    ownParcelKeysRef.current = new Set(
+      parcels.map((p) => parcelKey(p.parcel_number)).filter((k) => k !== "")
+    );
+  }, [parcels]);
+
+  // Held in a ref (the printOpenRef idiom) so the moveend handler wired
+  // once at load always sees fresh state.
+  const refreshNeighborsRef = useRef<() => void>(() => {});
+  refreshNeighborsRef.current = async () => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
+    const setNeighborsData = (fc: FeatureCollection) =>
+      (map.getSource("neighbors") as GeoJSONSource)?.setData(fc);
+    if (!neighborsOn || printOpenRef.current) {
+      neighborsAbortRef.current?.abort();
+      return;
+    }
+    if (map.getZoom() < NEIGHBORS_MIN_ZOOM) {
+      neighborsAbortRef.current?.abort();
+      neighborsCacheRef.current = null;
+      setNeighborsData(empty);
+      setNeighborsStatus("zoom");
+      return;
+    }
+    const b = map.getBounds();
+    if (!b) return;
+    const view: [number, number, number, number] = [
+      b.getWest(), b.getSouth(), b.getEast(), b.getNorth(),
+    ];
+    const cached = neighborsCacheRef.current;
+    if (
+      cached &&
+      Date.now() - cached.at < NEIGHBORS_CACHE_MS &&
+      view[0] >= cached.bbox[0] && view[1] >= cached.bbox[1] &&
+      view[2] <= cached.bbox[2] && view[3] <= cached.bbox[3]
+    ) {
+      // Still inside the padded extent already loaded: nothing to fetch.
+      if (neighborsStatus === "zoom" || neighborsStatus === "loading") {
+        setNeighborsStatus("ok");
+      }
+      return;
+    }
+    // Fetch padded past the viewport so small pans stay on the cache.
+    const padX = (view[2] - view[0]) * 0.2;
+    const padY = (view[3] - view[1]) * 0.2;
+    const bbox: [number, number, number, number] = [
+      view[0] - padX, view[1] - padY, view[2] + padX, view[3] + padY,
+    ];
+    neighborsAbortRef.current?.abort();
+    const controller = new AbortController();
+    neighborsAbortRef.current = controller;
+    setNeighborsStatus("loading");
+    try {
+      const res = await fetch("/api/gis/neighbors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bbox }),
+        signal: controller.signal,
+      });
+      const body = await res.json();
+      if (controller.signal.aborted) return;
+      if (!res.ok) throw new Error(body.error ?? "Neighbors unavailable.");
+      neighborsCacheRef.current = { bbox, at: Date.now() };
+      const services = (body.services ?? []) as NeighborServiceInfo[];
+      setNeighborServices(services);
+      setNeighborsFetchedAt(new Date());
+      const own = ownParcelKeysRef.current;
+      const features: Feature[] = [];
+      for (const f of (body.features ?? []) as Array<{
+        geometry: Geometry;
+        parcel_number: string;
+        owner_name: string;
+        deeded_acres: number | null;
+        computed_acres: number | null;
+        situs: string | null;
+        service_id: string;
+      }>) {
+        const key = parcelKey(f.parcel_number);
+        if (key && own.has(key)) continue;
+        const props: Record<string, unknown> = {
+          neighbor: true,
+          owner: f.owner_name,
+          parcel: f.parcel_number,
+          serviceId: f.service_id,
+        };
+        if (f.deeded_acres !== null) props.deeded = f.deeded_acres;
+        if (f.computed_acres !== null) props.computed = f.computed_acres;
+        if (f.situs) props.situs = f.situs;
+        features.push({ type: "Feature", geometry: f.geometry, properties: props });
+      }
+      setNeighborsData({ type: "FeatureCollection", features });
+      setNeighborsStatus(services.length === 0 ? "uncovered" : "ok");
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof Error && err.name === "AbortError") return;
+      setNeighborsData(empty);
+      setNeighborsStatus("error");
+    }
+  };
+
+  // Refresh when the toggle flips (and once the map is ready with the
+  // toggle already persisted on); show the one-time ephemeral-data note
+  // on first enable; leaving print mode brings the overlay back.
+  useEffect(() => {
+    refreshNeighborsRef.current();
+    if (neighborsOn) {
+      try {
+        if (!window.localStorage.getItem(NEIGHBORS_NOTE_KEY)) setNeighborsNoteOpen(true);
+      } catch {
+        // Without storage the note would show every enable; skip it.
+      }
+    } else {
+      setSelectedNeighbor(null);
+      setNeighborsStatus("idle");
+    }
+  }, [neighborsOn, mapLoaded, printOpen]);
+
+  function dismissNeighborsNote() {
+    setNeighborsNoteOpen(false);
+    try {
+      window.localStorage.setItem(NEIGHBORS_NOTE_KEY, "seen");
+    } catch {
+      // Fine: it will show again next session.
+    }
+  }
+
   // ---------------------------------------------------------------- map init
 
   const clickRef = useRef<(e: MapMouseEvent) => void>(() => {});
@@ -830,11 +1037,32 @@ export default function MapView({
       const hits = map.queryRenderedFeatures(e.point, { layers });
       if (hits.length > 0) {
         const props = hits[0].properties as { id: string; entityType: EntityType };
+        setSelectedNeighbor(null);
         setSelected({ entityType: props.entityType, id: props.id });
         return;
       }
     }
+    // Neighbors overlay: the lowest rung, hit only where nothing
+    // org-owned is under the tap (hidden layers are unclickable, so
+    // this is inert with the toggle off).
+    if (map.getLayer("neighbors-fill")) {
+      const hits = map.queryRenderedFeatures(e.point, { layers: ["neighbors-fill"] });
+      if (hits.length > 0) {
+        const p = hits[0].properties as Record<string, unknown>;
+        setSelected(null);
+        setSelectedNeighbor({
+          owner_name: String(p.owner ?? ""),
+          parcel_number: String(p.parcel ?? ""),
+          deeded_acres: typeof p.deeded === "number" ? p.deeded : null,
+          computed_acres: typeof p.computed === "number" ? p.computed : null,
+          situs: p.situs ? String(p.situs) : null,
+          service_id: String(p.serviceId ?? ""),
+        });
+        return;
+      }
+    }
     setSelected(null);
+    setSelectedNeighbor(null);
   };
 
   useEffect(() => {
@@ -1181,6 +1409,38 @@ export default function MapView({
         if (printOpenRef.current) setPrintViewVersion((v) => v + 1);
       });
 
+      // Neighbors overlay: thin neutral parcel outlines from the county's
+      // public GIS, ALWAYS beneath the org's own styled layers (inserted
+      // before properties-fill, the bottom-most org layer). The faint
+      // fill is the tap target; owner labels only at the highest zooms,
+      // with collision on so they yield to the org's own labels (which
+      // render above with overlap allowed).
+      map.addSource("neighbors", { type: "geojson", data: empty });
+      map.addLayer({ id: "neighbors-fill", type: "fill", source: "neighbors",
+        paint: { "fill-color": "#ffffff", "fill-opacity": 0.02 } }, "properties-fill");
+      map.addLayer({ id: "neighbors-line", type: "line", source: "neighbors",
+        paint: { "line-color": "#f3f4f6", "line-width": 0.8, "line-opacity": 0.6 } }, "properties-fill");
+      map.addLayer({ id: "neighbors-selected", type: "line", source: "neighbors",
+        paint: { "line-color": "#ffffff", "line-width": 3, "line-opacity": 0.9 },
+        filter: ["==", ["get", "parcel"], "__none__"] }, "properties-fill");
+      map.addLayer({ id: "neighbors-labels", type: "symbol", source: "neighbors",
+        minzoom: NEIGHBORS_LABEL_MIN_ZOOM,
+        layout: { "text-field": ["get", "owner"], "text-size": 9.5,
+          "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#e5e7eb", "text-halo-color": "#1f2937", "text-halo-width": 1 } }, "properties-fill");
+
+      // Debounced viewport fetch: cancel the pending call on further
+      // movement; the fetch itself also aborts superseded requests.
+      map.on("moveend", () => {
+        if (neighborsTimerRef.current !== null) {
+          window.clearTimeout(neighborsTimerRef.current);
+        }
+        neighborsTimerRef.current = window.setTimeout(
+          () => refreshNeighborsRef.current(),
+          NEIGHBORS_DEBOUNCE_MS
+        );
+      });
+
       // Pivot coverage circle editor: live preview + drag handles.
       map.addSource("pivot-preview", { type: "geojson", data: empty });
       map.addSource("pivot-handles", { type: "geojson", data: empty });
@@ -1237,6 +1497,7 @@ export default function MapView({
       "assets-circle", "assets-child-circle", "assets-line", "assets-fill",
       "cemeteries-fill", "cemeteries-circle",
       "maintenance-fill", "maintenance-line", "maintenance-circle",
+      "neighbors-fill",
     ]) {
       map.on("mouseenter", layer, () => {
         if (modeRef.current === "view") map.getCanvas().style.cursor = "pointer";
@@ -1430,31 +1691,60 @@ export default function MapView({
     }
   }, [mapLoaded, loading, focus, rowLists]);
 
-  // Layer visibility
+  // Layer visibility. Geometry layers follow the layer toggles alone;
+  // NAME LABEL layers show only when their layer is on AND the matching
+  // label toggle is on ("Property names" for property labels, "Field
+  // names" for every sub-property item's name label). Letter markers
+  // (asset letters, C, !) are identity marks, not names, and stay with
+  // their geometry group.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    const groups: Array<[keyof LayerVisibility, string[]]> = [
-      ["property", ["properties-fill", "properties-line", "property-labels"]],
-      ["parcel", ["parcels-fill", "parcels-line", "parcel-labels"]],
-      ["field", ["fields-fill", "fields-line", "field-labels"]],
-      ["pasture", ["pastures-fill", "pastures-line", "pasture-labels"]],
-      ["wetland", ["wetlands-fill", "wetlands-line", "wetland-labels"]],
-      ["timber_stand", ["timber-fill", "timber-line", "timber-labels"]],
-      ["road", ["roads-casing", "roads-line", "roads-hit", "road-labels"]],
-      ["easement", [...easementLayerIdsRef.current, "easement-labels"]],
-      ["asset", ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-name", "assets-child-circle", "assets-child-letter", "assets-child-name", "pivot-circles-fill", "pivot-circles-line"]],
-      ["cemetery", ["cemeteries-fill", "cemeteries-line", "cemeteries-circle", "cemeteries-letter", "cemeteries-name", "cemetery-labels"]],
-      ["maintenance_issue", ["maintenance-fill", "maintenance-outline", "maintenance-line", "maintenance-circle", "maintenance-letter", "maintenance-name"]],
+    const groups: Array<[boolean, string[]]> = [
+      [visibility.property, ["properties-fill", "properties-line"]],
+      [visibility.parcel, ["parcels-fill", "parcels-line"]],
+      [visibility.field, ["fields-fill", "fields-line"]],
+      [visibility.pasture, ["pastures-fill", "pastures-line"]],
+      [visibility.wetland, ["wetlands-fill", "wetlands-line"]],
+      [visibility.timber_stand, ["timber-fill", "timber-line"]],
+      [visibility.road, ["roads-casing", "roads-line", "roads-hit"]],
+      [visibility.easement, easementLayerIdsRef.current],
+      [visibility.asset, ["assets-fill", "assets-outline", "assets-line", "assets-circle", "assets-letter", "assets-child-circle", "assets-child-letter", "pivot-circles-fill", "pivot-circles-line"]],
+      [visibility.cemetery, ["cemeteries-fill", "cemeteries-line", "cemeteries-circle", "cemeteries-letter"]],
+      [visibility.maintenance_issue, ["maintenance-fill", "maintenance-outline", "maintenance-line", "maintenance-circle", "maintenance-letter"]],
+      [visibility.property && labelVisibility.property, ["property-labels"]],
+      [visibility.parcel && labelVisibility.items, ["parcel-labels"]],
+      [visibility.field && labelVisibility.items, ["field-labels"]],
+      [visibility.pasture && labelVisibility.items, ["pasture-labels"]],
+      [visibility.wetland && labelVisibility.items, ["wetland-labels"]],
+      [visibility.timber_stand && labelVisibility.items, ["timber-labels"]],
+      [visibility.road && labelVisibility.items, ["road-labels"]],
+      [visibility.easement && labelVisibility.items, ["easement-labels"]],
+      [visibility.asset && labelVisibility.items, ["assets-name", "assets-child-name"]],
+      [visibility.cemetery && labelVisibility.items, ["cemetery-labels", "cemeteries-name"]],
+      [visibility.maintenance_issue && labelVisibility.items, ["maintenance-name"]],
+      // Neighbors overlay: its own persisted toggle (not a
+      // LayerVisibility key); hidden while the print setup is up since
+      // the printed map never includes it (WYSIWYG).
+      [neighborsOn && !printOpen, ["neighbors-fill", "neighbors-line", "neighbors-selected", "neighbors-labels"]],
     ];
-    for (const [key, layers] of groups) {
+    for (const [on, layers] of groups) {
       for (const layer of layers) {
         if (map.getLayer(layer)) {
-          map.setLayoutProperty(layer, "visibility", visibility[key] ? "visible" : "none");
+          map.setLayoutProperty(layer, "visibility", on ? "visible" : "none");
         }
       }
     }
-  }, [visibility, mapLoaded]);
+  }, [visibility, labelVisibility, neighborsOn, printOpen, mapLoaded]);
+
+  // Selected neighbor parcel highlight
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !map.getLayer("neighbors-selected")) return;
+    map.setFilter("neighbors-selected", [
+      "==", ["get", "parcel"], selectedNeighbor?.parcel_number ?? "__none__",
+    ]);
+  }, [selectedNeighbor, mapLoaded]);
 
   // Selection highlight
   useEffect(() => {
@@ -2677,6 +2967,21 @@ export default function MapView({
       crops: cropsOn,
       entity: entityColorsOn,
     });
+    // Prefill the per-layer label checkboxes from the live label
+    // toggles (property names / field names); parcel labels keep their
+    // deliberate off default in print even when the layer is on.
+    setPrintLabels({
+      property: labelVisibility.property,
+      parcel: false,
+      field: labelVisibility.items,
+      pasture: labelVisibility.items,
+      wetland: labelVisibility.items,
+      timber_stand: labelVisibility.items,
+      road: labelVisibility.items,
+      easement: labelVisibility.items,
+      asset: labelVisibility.items,
+      cemetery: labelVisibility.items,
+    });
     // Title: the property name when the current view is one property,
     // else the organization name.
     let title = orgName ?? "";
@@ -3357,7 +3662,40 @@ export default function MapView({
           future "Government payments" (131px in Segoe UI); see
           LayerToggle.tsx. */}
       <div className="absolute left-3 top-3 z-20 flex w-[11.5rem] flex-col gap-2">
-        <LayerToggle visibility={visibility} onChange={setVisibility} />
+        <LayerToggle
+          visibility={visibility}
+          onChange={setVisibility}
+          labels={labelVisibility}
+          onLabelsChange={setLabelVisibility}
+          neighborsOn={neighborsOn}
+          onNeighborsChange={setNeighborsOn}
+          neighborsHint={
+            !neighborsOn
+              ? null
+              : neighborsStatus === "zoom"
+                ? "Zoom in to see neighbors"
+                : neighborsStatus === "uncovered"
+                  ? "Neighbors not available in this county yet"
+                  : neighborsStatus === "error"
+                    ? "County server not responding"
+                    : null
+          }
+        />
+        {neighborsNoteOpen && neighborsOn ? (
+          <div className="rounded-lg bg-white/95 p-2 shadow-md ring-1 ring-kelly-300">
+            <p className="text-[11px] leading-snug text-gray-600">
+              Neighbors shows surrounding parcels and owners from the
+              county&apos;s public records, drawn live. Nothing is saved to
+              your account unless you import a parcel.
+            </p>
+            <button
+              onClick={dismissNeighborsNote}
+              className="mt-1 text-[11px] font-semibold text-kelly-700 hover:underline"
+            >
+              Got it
+            </button>
+          </div>
+        ) : null}
         {/* Live map filter: hide individual items (the layer toggles
             above stay the coarse control). */}
         {mode === "view" ? (
@@ -4104,6 +4442,16 @@ export default function MapView({
           onPivotCircle={startPivotEditor}
           onCircleFootprint={startCircleEditor}
           onChanged={loadData}
+        />
+      ) : null}
+      {selectedNeighbor && !selected && mode === "view" && !printOpen ? (
+        <NeighborPanel
+          neighbor={selectedNeighbor}
+          service={
+            neighborServices.find((s) => s.id === selectedNeighbor.service_id) ?? null
+          }
+          fetchedAt={neighborsFetchedAt}
+          onClose={() => setSelectedNeighbor(null)}
         />
       ) : null}
     </div>

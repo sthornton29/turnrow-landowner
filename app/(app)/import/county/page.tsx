@@ -3,7 +3,15 @@ import CountyImportClient from "./CountyImportClient";
 
 export const metadata = { title: "Import from county records" };
 
-export default async function CountyImportPage() {
+export default async function CountyImportPage({
+  searchParams,
+}: {
+  // The map's Neighbors overlay links here with a service, mode, and
+  // seed preselected (run=1 fires the search on arrival); a plain visit
+  // carries none of these and behaves exactly as before.
+  searchParams: Promise<{ service?: string; mode?: string; q?: string; run?: string }>;
+}) {
+  const { service, mode, q, run } = await searchParams;
   const { supabase, profile } = await requireOrg();
 
   const [
@@ -42,6 +50,12 @@ export default async function CountyImportPage() {
       existingParcels={parcels ?? []}
       knownAliases={knownAliases}
       entities={entities ?? []}
+      initial={{
+        serviceId: service,
+        mode: mode === "entity" || mode === "owner" || mode === "parcel" ? mode : undefined,
+        text: q,
+        run: run === "1",
+      }}
     />
   );
 }

@@ -1,6 +1,67 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-30 (INCOME ENTITY FILTER FIXED AND MULTI-SELECT:
+Last updated: 2026-08-30 night (MAP NAME LABEL TOGGLES + NEIGHBORS
+OVERLAY. LABELS: two persisted switches in a new Labels section of the
+Layers box (turnrow.map.labels.v1, both default on): "Property names"
+(property-labels) and "Field names" covering EVERY sub-property name
+label (parcel/field/pasture/wetland/timber/cemetery/road/easement label
+layers plus assets-name, assets-child-name, cemeteries-name,
+maintenance-name; geometry, markers, and the asset/C/! letters are
+untouched). Enforced in MapView's one visibility effect as layer-on AND
+label-on (label layer ids were split OUT of the per-layer groups so the
+layer toggles no longer re-show labels); opening the print setup now
+PREFILLS its per-layer label checkboxes from these two switches
+(property from Property names, the rest from Field names, parcel
+staying off deliberately as before; print behavior otherwise
+unchanged). NEIGHBORS (LandGlide-style overlay on our own registry):
+county_gis_services gains nullable extent_xmin/ymin/xmax/ymax
+(migration 0038, WGS84) captured by /api/gis/test through
+gisServer.fetchLayerExtent (query returnExtentOnly with outSR=4326 so
+the county server does the projection; sanity-checked as plausible
+lon/lat) and written by BOTH the admin add/verify save and the existing
+Re-verify action (a null answer keeps the stored extent; the registry
+list shows an amber "no coverage extent (re-verify to enable
+Neighbors)" chip until captured). /api/gis/neighbors (POST, any
+signed-in user, maxDuration 60): validates a [w,s,e,n] bbox capped at
+0.6 degrees a side, picks ACTIVE services whose extent intersects the
+viewport (max 3; a Lawrence/Colbert straddle queries both), splits a
+1,500-feature budget across them, envelope-queries ONLY the mapped
+fields through queryLayerFeatures (pagination, esri fallback,
+reprojection guard, junk-acres nulling all inherited), drops
+geometry-less rows and raw attributes, caches per service+rounded-bbox
+in-process for 5 minutes, uses Promise.allSettled so one slow county
+cannot blank the other half of the viewport, and when NO service
+covers the view reverse-geocodes the center (lookupCounty) and
+console.logs "[neighbors] no registered GIS service covers X County,
+ST" so the Vercel logs name what to add. MAP: a Neighbors toggle at
+the bottom of the Layers box (turnrow.map.neighbors.v1, default OFF; a
+one-time dismissible note on first enable, turnrow.map.neighborsNote.v1,
+says the data is public records drawn live and never saved), zoom gate
+at 13 with a "Zoom in to see neighbors" hint (plus "not available in
+this county yet" / "county server not responding" states), owner-name
+labels only past zoom 15 WITH collision on so they always yield to the
+org's own overlap-allowed labels, all four neighbors-* layers inserted
+before properties-fill so the org's styled layers ALWAYS draw on top,
+moveend + 400 ms debounce + AbortController cancellation + a
+20%-padded client extent cache so small pans never refetch, and the
+user's own parcels removed by parcelKey (lib/parcelNumber.ts). A tap
+is the LOWEST rung of the click ladder (org features always win) and
+opens components/map/NeighborPanel.tsx: owner as recorded, parcel
+number, deeded acres (or computed with "est."), situs, "Public records
+via X County, ST GIS, fetched <date>" attribution, and two actions
+linking /import/county?service=<id>&mode=parcel|entity&q=<seed>&run=1;
+the county import page now reads searchParams and auto-fires the
+seeded search ONCE (plain visits unchanged; roles: the overlay is
+public data for everyone, the import flow enforces permissions as
+built). DATA POSTURE: neighbor parcels are EPHEMERAL, rendered and
+never persisted; nothing enters the database except through the
+deliberate import flow. The overlay hides while the print setup is
+open (the PDF never includes it). Help: new neighbors.md topic (Map
+group) and the map.md layers paragraph rewritten for Labels +
+Neighbors. Tests: lib/gis.test.ts (serviceExtent null/undefined
+handling, bboxesIntersect incl. the county-line straddle and
+shared-edge cases).)
+Earlier the same day, 2026-08-30 (INCOME ENTITY FILTER FIXED AND MULTI-SELECT:
 the old filter touched ONLY the by-property groups (income/page.tsx's
 single `continue` line) while the by-type table, chart, government
 payments line, and tax rows all rendered ORG-WIDE numbers from
@@ -178,6 +239,23 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 "?" drawer, how-to chat, and Contact support)
 
 ## DEPLOY CHECKLIST (this release)
+
+00000000. Run 0038_gis_service_extents.sql in Supabase BEFORE this
+   deploy goes live (2026-08-30; NOT YET RUN at the time of writing):
+   adds nullable extent_xmin/ymin/xmax/ymax to county_gis_services
+   (additive, re-runnable, no RLS change). A deploy without it BREAKS
+   the admin add/verify save and Re-verify (they write the new
+   columns), and the Neighbors overlay reads them (it degrades to
+   "not available in this county yet" everywhere, never errors).
+   AFTER the deploy: open Settings > Admin > County GIS services and
+   press Re-verify on EVERY service to capture its coverage extent
+   (the amber "no coverage extent" chip disappears as each lands);
+   Neighbors skips any service without one. Then test: toggle the two
+   label switches both ways and reload (they persist per browser);
+   enable Neighbors over home ground and confirm your own parcels are
+   not doubled; pan along the Lawrence/Colbert line for both services
+   in one viewport; tap a neighbor parcel and run both actions; zoom
+   out past the gate for the "Zoom in to see neighbors" message.
 
 0000000. Run 0034_roles_entity_access.sql, then 0035_grain_bin_sites.sql,
    then 0036_easement_emergency_phone.sql in Supabase, IN THAT ORDER,
@@ -1041,7 +1119,14 @@ Phase 5 (migration 0005):
   All authenticated users read it; only platform admins write. Columns:
   state, county, display_name, ArcGIS service_url + layer_id, field
   mappings (parcel_field, owner_field, acres_field, situs_field), status
-  (active | broken | untested), last_verified_at, notes. Seeded with
+  (active | broken | untested), last_verified_at, notes, and (migration
+  0038) nullable extent_xmin/ymin/xmax/ymax: the layer's WGS84 coverage
+  bbox, captured by the admin verify test query and Re-verify (the
+  county server answers returnExtentOnly with outSR=4326, no local
+  projection math) and used by the map's Neighbors overlay to pick
+  which service(s) cover the viewport (lib/gis.ts serviceExtent +
+  bboxesIntersect, unit tested; a null-extent service is skipped,
+  never guessed at). Seeded with
   Lawrence and Colbert County, Alabama (KCS-hosted MapServers behind the
   counties' ISV viewers), both live-verified during the build. Migration
   0008 seeds five more live-verified Alabama counties: Morgan (web5 KCS),
@@ -2272,7 +2357,10 @@ Functions and views:
     X of Y parcels covered and total unpaid, amber within 60 days of the
     nearest delinquent date, red once past it.
   - /import/county (Import from County Records; linked from the import
-    page, and from map/properties empty states): pick a county from
+    page, from map/properties empty states, and since 2026-08-30 from
+    the map's Neighbors popup with ?service=&mode=&q=&run=1, which
+    preselects the county and mode, seeds the text, and auto-fires the
+    search once; plain visits are unchanged): pick a county from
     active registry entries, then search one of three ways. The
     featured mode is "All parcels for an owner" (entity mode): county
     records write the same person or company many different ways
@@ -2371,7 +2459,11 @@ Functions and views:
     add-service
     flow (paste layer URL, auto-read fields with guessed mappings,
     dropdown mapping, one-record test query, save as active/untested),
-    edit, deactivate, delete.
+    edit, deactivate, delete. Since 2026-08-30 the test query also
+    captures the layer's WGS84 coverage extent (migration 0038):
+    add/verify save and Re-verify both write it (a null answer keeps
+    the stored one), and rows without one show an amber "no coverage
+    extent (re-verify to enable Neighbors)" chip.
   - TENANT FARMING ENTITIES (Part 2, 2026-08-22, migration 0031; the
     partner API's operating-entities section, keyed on entity_id,
     never on the name): the handshake's entities[] is stored on the

@@ -3,7 +3,7 @@ title: The map
 route: /map
 group: Map
 order: 1
-updated: 2026-08-29
+updated: 2026-08-30
 keywords: map, satellite, layers, legend, filter, hide, hidden, parcels, ag fields, pastures, grassland, cemeteries, wetlands, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
 ---
 ## What this page is for
@@ -12,7 +12,7 @@ The Map is the home page: your properties on satellite imagery with every bounda
 
 ## Layers and legend
 
-The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Field names** for every other name label (ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, asset names). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
 
 - **Cemeteries** are a muted violet: a traced plot, or a "C" marker for a single pin.
 

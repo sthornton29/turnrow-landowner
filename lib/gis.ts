@@ -15,6 +15,28 @@ export interface CountyGisService {
   status: "active" | "broken" | "untested";
   last_verified_at: string | null;
   notes: string | null;
+  // Layer coverage extent in WGS84 lon/lat (migration 0038), captured
+  // by the admin verify test query and Re-verify. Null until a service
+  // is (re-)verified; the Neighbors overlay skips null-extent services.
+  extent_xmin: number | null;
+  extent_ymin: number | null;
+  extent_xmax: number | null;
+  extent_ymax: number | null;
+}
+
+// [west, south, east, north] in WGS84 lon/lat.
+export type LonLatBbox = [number, number, number, number];
+
+export function serviceExtent(s: CountyGisService): LonLatBbox | null {
+  const nums = [s.extent_xmin, s.extent_ymin, s.extent_xmax, s.extent_ymax];
+  // Defensive about undefined as well as null: a row read before
+  // migration 0038 ran simply has no extent.
+  if (nums.some((n) => typeof n !== "number" || !Number.isFinite(n))) return null;
+  return nums as LonLatBbox;
+}
+
+export function bboxesIntersect(a: LonLatBbox, b: LonLatBbox): boolean {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 }
 
 export interface LayerField {

@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-08-30, version 0.1.0, build 2f3ec67. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-08-30, version 0.1.0, build ca00d35. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -486,7 +486,7 @@ The Map is the home page: your properties on satellite imagery with every bounda
 
 ## Layers and legend
 
-The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. Your choices are remembered on this device. Parcels start off because they clutter the view; property names always show.
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Field names** for every other name label (ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, asset names). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
 
 - **Cemeteries** are a muted violet: a traced plot, or a "C" marker for a single pin.
 
@@ -604,6 +604,29 @@ Generate renders the framed area at print resolution and downloads a Letter PDF 
 
 - **Why is the legend short?** It lists only layers that are checked and present in the frame.
 - **Can I print more than one page?** Each print is one page. Frame a second area and generate again.
+
+# Neighbors  (page: /map)
+
+## What it shows
+
+Turn on **Neighbors** at the bottom of the Layers box to see the tax parcels around your land, drawn as thin light outlines under your own boundaries, with the owner of record from the county's public GIS records. Zoom in close and owner names appear on the parcels.
+
+The overlay only works when you are zoomed in to about neighborhood scale. Zoomed out, the toggle shows "Zoom in to see neighbors" instead of loading thousands of parcels.
+
+## Where it works
+
+Neighbors covers the counties registered in the app's county service list, the same list the county import uses. In a county that is not registered yet, the toggle says "Neighbors not available in this county yet". Your own parcels never appear in the overlay; they are already on the map in their own style.
+
+## Tapping a neighbor parcel
+
+Tap any neighboring parcel to see the owner as the county recorded them, the parcel number, acres, and the address when the county publishes one, plus two buttons:
+
+- **Import this parcel** opens Import from County Records with that parcel already searched, ready to assign to a property.
+- **Find all parcels for this owner** runs an owner search in that county, grouping every way the county wrote the name.
+
+## Nothing is saved
+
+Neighbor parcels are drawn live from public county records and are never saved to your account. They disappear when you turn the toggle off. The only way county data enters your records is the import flow, where you choose exactly what to bring in.
 
 # Properties, parcels, and entities  (page: /properties)
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
@@ -91,6 +91,7 @@ export default function CountyImportClient({
   existingParcels,
   knownAliases,
   entities,
+  initial,
 }: {
   orgId: string;
   services: CountyGisService[];
@@ -108,12 +109,19 @@ export default function CountyImportClient({
   }>;
   knownAliases: KnownAlias[];
   entities: Array<{ id: string; name: string }>;
+  // Preselection from the map's Neighbors overlay (service + mode +
+  // seed, run=true fires the search on arrival). Absent on plain visits.
+  initial?: { serviceId?: string; mode?: SearchMode; text?: string; run?: boolean };
 }) {
   const supabase = useMemo(() => createClient(), []);
 
-  const [serviceId, setServiceId] = useState(services[0]?.id ?? "");
-  const [searchType, setSearchType] = useState<SearchMode>("entity");
-  const [text, setText] = useState("");
+  const [serviceId, setServiceId] = useState(
+    initial?.serviceId && services.some((s) => s.id === initial.serviceId)
+      ? initial.serviceId
+      : (services[0]?.id ?? "")
+  );
+  const [searchType, setSearchType] = useState<SearchMode>(initial?.mode ?? "entity");
+  const [text, setText] = useState(initial?.text ?? "");
   const [results, setResults] = useState<ResultRow[]>([]);
   const [groups, setGroups] = useState<OwnerGroup[]>([]);
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
@@ -172,6 +180,19 @@ export default function CountyImportClient({
     () => new Map(results.map((r) => [r.localId, r])),
     [results]
   );
+
+  // Arriving from the Neighbors overlay with run=1: fire the seeded
+  // search once, exactly as if the user pressed Search.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (autoRanRef.current || !initial?.run) return;
+    if (!service || text.trim().length < 2) return;
+    autoRanRef.current = true;
+    void search();
+    // Mount-only by design: search() is stable enough here and the ref
+    // guards re-entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function clearResults() {
     setResults([]);
