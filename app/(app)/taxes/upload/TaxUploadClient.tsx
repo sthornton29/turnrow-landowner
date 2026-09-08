@@ -7,11 +7,11 @@ import { createClient } from "@/lib/supabase/client";
 import { formatDollars } from "@/lib/format";
 import { takeHandoffFile } from "@/lib/fileHandoff";
 import { defaultDates, type CountyDefault } from "@/lib/tax";
-import { IDENTIFIER_KIND_LABELS, printedIdentifier, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
+import { IDENTIFIER_KIND_LABELS, normalizeIdentifier, printedIdentifier, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
 import { groupPages, reconcile, type PageHeader, type RegisteredAccount, type StatementGroup } from "@/lib/taxSegment";
-import { careOfTarget, matchEntity, matchLine, type MatchableEntityRef } from "@/lib/taxMatch";
+import { careOfTarget, matchEntity, matchLine, matchLineViaCounty, type CountyLineMatch, type CountyLookupHit, type MatchableEntityRef } from "@/lib/taxMatch";
 import { extractFile, extractStored } from "@/components/documents/classify";
-import { confirmLineParcel, confirmStatementEntity } from "@/components/taxes/taxLearn";
+import { confirmLineParcel, confirmStatementEntity, countyLookup, importParcelHref, type CountyLearn } from "@/components/taxes/taxLearn";
 
 // ---------------------------------------------------------------- types
 
@@ -37,9 +37,17 @@ interface LineDraft {
   // Match state
   mode: "matched" | "unmatched" | "create";
   parcelId: string;
-  matchSource: "identifier" | "manual" | null;
+  matchSource: "identifier" | "spatial" | "manual" | null;
   evidence: string | null;
   candidates: Array<{ parcelId: string; evidence: string }>;
+  // The live county lookup tier (migration 0042): what the county's GIS
+  // returned for this line's numbers when the local store had nothing.
+  county: CountyLearn | null; // set when the county resolved the match
+  countyImports: CountyLineMatch["notInAccount"]; // resolved, but not in the account
+  countyNote: string | null; // lookup unavailable, no mapping, ...
+  countyDone: boolean;
+  // Manual match: also save the printed numbers to the parcel (default on).
+  learnPrinted: boolean;
   newParcelNumber: string;
   newParcelCounty: string;
   newParcelPropertyId: string;
@@ -130,10 +138,10 @@ export default function TaxUploadClient({
   function patchStatement(id: string, patch: Partial<StatementDraft>) {
     setStatements((list) => list.map((s) => (s.localId === id ? { ...s, ...patch } : s)));
   }
-  function patchLine(sid: string, lid: string, patch: Partial<LineDraft>) {
+  function patchLine(sid: string, lid: string, patch: Partial<LineDraft>, onlyIf?: (current: LineDraft) => boolean) {
     setStatements((list) =>
       list.map((s) =>
-        s.localId === sid ? { ...s, lines: s.lines.map((l) => (l.localId === lid ? { ...l, ...patch } : l)) } : s
+        s.localId === sid ? { ...s, lines: s.lines.map((l) => (l.localId === lid && (!onlyIf || onlyIf(l)) ? { ...l, ...patch } : l)) } : s
       )
     );
   }
@@ -232,7 +240,9 @@ export default function TaxUploadClient({
           setStatements((list) => [...list, errorDraft(job.localId, g, res.error)]);
           continue;
         }
-        setStatements((list) => [...list, buildDraft(job.localId, g, res.extraction)]);
+        const draft = buildDraft(job.localId, g, res.extraction);
+        setStatements((list) => [...list, draft]);
+        void lookupCounty(draft.localId, draft.county, draft.state, draft.lines);
       }
     };
     await Promise.all([worker(), worker()]);
@@ -301,6 +311,13 @@ export default function TaxUploadClient({
         matchSource: m.parcelId ? "identifier" : null,
         evidence: m.evidence,
         candidates: m.candidates,
+        county: null,
+        countyImports: [],
+        countyNote: null,
+        // Only a line the county will be asked about shows the
+        // "asking the county" state; the rest are done from the start.
+        countyDone: !(lineType === "real_property" && !m.parcelId && m.candidates.length === 0 && identifiers.some((i) => i.kind !== "other")),
+        learnPrinted: true,
         newParcelNumber: firstParcelId,
         newParcelCounty: county,
         newParcelPropertyId: properties[0]?.id ?? "",
@@ -347,6 +364,89 @@ export default function TaxUploadClient({
       lines,
       rememberDates: false,
     };
+  }
+
+  // ---- the live county lookup tier (migration 0042)
+  // After the local identifier store comes up empty for a real-property
+  // line, ask the county's GIS for the printed numbers (one request per
+  // statement) and match what it answers by parcel number, then by
+  // overlap. Answers are cached per session by county + kind + value; a
+  // county with no registered service or no mapped identifier fields is
+  // remembered so it is never asked twice. Failures leave the line
+  // unmatched with a note; the Property Taxes page retries later.
+  const countyCache = useRef(new Map<string, CountyLookupHit[]>());
+  const countyUnavailable = useRef(new Map<string, string | null>()); // county key -> note (null = no service, silent)
+
+  function needsLookup(l: LineDraft): boolean {
+    return l.lineType === "real_property" && l.mode === "unmatched" && l.candidates.length === 0 && l.identifiers.some((i) => i.kind !== "other");
+  }
+
+  async function lookupCounty(sid: string, county: string, state: string, lines: LineDraft[]) {
+    const c = county.trim();
+    const st = state.trim().toUpperCase() || "AL";
+    const todo = lines.filter(needsLookup);
+    if (todo.length === 0) return;
+    if (!c) {
+      for (const l of todo) patchLine(sid, l.localId, { countyDone: true });
+      return;
+    }
+    const countyKey = `${c}|${st}`.toLowerCase();
+    if (countyUnavailable.current.has(countyKey)) {
+      const note = countyUnavailable.current.get(countyKey) ?? null;
+      for (const l of todo) patchLine(sid, l.localId, { countyDone: true, countyNote: note });
+      return;
+    }
+    const cacheKey = (i: PrintedIdentifier) => `${countyKey}|${i.kind}|${i.normalized}`;
+    const uncached = todo.filter((l) => l.identifiers.some((i) => i.kind !== "other" && !countyCache.current.has(cacheKey(i))));
+    let failure: string | null = null;
+    if (uncached.length > 0) {
+      const res = await countyLookup({ county: c, state: st, lines: uncached.map((l) => ({ key: l.localId, identifiers: l.identifiers })) });
+      if (res.error) {
+        failure = `County GIS lookup unavailable (${res.error}). The line stays unmatched; it is tried again on the Property Taxes page.`;
+      } else if (res.reason === "no_service") {
+        countyUnavailable.current.set(countyKey, null);
+      } else if (res.reason === "no_mapping") {
+        const note = `${res.service?.display_name ?? "The county's GIS service"} has no identifier fields mapped yet, so the county could not be asked for these numbers (Settings > Admin > County GIS > Re-verify).`;
+        countyUnavailable.current.set(countyKey, note);
+      } else {
+        const byKey = new Map(res.results.map((r) => [r.key, r.hits]));
+        for (const l of uncached) {
+          const hits = byKey.get(l.localId) ?? [];
+          for (const i of l.identifiers) {
+            if (i.kind === "other") continue;
+            countyCache.current.set(cacheKey(i), hits.filter((h) => h.kind === i.kind && normalizeIdentifier(h.value) === i.normalized));
+          }
+        }
+      }
+    }
+    // The answer lands only on a line the user has not touched since it
+    // was asked: still unmatched, same numbers. A hand pick, a Create,
+    // or an identifier edit made while the county was answering wins.
+    const idKey = (x: LineDraft) => x.identifiers.map((i) => `${i.kind}|${i.normalized}`).join(",");
+    for (const l of todo) {
+      const untouched = (cur: LineDraft) => cur.mode === "unmatched" && idKey(cur) === idKey(l);
+      if (failure || countyUnavailable.current.has(countyKey)) {
+        patchLine(sid, l.localId, { countyDone: true, countyNote: failure ?? countyUnavailable.current.get(countyKey) ?? null }, untouched);
+        continue;
+      }
+      const hits = l.identifiers.flatMap((i) => (i.kind === "other" ? [] : (countyCache.current.get(cacheKey(i)) ?? [])));
+      const m = matchLineViaCounty({ line_type: l.lineType }, hits, parcelList);
+      patchLine(sid, l.localId, {
+        countyDone: true,
+        countyNote: null,
+        countyImports: m.notInAccount,
+        ...(m.parcelId
+          ? {
+              mode: "matched",
+              parcelId: m.parcelId,
+              matchSource: m.source,
+              evidence: m.evidence,
+              candidates: m.candidates,
+              county: m.serviceId ? { serviceId: m.serviceId, serviceLabel: m.serviceLabel ?? "county GIS", identifiers: m.learn, attributes: m.attributes } : null,
+            }
+          : { candidates: m.candidates }),
+      }, untouched);
+    }
   }
 
   // ---- derived per statement
@@ -546,14 +646,20 @@ export default function TaxUploadClient({
           source: l.mode === "create" ? "manual" : (l.matchSource ?? "manual"),
           evidence: l.mode === "create" ? "Parcel created from this statement" : l.evidence,
           stored: learnedStore,
+          learn: l.matchSource === "manual" ? l.learnPrinted : true,
+          // The county's record belongs to the parcel it resolved, never
+          // to a parcel created or hand-picked instead.
+          county: l.mode === "matched" && l.matchSource !== "manual" ? l.county : null,
         });
         if (err) {
           patchStatement(s.localId, { error: "Saved, but could not remember the identifiers: " + err });
         }
-        learnedStore = [
-          ...learnedStore,
-          ...l.identifiers.map((i) => ({ parcel_id: parcelId, kind: i.kind, value: i.value, normalized: i.normalized })),
-        ];
+        if (l.matchSource !== "manual" || l.learnPrinted) {
+          learnedStore = [
+            ...learnedStore,
+            ...l.identifiers.map((i) => ({ parcel_id: parcelId, kind: i.kind, value: i.value, normalized: i.normalized })),
+          ];
+        }
       }
       setStored(learnedStore);
     }
@@ -607,13 +713,23 @@ export default function TaxUploadClient({
   // Re-run the line match when the user edits identifiers or the parcel list grows.
   function rematch(sid: string, l: LineDraft) {
     const m = matchLine({ line_type: l.lineType, identifiers: l.identifiers }, stored, parcelList);
-    patchLine(sid, l.localId, {
+    const next: LineDraft = {
+      ...l,
       mode: m.parcelId ? "matched" : "unmatched",
       parcelId: m.parcelId ?? "",
       matchSource: m.parcelId ? "identifier" : null,
       evidence: m.evidence,
       candidates: m.candidates,
-    });
+      county: null,
+      countyImports: [],
+      countyNote: null,
+      countyDone: false,
+    };
+    patchLine(sid, l.localId, next);
+    if (!m.parcelId) {
+      const s = statements.find((x) => x.localId === sid);
+      if (s) void lookupCounty(sid, s.county, s.state, [next]);
+    }
   }
 
   const isUnsure = (s: StatementDraft, key: string) => s.unsure.includes(key);
@@ -848,6 +964,11 @@ export default function TaxUploadClient({
                                 matchSource: null,
                                 evidence: null,
                                 candidates: [],
+                                county: null,
+                                countyImports: [],
+                                countyNote: null,
+                                countyDone: true,
+                                learnPrinted: true,
                                 newParcelNumber: "",
                                 newParcelCounty: s.county,
                                 newParcelPropertyId: properties[0]?.id ?? "",
@@ -1063,23 +1184,49 @@ function LineCard({
             </p>
           ) : line.candidates.length > 1 ? (
             <p className="text-xs text-amber-900">Several parcels match different numbers on this line; pick one.</p>
+          ) : line.mode === "unmatched" && !line.countyDone ? (
+            <p className="flex items-center gap-1.5 text-xs text-gray-600">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-kelly-500" />
+              Nothing on file matched these numbers; asking the county&apos;s GIS...
+            </p>
           ) : line.mode === "unmatched" ? (
             <p className="text-xs text-amber-900">No parcel matched. Pick one, create it, or leave it to resolve later.</p>
           ) : null}
+          {line.countyImports.length > 0 && line.mode !== "matched" ? (
+            <div className="rounded-lg border border-kelly-100 bg-kelly-50 p-2 text-xs text-pine-900">
+              {line.countyImports.map((c) => (
+                <p key={`${c.kind}|${c.value}|${c.parcel_number}`} className="flex flex-wrap items-center gap-x-2">
+                  <span>
+                    {IDENTIFIER_KIND_LABELS[c.kind]} {c.value} resolved via {c.service_label} to parcel {c.parcel_number}, which is not in your account.
+                  </span>
+                  <Link href={importParcelHref(c.service_id, c.parcel_number)} target="_blank" className="font-medium text-kelly-700 hover:underline">
+                    Import this parcel
+                  </Link>
+                </p>
+              ))}
+              <p className="mt-0.5 text-[11px] text-gray-600">After importing, add the number again on this line (or reopen the statement) to match it.</p>
+            </div>
+          ) : null}
+          {line.countyNote && line.mode !== "matched" ? <p className="text-xs text-gray-600">{line.countyNote}</p> : null}
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={line.mode === "create" ? "__create" : line.mode === "matched" ? line.parcelId : ""}
               onChange={(e) => {
                 const v = e.target.value;
-                if (v === "__create") onChange({ mode: "create", parcelId: "", matchSource: null });
+                if (v === "__create") onChange({ mode: "create", parcelId: "", matchSource: null, county: null });
                 else if (!v) onChange({ mode: "unmatched", parcelId: "", matchSource: null, evidence: null });
                 else {
                   const cand = line.candidates.find((c) => c.parcelId === v);
+                  // When the county resolved this line, its candidates ARE
+                  // the county's answer: picking one keeps the county record
+                  // and match source. Any other pick is a hand match.
+                  const viaCounty = !!cand && !!line.county;
                   onChange({
                     mode: "matched",
                     parcelId: v,
-                    matchSource: cand ? "identifier" : "manual",
+                    matchSource: cand ? (viaCounty ? (line.matchSource === "spatial" ? "spatial" : "identifier") : "identifier") : "manual",
                     evidence: cand?.evidence ?? "Matched by hand",
+                    county: viaCounty ? line.county : null,
                   });
                 }
               }}
@@ -1108,6 +1255,12 @@ function LineCard({
               </optgroup>
               <option value="__create">Create the parcel...</option>
             </select>
+            {line.mode === "matched" && line.matchSource === "manual" ? (
+              <label className="flex items-center gap-1.5 text-xs text-gray-700">
+                <input type="checkbox" checked={line.learnPrinted} onChange={(e) => onChange({ learnPrinted: e.target.checked })} className="h-3.5 w-3.5 accent-kelly-500" />
+                Also save the printed numbers to this parcel
+              </label>
+            ) : null}
           </div>
           {line.mode === "create" ? (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

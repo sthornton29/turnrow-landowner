@@ -70,3 +70,17 @@ describe("reconcile", () => {
     expect(reconcile([100], null)).toMatchObject({ reconciled: false, gap: null });
   });
 });
+
+describe("account registry pre-labeling (a recurring account)", () => {
+  it("labels next year's statement on the same county account without reading the taxpayer", () => {
+    // Colbert account 1234 was registered to Albemarle when the 2026
+    // statement was confirmed; the 2027 statement arrives keyed the same.
+    const registry = [{ county: "Colbert", state: "AL", account_number: "1234", entity_id: "alb", entity_name: "Albemarle Corporation" }];
+    const [g] = groupPages([page({ page: 1, county: "Colbert", billing_key: "001234", billing_kind: "account_number", tax_year: 2027, total_tax: 512 })], registry);
+    expect(g.entity_id).toBe("alb");
+    expect(g.entity_evidence).toBe("Account 001234 is registered to Albemarle Corporation");
+    // A different county's 1234 is a different account.
+    const [other] = groupPages([page({ page: 1, county: "Lawrence", billing_key: "1234", billing_kind: "account_number" })], registry);
+    expect(other.entity_id).toBeNull();
+  });
+});

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { harvestIdentifiers } from "@/lib/taxIdentifiers";
+import { identifierFieldsOf, type IdentifierFieldMapping } from "@/lib/gis";
 
 export const maxDuration = 60;
 
@@ -19,10 +20,12 @@ export async function POST() {
 
   const [{ data: parcels }, { data: services }] = await Promise.all([
     supabase.from("parcels").select("id, county, attributes, properties(state)").not("attributes", "is", null),
-    supabase.from("county_gis_services").select("id, state, county, parcel_field"),
+    supabase.from("county_gis_services").select("id, state, county, parcel_field, identifier_fields"),
   ]);
-  const parcelField = new Map<string, { id: string; field: string }>();
-  for (const s of services ?? []) parcelField.set(`${s.state}|${s.county}`.toLowerCase(), { id: s.id as string, field: s.parcel_field as string });
+  const parcelField = new Map<string, { id: string; field: string; mappings: IdentifierFieldMapping[] }>();
+  for (const s of services ?? []) {
+    parcelField.set(`${s.state}|${s.county}`.toLowerCase(), { id: s.id as string, field: s.parcel_field as string, mappings: identifierFieldsOf(s) });
+  }
 
   let parcelsScanned = 0;
   let identifiers = 0;
@@ -33,7 +36,7 @@ export async function POST() {
   for (const p of (parcels ?? []) as unknown as Row[]) {
     parcelsScanned++;
     const svc = p.county ? parcelField.get(`${stateOf(p)}|${p.county}`.toLowerCase()) : undefined;
-    const ids = harvestIdentifiers(p.attributes, { parcelField: svc?.field ?? null });
+    const ids = harvestIdentifiers(p.attributes, { parcelField: svc?.field ?? null, identifierFields: svc?.mappings ?? null });
     if (ids.length === 0) continue;
     const { error } = await supabase.from("parcel_identifiers").upsert(
       ids.map((i) => ({

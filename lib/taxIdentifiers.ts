@@ -158,16 +158,40 @@ export function printedIdentifier(
 // pattern list is the same one the labels use, plus field-name habits.
 const ATTRIBUTE_SKIP = /acre|area|shape|objectid|globalid|length|perimeter|owner|addr|situs|value|tax|year|date|zip|city|state|legal|desc|name|phone|class|use|zone|exempt|district|mail/i;
 
+// A county attribute value as an identifier string. Numeric columns
+// (Colbert publishes PPIN as a double) print without a spurious
+// decimal part.
+export function attributeValue(raw: unknown): string {
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw === "number") return String(raw);
+  return String(raw).trim().replace(/^(\d+)\.0+$/, "$1");
+}
+
+// Mapped fields (the registry's identifier_fields, migration 0042) are
+// harvested first under their declared kind; the name heuristics then
+// sweep the remaining attributes so an unmapped column still counts.
 export function harvestIdentifiers(
   attrs: Record<string, unknown> | null | undefined,
-  opts: { parcelField?: string | null } = {}
+  opts: { parcelField?: string | null; identifierFields?: Array<{ field: string; kind: IdentifierKind }> | null } = {}
 ): PrintedIdentifier[] {
   if (!attrs) return [];
   const out: PrintedIdentifier[] = [];
   const seen = new Set<string>();
+  const mapped = new Set<string>();
+  for (const m of opts.identifierFields ?? []) {
+    mapped.add(m.field);
+    const value = attributeValue(attrs[m.field]);
+    if (!value || value.length > 40) continue;
+    const normalized = normalizeIdentifier(value);
+    if (!normalized) continue;
+    const k = `${m.kind}|${normalized}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ label: m.field, kind: m.kind, value, normalized });
+  }
   for (const [field, raw] of Object.entries(attrs)) {
-    if (raw === null || raw === undefined) continue;
-    const value = String(raw).trim();
+    if (raw === null || raw === undefined || mapped.has(field)) continue;
+    const value = attributeValue(raw);
     if (!value || value.length > 40) continue;
     // Identifiers are mostly digits with separators; skip prose.
     if (!/\d/.test(value) || /\s[a-z]{3,}\s/i.test(value)) continue;

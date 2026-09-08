@@ -3,23 +3,31 @@ import { createClient } from "@/lib/supabase/server";
 import { buildWhere, normalizeFeatures, queryLayerFeatures } from "@/lib/gisServer";
 import { parcelsEqual } from "@/lib/parcelNumber";
 import { harvestIdentifiers } from "@/lib/taxIdentifiers";
-import type { CountyGisService } from "@/lib/gis";
+import { identifierFieldsOf, type CountyGisService } from "@/lib/gis";
 
 export const maxDuration = 120;
 
-// Fetch county attributes for parcels imported before attribute
-// retention (migration 0030): query the county's registered service by
-// parcel number, keep the matching feature's attribute set on the
-// parcel, and harvest its identifiers. Body: { parcel_ids?: string[] }
-// (default: every parcel with no attributes in a county that has an
-// active service). Session client: RLS scopes the parcels.
+// Fetch county attributes for parcels by parcel number against the
+// county's registered service, keep the matching feature's attribute
+// set on the parcel, and harvest its identifiers (the registry's
+// mapped identifier fields first, migration 0042, then the name
+// heuristics). Three ways in, all session-scoped by RLS:
+//   { parcel_ids: [...] }         these parcels (the parcel page's
+//                                 Refresh from county records)
+//   { county, state? }            every parcel in that county, whether
+//                                 or not it already has attributes (the
+//                                 per-county backfill in Settings > Admin)
+//   {}                            every parcel with no attributes yet
+//                                 (parcels imported before retention)
+// Reports how many parcels gained a PPIN so the backfill's effect is
+// visible, not inferred.
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  const body = (await request.json().catch(() => ({}))) as { parcel_ids?: string[] };
+  const body = (await request.json().catch(() => ({}))) as { parcel_ids?: string[]; county?: string; state?: string };
 
   const { data: profile } = await supabase.from("profiles").select("organization_id").eq("id", user.id).single();
   const orgId = profile?.organization_id as string | undefined;
@@ -30,18 +38,38 @@ export async function POST(request: Request) {
   for (const s of (services ?? []) as CountyGisService[]) byCounty.set(`${s.state}|${s.county}`.toLowerCase(), s);
 
   let q = supabase.from("parcels").select("id, parcel_number, county, attributes, properties(state)");
+  const county = String(body.county ?? "").trim();
   if (Array.isArray(body.parcel_ids) && body.parcel_ids.length > 0) q = q.in("id", body.parcel_ids.slice(0, 500));
+  else if (county) q = q.ilike("county", county);
   else q = q.is("attributes", null);
   const { data: parcels, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  type Row = { id: string; parcel_number: string; county: string | null; properties: { state: string | null } | Array<{ state: string | null }> | null };
+  const stateOf = (r: Row) => (Array.isArray(r.properties) ? r.properties[0]?.state : r.properties?.state) ?? "AL";
+  const wantedState = String(body.state ?? "").trim().toUpperCase();
+  const rows = ((parcels ?? []) as unknown as Row[]).filter((r) => !county || !wantedState || stateOf(r).toUpperCase() === wantedState);
+
+  // Which parcels already carry a PPIN, so the report can say how many
+  // GAINED one rather than how many rows were written.
+  const hadPpin = new Set<string>();
+  for (let i = 0; i < rows.length; i += 200) {
+    const { data: existing, error: exErr } = await supabase
+      .from("parcel_identifiers")
+      .select("parcel_id")
+      .eq("kind", "ppin")
+      .in("parcel_id", rows.slice(i, i + 200).map((r) => r.id));
+    if (exErr) return NextResponse.json({ error: exErr.message }, { status: 500 });
+    for (const e of existing ?? []) hadPpin.add(e.parcel_id as string);
+  }
+
   const deadline = Date.now() + 100_000;
   let updated = 0;
   let skipped = 0;
+  let identifiers = 0;
+  let gainedPpin = 0;
   const failures: string[] = [];
-  type Row = { id: string; parcel_number: string; county: string | null; properties: { state: string | null } | Array<{ state: string | null }> | null };
-  const stateOf = (r: Row) => (Array.isArray(r.properties) ? r.properties[0]?.state : r.properties?.state) ?? "AL";
-  for (const p of (parcels ?? []) as unknown as Row[]) {
+  for (const p of rows) {
     if (Date.now() > deadline) {
       failures.push(`${p.parcel_number}: ran out of time; run again`);
       continue;
@@ -72,9 +100,9 @@ export async function POST(request: Request) {
         .update({ attributes: hit.attributes, attributes_source: svc.display_name, attributes_fetched_at: now })
         .eq("id", p.id);
       if (upErr) throw new Error(upErr.message);
-      const ids = harvestIdentifiers(hit.attributes, { parcelField: svc.parcel_field });
+      const ids = harvestIdentifiers(hit.attributes, { parcelField: svc.parcel_field, identifierFields: identifierFieldsOf(svc) });
       if (ids.length > 0) {
-        await supabase.from("parcel_identifiers").upsert(
+        const { error: idErr } = await supabase.from("parcel_identifiers").upsert(
           ids.map((i) => ({
             organization_id: orgId,
             parcel_id: p.id,
@@ -88,11 +116,14 @@ export async function POST(request: Request) {
           })),
           { onConflict: "parcel_id,kind,normalized" }
         );
+        if (idErr) throw new Error(idErr.message);
+        identifiers += ids.length;
+        if (!hadPpin.has(p.id) && ids.some((i) => i.kind === "ppin")) gainedPpin++;
       }
       updated++;
     } catch (err) {
       failures.push(`${p.parcel_number}: ${err instanceof Error ? err.message : "failed"}`);
     }
   }
-  return NextResponse.json({ updated, skipped, failures });
+  return NextResponse.json({ updated, skipped, identifiers, gained_ppin: gainedPpin, failures });
 }

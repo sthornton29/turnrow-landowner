@@ -1,6 +1,8 @@
 // County GIS registry types and helpers shared by the proxy routes,
 // admin UI, and import flow.
 
+import { IDENTIFIER_KINDS, type IdentifierKind } from "@/lib/taxIdentifiers";
+
 export interface CountyGisService {
   id: string;
   state: string;
@@ -22,6 +24,32 @@ export interface CountyGisService {
   extent_ymin: number | null;
   extent_xmax: number | null;
   extent_ymax: number | null;
+  // Attribute -> identifier kind mappings beyond the parcel field
+  // (migration 0042): which column holds PPIN, PIN, alt key, folio...
+  // Imports harvest by them, the per-county backfill stores them, and
+  // the tax matcher's live lookup queries the county by them.
+  identifier_fields: IdentifierFieldMapping[];
+}
+
+export interface IdentifierFieldMapping {
+  field: string;
+  kind: IdentifierKind;
+}
+
+// Rows read before migration 0042, or hand-edited JSON, come through
+// here so the rest of the app only ever sees a clean list.
+export function identifierFieldsOf(s: { identifier_fields?: unknown } | null | undefined): IdentifierFieldMapping[] {
+  const raw = s?.identifier_fields;
+  if (!Array.isArray(raw)) return [];
+  const out: IdentifierFieldMapping[] = [];
+  for (const m of raw as Array<Record<string, unknown>>) {
+    const field = String(m?.field ?? "").trim();
+    const kind = String(m?.kind ?? "").trim() as IdentifierKind;
+    if (!field || !(IDENTIFIER_KINDS as readonly string[]).includes(kind) || kind === "parcel_number") continue;
+    if (out.some((o) => o.field === field)) continue;
+    out.push({ field, kind });
+  }
+  return out;
 }
 
 // [west, south, east, north] in WGS84 lon/lat.
@@ -83,6 +111,41 @@ export function parseLayerUrl(raw: string): { serviceUrl: string; layerId: numbe
     url = url.slice(0, -match[0].length);
   }
   return { serviceUrl: url, layerId };
+}
+
+// Auto-detect identifier attributes on a layer (the names counties and
+// their GIS vendors habitually use), excluding the parcel field itself
+// and anything that is not a bare identifier column. Order matters:
+// the first pattern to claim a field wins, and each kind is claimed
+// once. The admin confirms the proposal before it is saved.
+const IDENTIFIER_FIELD_PATTERNS: Array<{ kind: IdentifierKind; re: RegExp }> = [
+  { kind: "ppin", re: /^PPIN(_?(NO|NUM|NUMBER))?$/ },
+  { kind: "pin", re: /^PIN(_?(NO|NUM|NUMBER))?$/ },
+  { kind: "apn", re: /^APN(_?(NO|NUM|NUMBER))?$/ },
+  { kind: "alt_key", re: /^ALT_?KEY(_?(NO|NUM))?$|^ALTERNATE_?KEY$/ },
+  { kind: "folio", re: /^FOLIO(_?(NO|NUM|NUMBER))?$/ },
+  { kind: "key_number", re: /^KEY(_?(NO|NUM|NUMBER))?$|^KEYNO$|^KEYNUM$/ },
+  { kind: "account_number", re: /^ACCT(_?(NO|NUM|NUMBER))?$|^ACCOUNT(_?(NO|NUM|NUMBER))?$|^ACCTNUM$|^ACCOUNTNUM$/ },
+  { kind: "property_id", re: /^PROP(ERTY)?_?ID$/ },
+  { kind: "geo_id", re: /^GEO_?ID$/ },
+  { kind: "schedule_number", re: /^SCHED(ULE)?(_?(NO|NUM|NUMBER))?$/ },
+  { kind: "sbl", re: /^SBL$/ },
+  { kind: "bbl", re: /^BBL$/ },
+  { kind: "tmk", re: /^TMK$/ },
+  { kind: "upc", re: /^UPC$/ },
+];
+
+export function guessIdentifierFields(fields: LayerField[], parcelField: string | null): IdentifierFieldMapping[] {
+  const out: IdentifierFieldMapping[] = [];
+  const claimed = new Set<string>();
+  for (const p of IDENTIFIER_FIELD_PATTERNS) {
+    if (claimed.has(p.kind)) continue;
+    const hit = fields.find((f) => f.name !== parcelField && p.re.test(f.name.toUpperCase()));
+    if (!hit) continue;
+    claimed.add(p.kind);
+    out.push({ field: hit.name, kind: p.kind });
+  }
+  return out;
 }
 
 // Guess likely field mappings from a layer's field list.

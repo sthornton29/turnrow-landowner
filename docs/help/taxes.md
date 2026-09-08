@@ -3,7 +3,7 @@ title: Property taxes
 route: /taxes
 group: Property Taxes
 order: 1
-updated: 2026-08-31
+updated: 2026-09-08
 keywords: property tax, statement, upload, account, parcel match, PPIN, identifiers, lines, reconcile, completeness, unpaid, delinquent, due date, batch pay, check number, county calendar, assessed value, appraised value, personal property, tax year, entity, taxpayer, change report, year over year, effective rate, current use, class iii, homestead, exemption, appeal, spike, pdf
 ---
 ## What this page is for
@@ -24,7 +24,11 @@ Upload one PDF with many statements in it, or several files, or photos. The app 
 
 ## How parcels are matched
 
-Every number a county prints for a parcel is remembered on that parcel: parcel number, PPIN, account, key, receipt, and whatever else the county uses. A line matches when one of its printed numbers equals a remembered one, in any spacing or punctuation; the evidence says which number matched. The first statement from a county may need you to match a line by hand; when you confirm it, every number printed on that line is saved to the parcel, so the next year's statement from that county matches on its own. County imports seed the same store from the county's records.
+Every number a county prints for a parcel is remembered on that parcel: parcel number, PPIN, account, key, receipt, and whatever else the county uses. A line matches when one of its printed numbers equals a remembered one, in any spacing or punctuation; the evidence says which number matched. County imports seed the same store from the county's records, and Settings > Admin can refresh every parcel in a county from those records at any time (each parcel page has the same "Refresh from county records" action).
+
+**When nothing on file matches**, the app asks the county's own GIS records for the printed number. Where the county's service is registered with its identifier fields mapped (an admin setting; Alabama's KCS counties carry PPIN and PIN), the county answers with the parcel that number belongs to, and the line matches to your parcel by parcel number, or by map overlap when the county records the number differently. The evidence then reads like "PPIN 2471 resolved via Colbert County GIS to parcel 11 07 26 0 000 001.001 on Cottontown". Confirming saves the printed number and the county's other numbers to the parcel, so the next statement matches straight from your own records without asking the county. If the county resolves the number to a parcel you have not mapped, the line offers "Import this parcel", which opens the county import with that parcel already found. If the county's server is down, the line simply stays unmatched with a note, and the Property Taxes page asks again the next time you open it.
+
+**Why a first-year statement may still need one confirmation.** Parcels imported before the app kept county attributes, or whose county has no registered service or no mapped identifier fields, carry only their parcel number. A statement that prints only a PPIN cannot match such a parcel until the number is learned: confirm the line by hand once (or run the county refresh in Settings > Admin first), and every later year matches on its own. The "Also save the printed numbers to this parcel" box on a hand match is on by default; untick it only when you are matching a line to a parcel whose printed number belongs to something else.
 
 When no number matches, a printed legal description can still place the line through the same description matching the document upload uses, labeled as such. Lines that still do not match wait in the Unmatched section with a "Match to parcel" control; matching there teaches the parcel the same way.
 

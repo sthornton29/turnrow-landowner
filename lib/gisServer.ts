@@ -378,3 +378,62 @@ export function normalizeFeatures(
     };
   });
 }
+
+// ---------------------------------------------------------------- identifier lookup (migration 0042)
+
+// ArcGIS field types that take an unquoted numeric literal.
+export function isNumericFieldType(type: string | null | undefined): boolean {
+  return /Integer|Double|Single|OID/i.test(type ?? "");
+}
+
+function compactUpper(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// Exact match for a batch of printed values against one mapped
+// identifier column. Numeric columns (Colbert publishes PPIN as a
+// double) take only digit-only values as bare literals; text columns
+// compare the upper-cased printed value and its punctuation-stripped
+// form. Null when nothing in the batch can be asked of this column.
+export function buildIdentifierWhere(field: string, fieldType: string | null | undefined, values: string[]): string | null {
+  const cleaned = values.map((v) => v.trim()).filter(Boolean);
+  if (cleaned.length === 0) return null;
+  if (isNumericFieldType(fieldType)) {
+    const nums = [...new Set(cleaned.map((v) => v.replace(/^0+(?=\d)/, "")).filter((v) => /^\d{1,15}$/.test(v)))];
+    return nums.length ? `${field} IN (${nums.join(", ")})` : null;
+  }
+  const literals = new Set<string>();
+  for (const v of cleaned) {
+    literals.add(escapeSqlLiteral(v.toUpperCase()));
+    const compact = compactUpper(v);
+    if (compact) literals.add(escapeSqlLiteral(compact));
+    const unpadded = compact.replace(/^0+(?=\d)/, "");
+    if (unpadded) literals.add(escapeSqlLiteral(unpadded));
+  }
+  return `UPPER(${field}) IN (${[...literals].map((l) => `'${l}'`).join(", ")})`;
+}
+
+// Looser second try for one value on a text column: the digits in
+// order with any separator between them (a "12-345" printing against a
+// "12 345" record). Numeric columns have no looser form.
+export function buildIdentifierLikeWhere(field: string, fieldType: string | null | undefined, value: string): string | null {
+  if (isNumericFieldType(fieldType)) return null;
+  const compact = compactUpper(value).replace(/^0+(?=\d)/, "");
+  if (compact.length < 3) return null;
+  return `UPPER(${field}) LIKE '%${escapeSqlLiteral(compact.split("").join("%"))}%'`;
+}
+
+// Layer field types, cached per layer for ten minutes so a review
+// screen with many lines asks the county once.
+const fieldTypeCache = new Map<string, { at: number; types: Map<string, string> }>();
+const FIELD_TYPE_TTL_MS = 10 * 60 * 1000;
+
+export async function layerFieldTypes(serviceUrl: string, layerId: number): Promise<Map<string, string>> {
+  const key = `${serviceUrl}/${layerId}`;
+  const hit = fieldTypeCache.get(key);
+  if (hit && Date.now() - hit.at < FIELD_TYPE_TTL_MS) return hit.types;
+  const info = await fetchLayerInfo(serviceUrl, layerId);
+  const types = new Map(info.fields.map((f) => [f.name, f.type]));
+  fieldTypeCache.set(key, { at: Date.now(), types });
+  return types;
+}

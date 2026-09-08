@@ -42,6 +42,42 @@ export default function ParcelIdentifiers({
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Re-fetch this parcel's record from the county's registered service
+  // by parcel number and store every mapped identifier (migration 0042).
+  async function refreshFromCounty() {
+    setRefreshing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/gis/parcel-attributes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parcel_ids: [parcelId] }),
+      });
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) throw new Error(String(body.error ?? `Failed (${res.status})`));
+      const failures = Array.isArray(body.failures) ? (body.failures as string[]) : [];
+      if (failures.length > 0) throw new Error(failures[0]);
+      if (!Number(body.updated)) {
+        setNotice("No county record found: the county has no registered service, or the parcel number is not in its records.");
+      } else {
+        const { data } = await supabase
+          .from("parcel_identifiers")
+          .select("id, kind, label, value, source, last_seen_at")
+          .eq("parcel_id", parcelId)
+          .order("kind");
+        setRows((data ?? []) as ParcelIdentifierRow[]);
+        setNotice(`County record refreshed: ${body.identifiers ?? 0} identifiers recorded.`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reach the county.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function add() {
     setError(null);
@@ -96,10 +132,16 @@ export default function ParcelIdentifiers({
     <section className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Identifiers</h2>
-        <button onClick={() => setAdding((a) => !a)} className="text-xs font-medium text-kelly-700 hover:underline">
-          {adding ? "Cancel" : "Add"}
-        </button>
+        <span className="flex items-center gap-3">
+          <button onClick={refreshFromCounty} disabled={refreshing} className="text-xs font-medium text-kelly-700 hover:underline disabled:opacity-60">
+            {refreshing ? "Refreshing..." : "Refresh from county records"}
+          </button>
+          <button onClick={() => setAdding((a) => !a)} className="text-xs font-medium text-kelly-700 hover:underline">
+            {adding ? "Cancel" : "Add"}
+          </button>
+        </span>
       </div>
+      {notice ? <p className="mb-1 text-xs text-gray-600">{notice}</p> : null}
       {rows.length === 0 ? <p className="text-xs text-gray-500">Only the parcel number so far.</p> : null}
       <ul className="divide-y divide-gray-100 text-sm">
         {rows.map((r) => (

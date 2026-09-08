@@ -4,6 +4,7 @@
 // (spends API credits); the deterministic suite in taxFixtures.test.ts
 // runs on the snapshots every time.
 //   TAX_FIXTURES_LIVE=1 npx vitest run lib/taxFixtures.live.test.ts
+//   TAX_FIXTURES_LIVE=1 TAX_FIXTURES_ONLY=2026-colbert npx vitest run lib/taxFixtures.live.test.ts
 import { describe, expect, it } from "vitest";
 import fs from "fs";
 import path from "path";
@@ -14,7 +15,13 @@ import { groupPages, type PageHeader } from "@/lib/taxSegment";
 
 const DIR = path.join(process.cwd(), "fixtures", "tax-statements");
 const live = process.env.TAX_FIXTURES_LIVE === "1";
-const files = fs.existsSync(DIR) ? fs.readdirSync(DIR).filter((f) => f.toLowerCase().endsWith(".pdf")) : [];
+// TAX_FIXTURES_ONLY=2026-colbert limits the run to one fixture (by file
+// stem) so adding a statement never re-extracts and rewrites the
+// snapshots of the others.
+const only = (process.env.TAX_FIXTURES_ONLY ?? "").trim().toLowerCase();
+const files = fs.existsSync(DIR)
+  ? fs.readdirSync(DIR).filter((f) => f.toLowerCase().endsWith(".pdf") && (!only || f.toLowerCase().replace(/\.pdf$/, "") === only))
+  : [];
 
 // .env.local first, then a pulled Vercel env (vercel env pull
 // .env.vercel.local --environment=production) for keys that only live

@@ -14,7 +14,8 @@ import {
   type TaxStatementRow,
 } from "@/lib/tax";
 import { IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier } from "@/lib/taxIdentifiers";
-import { confirmLineParcel, loadStoredIdentifiers } from "@/components/taxes/taxLearn";
+import { confirmLineParcel, countyLookup, importParcelHref, loadStoredIdentifiers } from "@/components/taxes/taxLearn";
+import { matchLineViaCounty, type CountyLineMatch } from "@/lib/taxMatch";
 import TaxChangeReport from "@/components/taxes/TaxChangeReport";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import { NO_ENTITY } from "@/lib/entities";
@@ -96,6 +97,14 @@ export default function TaxStatusClient({
   const [error, setError] = useState<string | null>(null);
   const [resolveParcelId, setResolveParcelId] = useState<Record<string, string>>({});
   const [editingEntity, setEditingEntity] = useState<string | null>(null);
+  // The live county lookup tier (migration 0042) for the Unmatched
+  // section: what the county's GIS answered for each line's numbers,
+  // a note when it could not be asked, and the manual match's
+  // "also save the printed numbers" choice (default on).
+  const [countySuggest, setCountySuggest] = useState<Record<string, CountyLineMatch>>({});
+  const [countyNote, setCountyNote] = useState<Record<string, string>>({});
+  const [learnPrinted, setLearnPrinted] = useState<Record<string, boolean>>({});
+  const lookedUp = useRef(new Set<string>());
 
   const reload = useCallback(async () => {
     const [s, l, p] = await Promise.all([
@@ -152,6 +161,52 @@ export default function TaxStatusClient({
   // Unmatched = real-property lines with no parcel (personal property
   // never needs one).
   const unmatchedLines = visibleLines.filter((l) => l.line_type === "real_property" && !l.parcel_id);
+
+  // Ask the county once per unmatched line (per page load); a line
+  // that resolves to one of the account's parcels preselects it in the
+  // match control, a parcel outside the account offers an import, and
+  // a county that cannot be reached leaves a note and is retried on the
+  // next visit.
+  const unmatchedKey = unmatchedLines.map((l) => l.id).join(",");
+  useEffect(() => {
+    const todo = unmatchedLines.filter((l) => !lookedUp.current.has(l.id) && (l.identifiers ?? []).some((i) => i.kind !== "other"));
+    if (todo.length === 0) return;
+    for (const l of todo) lookedUp.current.add(l.id);
+    const groups = new Map<string, { county: string; state: string | null; lines: TaxStatementLineRow[] }>();
+    for (const l of todo) {
+      const s = statementById.get(l.tax_statement_id);
+      if (!s?.county) continue;
+      const key = `${s.county}|${s.state ?? ""}`.toLowerCase();
+      const g = groups.get(key) ?? { county: s.county, state: s.state ?? null, lines: [] };
+      g.lines.push(l);
+      groups.set(key, g);
+    }
+    const refs = parcels.map((p) => ({ id: p.id, parcel_number: p.parcel_number, property_id: p.property_id, property_name: propertyName.get(p.property_id) ?? null }));
+    for (const g of groups.values()) {
+      countyLookup({ county: g.county, state: g.state, lines: g.lines.map((l) => ({ key: l.id, identifiers: (l.identifiers ?? []) as PrintedIdentifier[] })) }).then((res) => {
+        if (res.error || res.reason === "no_mapping") {
+          const note = res.error
+            ? `County GIS lookup unavailable (${res.error}); tried again next time.`
+            : `${res.service?.display_name ?? "The county's GIS service"} has no identifier fields mapped yet (Settings > Admin > County GIS > Re-verify).`;
+          setCountyNote((m) => ({ ...m, ...Object.fromEntries(g.lines.map((l) => [l.id, note])) }));
+          if (res.error) for (const l of g.lines) lookedUp.current.delete(l.id);
+          return;
+        }
+        if (res.reason === "no_service") return;
+        const byKey = new Map(res.results.map((r) => [r.key, r.hits]));
+        const next: Record<string, CountyLineMatch> = {};
+        const pre: Record<string, string> = {};
+        for (const l of g.lines) {
+          const m = matchLineViaCounty({ line_type: l.line_type }, byKey.get(l.id) ?? [], refs);
+          if (m.parcelId || m.notInAccount.length > 0 || m.candidates.length > 0) next[l.id] = m;
+          if (m.parcelId) pre[l.id] = m.parcelId;
+        }
+        setCountySuggest((m) => ({ ...m, ...next }));
+        setResolveParcelId((m) => ({ ...pre, ...m }));
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unmatchedKey]);
 
   const totalDue = yearStatements.reduce((s, x) => s + x.amount_due, 0);
   const totalPaid = yearStatements.reduce((s, x) => s + (paidByStatement.get(x.id) ?? 0), 0);
@@ -245,14 +300,20 @@ export default function TaxStatusClient({
     setError(null);
     const parcel = parcelById.get(parcelId);
     const stored = await loadStoredIdentifiers(supabase);
+    // The county's own resolution, when the user kept the parcel it
+    // proposed; any other pick is a hand match.
+    const suggestion = countySuggest[line.id];
+    const viaCounty = suggestion && suggestion.parcelId === parcelId && suggestion.source ? suggestion : null;
     const err = await confirmLineParcel(supabase, {
       orgId,
       lineId: line.id,
       parcelId,
       identifiers: (line.identifiers ?? []) as PrintedIdentifier[],
-      source: "manual",
-      evidence: parcel ? `Matched by hand to parcel ${parcel.parcel_number}` : "Matched by hand",
+      source: viaCounty?.source ?? "manual",
+      evidence: viaCounty?.evidence ?? (parcel ? `Matched by hand to parcel ${parcel.parcel_number}` : "Matched by hand"),
       stored,
+      learn: viaCounty ? true : learnPrinted[line.id] !== false,
+      county: viaCounty && viaCounty.serviceId ? { serviceId: viaCounty.serviceId, serviceLabel: viaCounty.serviceLabel ?? "county GIS", identifiers: viaCounty.learn, attributes: viaCounty.attributes } : null,
     });
     if (err) {
       setError(
@@ -345,8 +406,26 @@ export default function TaxStatusClient({
   }
 
   function matchControl(line: TaxStatementLineRow) {
+    const suggestion = countySuggest[line.id];
+    const chosen = resolveParcelId[line.id] ?? "";
+    const keptSuggestion = !!suggestion?.parcelId && suggestion.parcelId === chosen;
     return (
-      <span className="flex flex-wrap items-center gap-2">
+      <span className="flex flex-col items-end gap-1">
+        {suggestion?.parcelId && suggestion.evidence ? (
+          <span className="max-w-md text-right text-xs text-pine-900">{suggestion.evidence}</span>
+        ) : suggestion && suggestion.candidates.length > 1 ? (
+          <span className="max-w-md text-right text-xs text-amber-900">The county resolved these numbers to several of your parcels; pick one.</span>
+        ) : null}
+        {(suggestion?.notInAccount ?? []).map((c) => (
+          <span key={`${c.kind}|${c.value}|${c.parcel_number}`} className="max-w-md text-right text-xs text-pine-900">
+            {IDENTIFIER_KIND_LABELS[c.kind]} {c.value} resolved via {c.service_label} to parcel {c.parcel_number}, which is not in your account.{" "}
+            <Link href={importParcelHref(c.service_id, c.parcel_number)} className="font-medium text-kelly-700 hover:underline">
+              Import this parcel
+            </Link>
+          </span>
+        ))}
+        {countyNote[line.id] && !suggestion ? <span className="max-w-md text-right text-xs text-gray-500">{countyNote[line.id]}</span> : null}
+        <span className="flex flex-wrap items-center justify-end gap-2">
         <select
           value={resolveParcelId[line.id] ?? ""}
           onChange={(e) => setResolveParcelId((m) => ({ ...m, [line.id]: e.target.value }))}
@@ -366,6 +445,18 @@ export default function TaxStatusClient({
         >
           Match
         </button>
+        </span>
+        {chosen && !keptSuggestion ? (
+          <label className="flex items-center gap-1.5 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={learnPrinted[line.id] !== false}
+              onChange={(e) => setLearnPrinted((m) => ({ ...m, [line.id]: e.target.checked }))}
+              className="h-3.5 w-3.5 accent-kelly-500"
+            />
+            Also save the printed numbers to this parcel
+          </label>
+        ) : null}
       </span>
     );
   }

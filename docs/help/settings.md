@@ -12,7 +12,7 @@ Admins invite people by email, set their role (**admin** sees and manages everyt
 
 ## Admin sections
 
-Platform administrators see extra sections: the county GIS registry (the public parcel services behind Import from county records, each verified live) and program parameters for government payment estimates (reference prices, loan rates, factors by program year). Regular users do not see these.
+Platform administrators see extra sections: the county GIS registry (the public parcel services behind Import from county records, each verified live, with the identifier fields the county publishes such as PPIN mapped so tax statements can be resolved against county records), the parcel identifier tools (re-harvest, the pre-retention fetch, and a per-county refresh that re-reads every parcel in a county and reports how many gained a PPIN), and program parameters for government payment estimates (reference prices, loan rates, factors by program year). Regular users do not see these.
 
 ## Common questions
 

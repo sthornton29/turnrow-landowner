@@ -17,7 +17,7 @@ import {
 } from "@/lib/ownerNames";
 import { ENTITY_TYPE_LABELS, guessEntityType } from "@/lib/entities";
 import MiniParcelSketch from "@/components/county/MiniParcelSketch";
-import type { CountyGisService, EntityParcelFeature } from "@/lib/gis";
+import { identifierFieldsOf, type CountyGisService, type EntityParcelFeature } from "@/lib/gis";
 import type { LandEntityType } from "@/types/db";
 import type { MultiPolygon } from "geojson";
 
@@ -634,7 +634,7 @@ export default function CountyImportClient({
     // lands in the parcel's identifier store so tax statements match on
     // the county's own numbers. The parcel number itself mirrors by trigger.
     const saveHarvestedIdentifiers = async (parcelId: string, attrs: Record<string, unknown> | undefined) => {
-      const ids = harvestIdentifiers(attrs ?? {}, { parcelField: service.parcel_field });
+      const ids = harvestIdentifiers(attrs ?? {}, { parcelField: service.parcel_field, identifierFields: identifierFieldsOf(service) });
       if (ids.length === 0) return;
       const now = new Date().toISOString();
       await supabase.from("parcel_identifiers").upsert(

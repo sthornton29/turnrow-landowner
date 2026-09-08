@@ -1,0 +1,107 @@
+{
+  "file": "2026-colbert.pdf",
+  "total_pages": 1,
+  "pages": [
+    {
+      "page": 1,
+      "county": "Colbert",
+      "state": "AL",
+      "billing_key": "1234",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP/ THE",
+      "tax_year": 2026,
+      "total_tax": 510.1,
+      "is_continuation": false,
+      "is_statement": true
+    }
+  ],
+  "groups": [
+    {
+      "key": "colbert|al|1234|2026",
+      "pages": [
+        1
+      ],
+      "county": "Colbert",
+      "state": "AL",
+      "billing_key": "1234",
+      "billing_kind": "account_number",
+      "taxpayer_name": "ALBEMARLE CORP/ THE",
+      "tax_year": 2026,
+      "total_tax": 510.1,
+      "entity_id": null,
+      "entity_evidence": null
+    }
+  ],
+  "statements": [
+    {
+      "pages": [
+        1
+      ],
+      "extraction": {
+        "county": "Colbert",
+        "state": "AL",
+        "authority_name": "Colbert County - Tommy L Oswalt Revenue Commissioner",
+        "tax_year": 2026,
+        "billing_key": "1234",
+        "billing_kind": "account_number",
+        "taxpayer_name": "ALBEMARLE CORP/ THE",
+        "care_of": null,
+        "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
+        "total_tax": 510.1,
+        "due_date": "2026-10-01",
+        "delinquent_date": "2027-01-01",
+        "header_identifiers": [
+          {
+            "label": "ACCOUNT NUMBER",
+            "kind": "account_number",
+            "value": "1234"
+          }
+        ],
+        "lines": [
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "2471"
+              }
+            ],
+            "appraised_value": null,
+            "assessed_value": null,
+            "tax_due": 69,
+            "exemptions": null,
+            "legal_description": null,
+            "property_address": "0",
+            "acres": null
+          },
+          {
+            "line_type": "real_property",
+            "identifiers": [
+              {
+                "label": "PPIN",
+                "kind": "ppin",
+                "value": "2661"
+              }
+            ],
+            "appraised_value": null,
+            "assessed_value": null,
+            "tax_due": 441.1,
+            "exemptions": null,
+            "legal_description": null,
+            "property_address": "0",
+            "acres": null
+          }
+        ],
+        "unsure_fields": [
+          "lines[0].property_address",
+          "lines[1].property_address",
+          "lines[0].acres",
+          "lines[1].acres",
+          "care_of"
+        ]
+      }
+    }
+  ],
+  "written_at": "2026-09-08T18:35:43.486Z"
+}

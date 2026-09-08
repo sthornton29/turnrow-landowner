@@ -1,6 +1,135 @@
 # Turnrow Landowner: Project Summary
 
-Last updated: 2026-08-31 (FARM SYNC SCOPES LIVE + NOTHING SILENT, TENANT
+Last updated: 2026-09-08 (LIVE COUNTY IDENTIFIER LOOKUP FOR TAX
+MATCHING, REGISTRY IDENTIFIER FIELD MAPPINGS, PER-COUNTY IDENTIFIER
+BACKFILL, migration 0042. THE DIAGNOSIS: the 2026 Colbert statement
+(account 1234, two PPIN-only lines 2471 and 2661, $510.10, Cottontown,
+fixtures/tax-statements/2026-colbert.pdf) saved in production with both
+lines unmatched. Not a matcher bug: extraction captured both PPINs
+under kind ppin exactly as the 2024 snapshot did, and kind-aware or
+kind-agnostic matching would have hit any stored row. The Cottontown
+parcels simply had NO identifier but the mirrored parcel number: they
+were imported 2026-08-16, five days before attribute retention (0030,
+08-21); the "Fetch attributes for parcels imported before retention"
+backfill ran the night Colbert's server was down (attributes stayed
+null); and the 2024 Colbert statement was reviewed live but never
+confirmed, so the learn-once loop never fired (the 2024 fixture test
+passes because it TEACHES the PPIN in the test itself). Account 1234
+was likewise unregistered until the 2026 confirmation registered it to
+Albemarle (the entity matched by name anyway); next year pre-labels.
+Verified live: the Colbert KCS layer is up and carries PPIN (double),
+PIN (text), PARCEL_NO, PARCELID, acctNum; PPIN = 2471 works, CAST(PPIN
+AS VARCHAR) = '2471' returns nothing (the field TYPE decides the
+literal). THE FIX, three layers. (1) REGISTRY MAPPINGS:
+county_gis_services.identifier_fields jsonb [{field, kind}] (0042,
+seeded from the live-verified layers: PPIN+PIN on Colbert, Franklin,
+Lawrence; PPIN on Lauderdale; PIN on Madison and Morgan; Limestone
+none); lib/gis.ts identifierFieldsOf (cleans any stored list) and
+guessIdentifierFields (PPIN, PIN, APN, ALTKEY, FOLIO, KEY, ACCT,
+PROP_ID, GEO_ID, SCHED, SBL, BBL, TMK, UPC, parcel field excluded, one
+field per kind); /api/gis/layer-info returns guesses.identifiers; the
+admin add/edit form has an Identifier fields editor (field select +
+kind select rows, prefilled from the guesses); Re-verify on a service
+with no mappings reads the layer, proposes the detected mappings in a
+confirm dialog, and saves them (declined = note, editable by hand);
+the registry list shows the mappings as a chip or an amber "no
+identifier fields (re-verify to map PPIN and the like)".
+harvestIdentifiers(attrs, {parcelField, identifierFields}) harvests
+mapped fields FIRST under their declared kind (attributeValue prints a
+numeric PPIN without a decimal tail), then the name heuristics sweep
+the rest; the county import, /api/parcels/reharvest, and the backfill
+all pass the mappings. (2) THE LIVE LOOKUP TIER (POST
+/api/gis/identifier-lookup {county, state, lines:[{key,
+identifiers}]}, any signed-in user, maxDuration 60): finds the active
+service for the county, requires mappings (reason no_service /
+no_mapping otherwise), reads the layer's field types (cached 10 min,
+gisServer.layerFieldTypes), then asks the county in batches:
+kind-aware first (buildIdentifierWhere: numeric columns take bare
+digit-only literals "PPIN IN (2471, 2661)", text columns UPPER(F) IN
+(printed, compact, unpadded)), kind-agnostic second over the other
+mapped columns, then a capped LIKE retry per value on text columns
+(buildIdentifierLikeWhere, interleaved wildcards; numeric columns have
+no loose form); each hit returns the county's parcel number, the
+harvested identifiers, the trimmed attributes, and OVERLAPS (share of
+the county feature's area inside each of the organization's parcels
+in that county, parcels_geo under RLS, @turf/intersect + area, 5%
+floor). lib/taxMatch.ts matchLineViaCounty (pure, unit tested) then
+matches the organization's parcels by normalized parcel number first
+(parcelsEqual), spatial overlap >= 50% second; evidence "PPIN 2471
+resolved via Colbert County GIS to parcel 11 07 26 0 000 001.001 on
+Cottontown" (spatial: "... to county parcel X, 99% inside parcel Y");
+several parcels are listed, none chosen; a resolved parcel NOT in the
+account is reported as notInAccount; personal property never matches.
+The upload review runs it per statement right after the local match
+fails (components/taxes/taxLearn.ts countyLookup; a pulsing "asking
+the county's GIS..." line; answers cached per session by county +
+kind + value; a county with no service is silent, no mapping shows a
+note pointing at Settings > Admin > County GIS > Re-verify; a county
+server failure leaves the line unmatched with "County GIS lookup
+unavailable (...); tried again on the Property Taxes page"); a
+county-resolved line confirms with match_source identifier or
+spatial, learns the printed numbers (tax_statement) AND the county's
+identifiers and attributes (county_import, source_ref the service;
+attributes only fill an empty parcel) through confirmLineParcel's new
+county arg; "Import this parcel" links to /import/county?service=&
+mode=parcel&q=<parcel number>&run=1 (the Neighbors seeding). The
+Property Taxes page's Unmatched section runs the same tier once per
+line per visit (preselects the resolved parcel in Match to parcel,
+shows the evidence, the import offer, or the unavailable note; a
+failed county is retried on the next visit). (3) BACKFILL: POST
+/api/gis/parcel-attributes gains {county, state} (every parcel in the
+county, attributes or not) beside {parcel_ids} and the default
+(attributes null), harvests by the mappings, and reports gained_ppin;
+Settings > Admin > Parcel identifiers has one "Refresh identifiers
+from county records" button per active county; every parcel page's
+Identifiers section has "Refresh from county records" (parcel_ids:
+[id], re-reads the list). RUN FOR STUART 2026-09-08 under the service
+role (the route needs a session): both Cottontown parcels refreshed,
+10 identifiers, 2 parcels gained a PPIN (2661 on 001.000, 2471 on
+001.001; plus PIN, the compact PARCEL_NO, and account 1234).
+MATCHER RULE ADDED: account numbers are WEAK identifiers (matchLine
+tries parcel-specific kinds first and lets an account number decide
+only when nothing parcel-specific is printed or stored), because
+county records carry the account on every parcel of the bill and a
+per-line account would otherwise turn every matched line into a
+several-candidates tie. MANUAL MATCH: "Also save the printed numbers
+to this parcel" checkbox (default on) on the upload review's hand
+matches and the Unmatched section (confirmLineParcel learn: false
+skips the printed learning); the parcel page's Add identifier (kind +
+value, source manual) already existed and is unchanged. FIXTURES:
+2026-colbert.pdf + snapshot (the live writer gained
+TAX_FIXTURES_ONLY=<stem> so one statement can be added without
+re-extracting the others); tests: the 2026 fixture matches BOTH lines
+to Cottontown through a mocked county (the real attribute rows of
+2026-09-08) against a parcel set with NO PPINs, then directly on the
+second run, with the account printed per line still resolving to one
+parcel; matchLineViaCounty (by number, spatial, not-in-account, ties,
+personal property); mapped harvesting against the real Colbert
+record; buildIdentifierWhere/LikeWhere by field type;
+guessIdentifierFields and identifierFieldsOf; registry pre-labeling of
+recurring account 1234. Help: taxes.md (the county tier, why a first
+year may need one confirmation, the checkbox). AI REVIEW FIXES (same
+day): a county answer landing after a hand pick, a Create, or an
+identifier edit no longer overwrites it (patchLine onlyIf: still
+unmatched with the same numbers); Create the parcel clears the county
+record and the save passes it only for a county-resolved match;
+countyLookup never throws (fetch failures become an error note) and
+chunks 40 lines per request so the route's 60-line cap never drops
+lines silently; the session cache filters hits by NORMALIZED value
+(the route stamps the first printed spelling); the route stops asking
+the county after 40 s and keeps account numbers out of the
+kind-agnostic and LIKE passes; matchLineViaCounty gives account hits
+the same weak tier and equates a county's compact spelling with a
+trailing zero sub-parcel to the spaced one (sameParcelNumber, tested;
+lib/parcelNumber.ts untouched); matchLine runs four passes (strong
+kind-aware, strong kind-agnostic never against a stored account,
+account kind-aware, account kind-agnostic); confirmLineParcel dedupes
+the county identifiers against what the printed pass just wrote (a
+number both printed and returned keeps its statement provenance) and
+surfaces the attributes write error; the admin form drops proposed
+mappings that name fields the (re-pasted) layer lacks and never saves
+one; the backfill's PPIN precheck is chunked with its error checked.)
+Earlier, 2026-08-31 (FARM SYNC SCOPES LIVE + NOTHING SILENT, TENANT
 DATA DRIFT REVIEW, TAX DOCUMENTS CATEGORY, LEASES BORN ACTIVE.
 THE FARM DATA FLOW, one paragraph every future feature follows: the farm
 partner API is read ONLY by lib/farmSync.ts syncConnection (cron every 6
@@ -347,6 +476,26 @@ assistant on a read-only RLS seam, migration 0022; Help Center with a
 "?" drawer, how-to chat, and Contact support)
 
 ## DEPLOY CHECKLIST (this release)
+
+00000000000. Run 0042_gis_identifier_fields.sql in Supabase BEFORE this
+   deploy goes live (2026-09-08; NOT YET RUN at the time of writing).
+   It adds county_gis_services.identifier_fields (jsonb, default [])
+   and seeds the mappings for the seven Alabama services from the
+   fields verified live that day. Until it runs, the admin registry's
+   save and Re-verify fail on the missing column, and the live county
+   lookup answers "no identifier fields mapped" for every county (the
+   code tolerates a row without the column: identifierFieldsOf reads
+   it as empty). AFTER the deploy: Settings > Admin > County GIS >
+   Re-verify Colbert (confirms the PPIN + PIN mapping is there; a
+   service the seed missed gets the auto-detected proposal), then
+   Settings > Admin > Parcel identifiers > "Colbert County, AL" (the
+   per-county refresh; Stuart's two Cottontown parcels were already
+   refreshed under the service role on 2026-09-08 and carry PPIN 2661
+   and 2471), then delete or resolve the saved 2026 Colbert statement
+   (it is on file with both lines unmatched, so a re-upload is skipped
+   as a duplicate) and upload 2026-colbert.pdf: both lines should
+   match Cottontown from the local store, or through the county tier
+   on any parcel set that still lacks PPINs.
 
 0000000000. Run 0041_drop_lease_assumption_drift.sql in Supabase
    (2026-08-31; NOT YET RUN at the time of writing; order relative to
@@ -1170,7 +1319,16 @@ missing unique (id, organization_id) on parcels):
   number); evidence names the identifier ("PPIN 44521 matches parcel
   11 07 26 0 000 001.000 on Cottontown"); several parcels matching
   different numbers are listed, none chosen; personal property never
-  matches. matchEntity: the C/O target is the signal (careOfTarget),
+  matches; account numbers are WEAK (parcel-specific kinds decide
+  first, 2026-09-08). THIRD TIER, THE COUNTY (2026-09-08, migration
+  0042): when the local store has nothing, /api/gis/identifier-lookup
+  asks the county's registered service for the printed number through
+  its mapped identifier fields and matchLineViaCounty matches the
+  answer to the organization's parcels by parcel number, then by
+  overlap; a parcel outside the account is offered as an import; on
+  confirm the county's identifiers and attributes save as county
+  records so the next year matches locally. Full account in the
+  2026-09-08 header paragraph. matchEntity: the C/O target is the signal (careOfTarget),
   the taxpayer stays as printed; entity names and entity_aliases
   through normalizeOwnerName + ownerSimilarity >= 0.75, with
   tokensMatch extended to two edits on 8+ letter words (AMBEMARLE,
@@ -1280,7 +1438,11 @@ Phase 5 (migration 0005):
 - county_gis_services: the app's first GLOBAL table (no organization_id).
   All authenticated users read it; only platform admins write. Columns:
   state, county, display_name, ArcGIS service_url + layer_id, field
-  mappings (parcel_field, owner_field, acres_field, situs_field), status
+  mappings (parcel_field, owner_field, acres_field, situs_field, and
+  since migration 0042 identifier_fields jsonb [{field, kind}]: the
+  attributes holding PPIN, PIN, alt key, folio... auto-detected on
+  verify and Re-verify, confirmed by the admin, used by imports, the
+  per-county identifier refresh, and the tax matcher's county lookup), status
   (active | broken | untested), last_verified_at, notes, and (migration
   0038) nullable extent_xmin/ymin/xmax/ymax: the layer's WGS84 coverage
   bbox, captured by the admin verify test query and Re-verify (the
@@ -2892,6 +3054,10 @@ Functions and views:
   mapping (no geometry crosses the API), 6-hour cron sync + manual
   refresh, Crops map layer, Farm activity page, dashboard harvest card,
   crop share yield prefill from actuals. Described above.
+- 2026-09-08 (DONE): live county identifier lookup for property tax
+  matching, registry identifier field mappings (migration 0042),
+  per-county and per-parcel identifier refresh, the 2026 Colbert
+  fixture. Described in the header paragraph.
 - Post-Phase 6 (DONE): owner entity matching in the county import
   (migration 0007). Entity search mode groups all of an owner's parcels
   across name variants, user-correctable grouping, confirmed groupings

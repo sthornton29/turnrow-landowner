@@ -19,6 +19,7 @@ const base: CountyGisService = {
   extent_ymin: 34.3,
   extent_xmax: -86.94,
   extent_ymax: 34.85,
+  identifier_fields: [],
 };
 
 describe("serviceExtent", () => {

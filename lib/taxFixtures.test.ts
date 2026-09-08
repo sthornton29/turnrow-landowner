@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
 import fs from "fs";
 import path from "path";
 import { groupPages, reconcile, type PageHeader } from "@/lib/taxSegment";
-import { printedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
-import { identifiersToLearn, matchEntity, matchLine } from "@/lib/taxMatch";
+import { harvestIdentifiers, printedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
+import { identifiersToLearn, matchEntity, matchLine, matchLineViaCounty, type CountyLookupHit } from "@/lib/taxMatch";
 
 const DIR = path.join(process.cwd(), "fixtures", "tax-statements");
 
@@ -188,5 +188,116 @@ describe.skipIf(!lawrence && !colbert && !morgan)("all fixtures", () => {
         if (del) expect(del).toMatch(/^2025-01-01$/);
       }
     }
+  });
+});
+
+// The 2026 Colbert statement (same account 1234, same two PPINs) is the
+// case that failed in production on 2026-09-08: the Cottontown parcels
+// had been imported before attribute retention, the county server was
+// down when the backfill ran, and the 2024 statement was never
+// hand-confirmed, so no PPIN was ever stored. The live county lookup
+// tier (migration 0042) closes that gap; this suite runs it against a
+// parcel set with NO PPINs and a mocked county answer (the real
+// attribute rows the Colbert layer returned that day).
+const colbert2026 = load("2026-colbert");
+
+describe.skipIf(!colbert2026)("Colbert County 2026 (account 1234 again, PPINs 2471 and 2661)", () => {
+  const cottontown = [
+    { id: "c000", parcel_number: "11 07 26 0 000 001.000", property_id: "cot", property_name: "Cottontown" },
+    { id: "c001", parcel_number: "11 07 26 0 000 001.001", property_id: "cot", property_name: "Cottontown" },
+  ];
+  // Only the mirrored parcel numbers: exactly what production held.
+  const noPpins: StoredIdentifier[] = cottontown.map((p) => ({ parcel_id: p.id, kind: "parcel_number", value: p.parcel_number, normalized: printedIdentifier("x", "parcel_number", p.parcel_number)!.normalized }));
+  const mappings = [
+    { field: "PPIN", kind: "ppin" as const },
+    { field: "PIN", kind: "pin" as const },
+  ];
+  const countyRecords: Record<string, Record<string, unknown>> = {
+    "2661": { OBJECTID: 11938, PARCEL_NO: "1107260000001000", PIN: "2661", PPIN: 2661, PARCELID: "1107260000001000", ParcelID_GISlink: "11 07 26 0 000 001.000", Owner: "ALBEMARLE CORP/ THE", DeededAcres: 0, CalcAcres: 269, PIN_PID: "2661.00000000, 1107260000001000", acctNum: "1234", TaxYearDue: 2026, TotalTaxDue: 441.1 },
+    "2471": { OBJECTID: 14733, PARCEL_NO: "1107260000001001", PIN: "2471", PPIN: 2471, PARCELID: "1107260000001001", ParcelID_GISlink: "11 07 26 0 000 001.001", Owner: "ALBEMARLE CORP/ THE", DeededAcres: 0, CalcAcres: 74.09, PIN_PID: "2471.00000000, 1107260000001001", acctNum: "1234", TaxYearDue: 2026, TotalTaxDue: 69 },
+  };
+  // The mocked service: what /api/gis/identifier-lookup builds from the
+  // county's features for one printed identifier.
+  const mockLookup = (printed: NonNullable<ReturnType<typeof printedIdentifier>>): CountyLookupHit[] => {
+    const rec = countyRecords[printed.normalized];
+    if (!rec) return [];
+    return [
+      {
+        kind: printed.kind,
+        value: printed.value,
+        parcel_number: String(rec.ParcelID_GISlink),
+        service_label: "Colbert County GIS",
+        service_id: "svc-colbert",
+        identifiers: harvestIdentifiers(rec, { parcelField: "ParcelID_GISlink", identifierFields: mappings }),
+        attributes: rec,
+        overlaps: [],
+      },
+    ];
+  };
+
+  it("reads the same account a year later: 1234, $510.10, two PPIN lines, reconciled, registry pre-labels the entity", () => {
+    const s = colbert2026!;
+    expect(s.statements).toHaveLength(1);
+    const st = s.statements[0];
+    expect(st.extraction.tax_year).toBe(2026);
+    expect(printedIdentifier("Account", "account_number", st.extraction.billing_key as string)?.normalized).toBe("1234");
+    expect(st.extraction.total_tax).toBe(510.1);
+    const lines = linesOf(st);
+    expect(lines.map((l) => [l.identifiers.find((i) => i.kind === "ppin")?.normalized, l.tax_due])).toEqual([
+      ["2471", 69],
+      ["2661", 441.1],
+    ]);
+    expect(reconcile(lines.map((l) => l.tax_due), st.extraction.total_tax as number).reconciled).toBe(true);
+    expect(st.extraction.due_date).toBe("2026-10-01");
+    expect(st.extraction.delinquent_date).toBe("2027-01-01");
+    // Account 1234 was registered when the 2026 statement was confirmed.
+    const registry = [{ county: "Colbert", state: "AL", account_number: "1234", entity_id: "alb", entity_name: "Albemarle Corporation" }];
+    const [g] = groupPages(s.pages, registry);
+    expect(g.entity_id).toBe("alb");
+  });
+
+  it("matches both lines to Cottontown through the county with NO PPINs on file, then directly on the second run", () => {
+    const lines = colbert2026!.statements.flatMap(linesOf).filter((l) => l.line_type === "real_property");
+    expect(lines).toHaveLength(2);
+    let store = [...noPpins];
+    const matchedParcels: string[] = [];
+    for (const line of lines) {
+      // Tier 1, the local store: nothing (production's state).
+      expect(matchLine(line, store, cottontown).parcelId).toBeNull();
+      // Tier 2, the county: resolves the printed PPIN to the parcel by number.
+      const hits = line.identifiers.flatMap(mockLookup);
+      const m = matchLineViaCounty(line, hits, cottontown);
+      expect(m.parcelId).not.toBeNull();
+      expect(m.source).toBe("identifier");
+      expect(m.evidence).toMatch(/^PPIN \d+ resolved via Colbert County GIS to parcel 11 07 26 0 000 001\.00[01] on Cottontown$/);
+      matchedParcels.push(m.parcelId!);
+      // Confirm: the printed PPIN saves (self-learning) and so do the
+      // county's identifiers (as county records).
+      const learnedPrinted = identifiersToLearn(m.parcelId!, line.identifiers, store);
+      expect(learnedPrinted.map((l) => l.kind)).toEqual(["ppin"]);
+      store = [...store, ...learnedPrinted];
+      const learnedCounty = identifiersToLearn(m.parcelId!, m.learn, store);
+      // The PPIN is already learned from the paper; PIN and the account
+      // are new. (The county's run-together PARCEL_NO also lands as a
+      // second parcel-number spelling when its compact key differs from
+      // the spaced form, which is what lets a compact printing match.)
+      const countyKinds = learnedCounty.map((l) => l.kind);
+      expect(countyKinds).toContain("pin");
+      expect(countyKinds).toContain("account_number");
+      expect(countyKinds).not.toContain("ppin");
+      store = [...store, ...learnedCounty];
+    }
+    expect(new Set(matchedParcels)).toEqual(new Set(["c000", "c001"]));
+    expect(matchedParcels[0]).toBe("c001"); // PPIN 2471 is the 74-acre parcel .001
+    // Second run, same paper: the local store answers, kind-aware, no county call.
+    for (const line of lines) {
+      const m = matchLine(line, store, cottontown);
+      expect(m.parcelId).not.toBeNull();
+      expect(m.evidence).toMatch(/^PPIN \d+ matches parcel /);
+    }
+    // And a whole-account bill printing the account beside the PPIN still
+    // resolves to ONE parcel per line, not to every parcel on the account.
+    const withAccount = { ...lines[0], identifiers: [...lines[0].identifiers, printedIdentifier("Account", "account_number", "1234")!] };
+    expect(matchLine(withAccount, store, cottontown).parcelId).toBe("c001");
   });
 });

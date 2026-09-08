@@ -335,7 +335,7 @@ export default async function SettingsPage() {
             </h2>
           </div>
           <AdminGisClient initialServices={services ?? []} embedded />
-          <ParcelIdentifierTools />
+          <ParcelIdentifierTools services={(services ?? []).map((s) => ({ id: s.id, county: s.county, state: s.state, display_name: s.display_name, status: s.status }))} />
         </section>
       ) : null}
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchLayerInfo, GisError } from "@/lib/gisServer";
-import { guessFields, parseLayerUrl } from "@/lib/gis";
+import { guessFields, guessIdentifierFields, parseLayerUrl } from "@/lib/gis";
 
 // Platform admin: fetch an ArcGIS layer's metadata so field mappings can
 // be picked from real field lists instead of guessed.
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
 
   try {
     const info = await fetchLayerInfo(serviceUrl, layer);
+    const guesses = guessFields(info.fields);
     if (info.fields.length === 0) {
       return NextResponse.json(
         { error: "That URL responded but lists no fields; check that it points at a layer (ends in /FeatureServer/0 or similar)." },
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
       geometry_type: info.geometryType,
       max_record_count: info.maxRecordCount,
       fields: info.fields,
-      guesses: guessFields(info.fields),
+      guesses: { ...guesses, identifiers: guessIdentifierFields(info.fields, guesses.parcel) },
     });
   } catch (err) {
     const status = err instanceof GisError ? err.status : 502;

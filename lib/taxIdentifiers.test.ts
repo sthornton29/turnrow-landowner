@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessKind, harvestIdentifiers, identifiersEqual, normalizeIdentifier, printedIdentifier } from "./taxIdentifiers";
+import { attributeValue, guessKind, harvestIdentifiers, identifiersEqual, normalizeIdentifier, printedIdentifier } from "./taxIdentifiers";
 
 describe("identifier normalizer", () => {
   it("treats spaces, dashes, dots, and leading zeros as equivalent", () => {
@@ -81,5 +81,50 @@ describe("harvestIdentifiers from county attributes", () => {
   });
   it("ignores prose, acres, and names", () => {
     expect(harvestIdentifiers({ Owner: "SMITH JOHN 123", Acres: 12.5, LegalDesc: "SEC 31 T4S R7W 120 AC" })).toEqual([]);
+  });
+});
+
+describe("harvestIdentifiers with registry mappings (migration 0042)", () => {
+  // The Colbert County record for Cottontown's 269-acre parcel exactly
+  // as the KCS layer returned it on 2026-09-08 (PPIN is a double there).
+  const colbert = {
+    OBJECTID: 11938,
+    PARCEL_NO: "1107260000001000",
+    PIN: "2661",
+    PPIN: 2661,
+    PARCELID: "1107260000001000",
+    ParcelID_GISlink: "11 07 26 0 000 001.000",
+    Owner: "ALBEMARLE CORP/ THE",
+    DeededAcres: 0,
+    CalcAcres: 269,
+    PIN_PID: "2661.00000000, 1107260000001000",
+    acctNum: "1234",
+    TaxYearDue: 2026,
+    TotalTaxDue: 441.1,
+  };
+  it("stores the mapped PPIN and PIN under their kinds, then sweeps the rest by name", () => {
+    const ids = harvestIdentifiers(colbert, {
+      parcelField: "ParcelID_GISlink",
+      identifierFields: [
+        { field: "PPIN", kind: "ppin" },
+        { field: "PIN", kind: "pin" },
+      ],
+    });
+    const byKind = Object.fromEntries(ids.map((i) => [i.kind, i.value]));
+    expect(byKind.ppin).toBe("2661");
+    expect(byKind.pin).toBe("2661");
+    expect(byKind.parcel_number).toBe("11 07 26 0 000 001.000"); // the parcel field; PARCEL_NO dedupes onto it
+    expect(byKind.account_number).toBe("1234");
+    // The parcel field mirrors by trigger; the composite PIN_PID and the
+    // tax figures are not identifiers.
+    expect(ids.some((i) => i.label === "PIN_PID" || i.label === "TotalTaxDue" || i.label === "TaxYearDue")).toBe(false);
+    // Mapped first, so the statement's PPIN 2661 matches kind-aware.
+    expect(ids[0]).toEqual({ label: "PPIN", kind: "ppin", value: "2661", normalized: "2661" });
+  });
+  it("prints a numeric PPIN without a decimal tail and finds the same PPIN by name when unmapped", () => {
+    expect(attributeValue(2661)).toBe("2661");
+    expect(attributeValue("2661.00000000")).toBe("2661");
+    const unmapped = harvestIdentifiers(colbert, { parcelField: "ParcelID_GISlink" });
+    expect(unmapped.find((i) => i.kind === "ppin")?.value).toBe("2661");
   });
 });
