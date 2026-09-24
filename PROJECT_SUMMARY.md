@@ -1,5 +1,35 @@
 # Turnrow Landowner: Project Summary
 
+2026-09-23 (ABSENTEE-LANDOWNER USABILITY PASS, no schema change). The
+navigation model moved to components/layout/nav.ts (one list of
+sections with a one-line hint each, DESKTOP_NAV groups, MOBILE_GROUPS,
+isActive with the sub-page aliases): the header went from fourteen
+flat pills to Map, Home, Land (Properties, Timber, Assets,
+Maintenance), Money (Leases, Income, Property Taxes, Government
+Payments), Records (Documents, Farm Data, Import), Ask; a group is a
+click-to-open menu (outside click, Escape, and route change close it)
+whose pill names the current page inside it. The phone bar is Map,
+Home, Properties, Leases, More, where More is a bottom sheet listing
+every section plus Settings (nine sections had no phone navigation
+before). lib/help.test.ts and scripts/build-help.mjs read the href
+literals from nav.ts as well. Home (was Dashboard) opens with ONE
+"Needs your attention" card: past-due and upcoming payments (as
+before), active leases ending within 90 days or already ended without
+auto-renew, tenant insurance missing when a hunting lease requires
+it, expired, or expiring within 60 days (one line per tenant on an
+active lease), open maintenance issues with the high-severity count,
+and taxes in the warn or danger tier; each line links to the fixing
+page, red sorts above amber, and an all-clear line shows when nothing
+is pending. A brand-new organization (no properties) gets a four-step
+setup list (county import, entities, leases, tax statements) instead.
+The Properties list no longer carries a Delete button and an entity
+picker on every card (both stayed on the property page); the flat
+view names the holder as text. The Property Taxes "Not on any
+statement" list is grouped by property in collapsible rows with one
+Upload statement link each (81 parcels read as 22 rows for Martin
+Land). Help: getting-started.md gained "Finding your way around" and
+the Home description; taxes.md notes the grouping.
+
 Last updated: 2026-09-08 (LIVE COUNTY IDENTIFIER LOOKUP FOR TAX
 MATCHING, REGISTRY IDENTIFIER FIELD MAPPINGS, PER-COUNTY IDENTIFIER
 BACKFILL, migration 0042. THE DIAGNOSIS: the 2026 Colbert statement

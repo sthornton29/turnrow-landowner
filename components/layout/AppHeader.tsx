@@ -3,24 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import HelpDrawer from "@/components/help/HelpDrawer";
-
-const NAV = [
-  { href: "/map", label: "Map" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/properties", label: "Properties" },
-  { href: "/timber", label: "Timber" },
-  { href: "/assets", label: "Assets" },
-  { href: "/maintenance", label: "Maintenance" },
-  { href: "/leases", label: "Leases" },
-  { href: "/taxes", label: "Property Taxes" },
-  { href: "/income", label: "Income" },
-  { href: "/gov-payments", label: "Gov Payments" },
-  { href: "/documents", label: "Documents" },
-  { href: "/ask", label: "Ask" },
-  { href: "/farm-activity", label: "Farm Data" },
-  { href: "/import", label: "Import" },
-];
+import { DESKTOP_NAV, isActive, isGroup, type NavGroup } from "./nav";
 
 const GEAR_PATH = (
   <>
@@ -33,19 +18,100 @@ const GEAR_PATH = (
   </>
 );
 
+const PILL = "rounded-lg px-3 py-1.5 text-sm font-medium transition ";
+const PILL_ACTIVE = "bg-kelly-50 text-pine-900";
+const PILL_IDLE = "text-gray-600 hover:bg-gray-50 hover:text-gray-900";
+
+// A grouped section of the header: a pill that opens a small menu on
+// click (not hover, so it works the same with a trackpad, a touch
+// screen, and a keyboard). Closes on outside click, Escape, or when the
+// route changes.
+function GroupMenu({ group, pathname }: { group: NavGroup; pathname: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const activeChild = group.items.find((item) => isActive(pathname, item.href));
+
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={PILL + "flex items-center gap-1 " + (activeChild ? PILL_ACTIVE : PILL_IDLE)}
+      >
+        {/* The pill names the page you are on inside the group, so the
+            header still reads "Property Taxes" when that is where you are. */}
+        {activeChild ? activeChild.label : group.label}
+        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-70" aria-hidden>
+          <path
+            fillRule="evenodd"
+            d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+        >
+          <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            {group.label}
+          </p>
+          {group.items.map((item) => {
+            const active = isActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                role="menuitem"
+                className={
+                  "block px-3 py-2 transition " +
+                  (active ? "bg-kelly-50" : "hover:bg-gray-50")
+                }
+              >
+                <span className={"block text-sm font-medium " + (active ? "text-pine-900" : "text-gray-900")}>
+                  {item.label}
+                </span>
+                <span className="block text-xs text-gray-500">{item.hint}</span>
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function AppHeader() {
   const pathname = usePathname();
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-gray-200 bg-white">
-      {/* Full-bleed banner: the logo sits HARD LEFT and the nav takes
-          every pixel that frees up, which is what stops the pills
-          crowding at laptop widths. Deliberate trade: page content
-          stays max-w-5xl centered, so the header no longer aligns with
-          content edges on wide screens. */}
       <div className="flex h-full w-full items-center gap-4 px-4 md:px-6">
         {/* Brand: the horizontal logo stands alone (T mark on mobile).
-            Tapping it goes home, which is the map now. */}
+            Tapping it goes home, which is the map. */}
         <Link href="/map" className="flex shrink-0 items-center">
           <Image
             src="/brand/turnrow_horizontal_green.svg"
@@ -66,27 +132,19 @@ export default function AppHeader() {
         </Link>
 
         <nav className="ml-auto hidden min-w-0 items-center justify-end gap-1 md:flex">
-          {NAV.map((item) => {
-            const active =
-              pathname === item.href ||
-              pathname.startsWith(item.href + "/") ||
-              // Entities is a tab of the Properties section
-              (item.href === "/properties" && pathname.startsWith("/entities"));
-            return (
+          {DESKTOP_NAV.map((entry) =>
+            isGroup(entry) ? (
+              <GroupMenu key={entry.label} group={entry} pathname={pathname} />
+            ) : (
               <Link
-                key={item.href}
-                href={item.href}
-                className={
-                  "rounded-lg px-3 py-1.5 text-sm font-medium transition " +
-                  (active
-                    ? "bg-kelly-50 text-pine-900"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
-                }
+                key={entry.href}
+                href={entry.href}
+                className={PILL + (isActive(pathname, entry.href) ? PILL_ACTIVE : PILL_IDLE)}
               >
-                {item.label}
+                {entry.label}
               </Link>
-            );
-          })}
+            )
+          )}
           <HelpDrawer />
           <Link
             href="/settings"

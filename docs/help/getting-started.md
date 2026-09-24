@@ -17,9 +17,13 @@ Turnrow Landowner keeps the records of land you own and lease out: where the bou
 - **Add what is on the ground.** Timber stands, roads, wells, pivots, bins, and easements are drawn or pinned from the Map's Add button.
 - **Bring in the paperwork.** Leases, tax statements, deeds, surveys, and FSA-156EZ forms can be uploaded and read for you; you review what was read before it saves.
 
-## The Dashboard
+## Finding your way around
 
-The Dashboard shows total acres, property count, ag field and timber acres, and counts of wells, pivots, bins, and buildings, with a satellite thumbnail that opens the map. When land sits in more than one entity, chips across the top scope the numbers to one entity. Alert cards flag things that need attention, such as tenant insurance about to expire or taxes coming due.
+The menu has six stops. **Map** and **Home** stand alone. **Land** holds Properties, Timber, Assets, and Maintenance. **Money** holds Leases, Income, Property Taxes, and Government Payments. **Records** holds Documents, Farm Data, and Import. **Ask** answers questions from your records. Tap a group to see its pages with a one-line description of each; the group's pill names the page you are on. On a phone, the bottom bar has Map, Home, Properties, Leases, and **More**, which opens every section and Settings.
+
+## Home
+
+Home opens with **Needs your attention**: payments past due or due soon, leases ending within 90 days (or ended but still marked active), tenant insurance certificates expired or expiring within 60 days, and open maintenance issues. Each line links to the page that fixes it, and when nothing is pending the card says so. Below that come this year's property taxes (parcels covered, what is unpaid, the delinquent date), harvest progress when your tenant shares field data, then total acres, property count, ag field and timber acres, and counts of wells, pivots, bins, and buildings, with a satellite thumbnail that opens the map. When land sits in more than one entity, chips scope the numbers to one entity. A brand-new organization sees a four-step setup list instead.
 
 ## Getting help
 

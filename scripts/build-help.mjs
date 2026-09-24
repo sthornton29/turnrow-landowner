@@ -7,8 +7,8 @@
 //    2. lib/helpContent.generated.ts      the same content as a typed module
 //       bundled into the app (help drawer, /help, /api/support-chat), so
 //       nothing is fetched at runtime;
-//    3. COVERAGE CHECK: every route in components/layout/AppHeader.tsx and
-//       components/layout/MobileNav.tsx must resolve to a topic (longest
+//    3. COVERAGE CHECK: every route in components/layout/nav.ts (plus
+//       AppHeader.tsx and MobileNav.tsx) must resolve to a topic (longest
 //       route-prefix match). A page without help FAILS the build; the
 //       vitest suite (lib/help.test.ts) runs the same check.
 //
@@ -77,6 +77,7 @@ for (const t of topics) {
 
 // ---- Coverage: every nav route must resolve to a topic. ----
 const navSources = [
+  join(root, "components", "layout", "nav.ts"),
   join(root, "components", "layout", "AppHeader.tsx"),
   join(root, "components", "layout", "MobileNav.tsx"),
 ];

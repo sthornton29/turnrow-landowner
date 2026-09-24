@@ -12,7 +12,7 @@ import {
 } from "@/lib/leaseLogic";
 import type { MultiPolygon } from "geojson";
 
-export const metadata = { title: "Dashboard" };
+export const metadata = { title: "Home" };
 
 // Static satellite thumbnail centered on the organization's land, via the
 // Mapbox Static Images API. Zoom is estimated from the bounding box span.
@@ -52,6 +52,8 @@ export default async function DashboardPage({
     { data: taxPayments },
     { data: taxLines },
     { data: farmData },
+    { data: tenants },
+    { data: openIssues },
   ] = await Promise.all([
     supabase
       .from("organizations")
@@ -74,7 +76,9 @@ export default async function DashboardPage({
       .select("id, lease_id, timber_sale_id, label, due_date, expected_amount")
       .order("due_date"),
     supabase.from("payments").select("expected_payment_id, amount"),
-    supabase.from("leases").select("id, name"),
+    supabase
+      .from("leases")
+      .select("id, name, status, lease_type, end_date, auto_renew, tenant_id, terms"),
     supabase.from("timber_sales").select("id, sale_name"),
     supabase
       .from("tax_statements")
@@ -90,6 +94,11 @@ export default async function DashboardPage({
       .from("farm_field_data")
       .select("planted_acres, harvested_acres, harvest_status")
       .eq("crop_year", new Date().getFullYear()),
+    supabase.from("tenants").select("id, name, insurance_on_file, insurance_expires"),
+    supabase
+      .from("maintenance_issues")
+      .select("id, severity")
+      .eq("status", "open"),
   ]);
 
   // Payments needing attention: past due, or due within 60 days, not yet paid.
@@ -120,6 +129,88 @@ export default async function DashboardPage({
           new Date(e.due_date + "T00:00:00") <= horizon)
     )
     .slice(0, 8);
+
+  // Everything else an absentee owner would want flagged without opening
+  // each page: leases running out, tenant insurance lapsing, and open
+  // problems on the ground. Each alert links to the page that fixes it.
+  type Alert = { key: string; href: string; title: string; detail: string; tone: "red" | "amber" };
+  const alerts: Alert[] = [];
+  const today = now.toISOString().slice(0, 10);
+  const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const in60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const activeLeases = (leases ?? []).filter((l) => l.status === "active");
+  for (const l of activeLeases) {
+    if (!l.end_date || l.auto_renew) continue;
+    if (l.end_date < today) {
+      alerts.push({
+        key: `lease-ended-${l.id}`,
+        href: `/leases/${l.id}`,
+        title: l.name,
+        detail: `Lease ended ${l.end_date} and is still marked active. Renew it or mark it expired.`,
+        tone: "red",
+      });
+    } else if (l.end_date <= in90) {
+      alerts.push({
+        key: `lease-ending-${l.id}`,
+        href: `/leases/${l.id}`,
+        title: l.name,
+        detail: `Lease ends ${l.end_date}. Time to talk renewal with your tenant.`,
+        tone: "amber",
+      });
+    }
+  }
+  const tenantById = new Map((tenants ?? []).map((t) => [t.id, t]));
+  const flaggedTenants = new Set<string>();
+  for (const l of activeLeases) {
+    const t = tenantById.get(l.tenant_id);
+    if (!t || flaggedTenants.has(t.id)) continue;
+    const terms = (l.terms ?? {}) as { insurance_required?: boolean };
+    const required = l.lease_type === "hunting" && terms.insurance_required === true;
+    if (required && !t.insurance_on_file) {
+      flaggedTenants.add(t.id);
+      alerts.push({
+        key: `ins-none-${t.id}`,
+        href: `/tenants/${t.id}`,
+        title: t.name,
+        detail: `${l.name} requires insurance but no certificate is on file.`,
+        tone: "red",
+      });
+    } else if (t.insurance_on_file && t.insurance_expires && t.insurance_expires < today) {
+      flaggedTenants.add(t.id);
+      alerts.push({
+        key: `ins-expired-${t.id}`,
+        href: `/tenants/${t.id}`,
+        title: t.name,
+        detail: `Insurance certificate expired ${t.insurance_expires}. Ask for a current one.`,
+        tone: required ? "red" : "amber",
+      });
+    } else if (t.insurance_on_file && t.insurance_expires && t.insurance_expires <= in60) {
+      flaggedTenants.add(t.id);
+      alerts.push({
+        key: `ins-soon-${t.id}`,
+        href: `/tenants/${t.id}`,
+        title: t.name,
+        detail: `Insurance certificate expires ${t.insurance_expires}.`,
+        tone: "amber",
+      });
+    }
+  }
+  const openCount = (openIssues ?? []).length;
+  const highCount = (openIssues ?? []).filter((i) => i.severity === "high").length;
+  if (openCount > 0) {
+    alerts.push({
+      key: "maintenance",
+      href: "/maintenance",
+      title: "Maintenance",
+      detail:
+        `${formatNumber(openCount)} open issue${openCount === 1 ? "" : "s"} on the land` +
+        (highCount > 0 ? ` (${formatNumber(highCount)} high severity)` : "") +
+        ".",
+      tone: highCount > 0 ? "red" : "amber",
+    });
+  }
+  alerts.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === "red" ? -1 : 1));
+  const setupStage = (properties ?? []).length === 0;
 
   // Entity filter for the stat tiles (only shown when the org holds land
   // in more than one entity). Alerts and cards below stay org-wide.
@@ -190,6 +281,22 @@ export default async function DashboardPage({
     const delinquent = new Date(nearestDelinquent + "T00:00:00");
     const daysLeft = Math.ceil((delinquent.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
     taxTier = daysLeft < 0 ? "danger" : daysLeft <= 60 ? "warn" : "ok";
+  }
+  // Taxes near or past delinquency join the attention list too (the
+  // card below carries the detail); otherwise the all-clear line could
+  // sit above a red tax card.
+  if (taxTier !== "ok" && nearestDelinquent) {
+    alerts.push({
+      key: "taxes",
+      href: "/taxes",
+      title: `${taxYear} property taxes`,
+      detail:
+        taxTier === "danger"
+          ? `${formatDollars(taxUnpaidTotal)} unpaid and delinquent since ${nearestDelinquent}.`
+          : `${formatDollars(taxUnpaidTotal)} unpaid, delinquent ${nearestDelinquent}.`,
+      tone: taxTier === "danger" ? "red" : "amber",
+    });
+    alerts.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === "red" ? -1 : 1));
   }
   const taxCardBorder =
     taxTier === "danger"
@@ -264,12 +371,27 @@ export default async function DashboardPage({
         </p>
       </div>
 
-      {attention.length > 0 ? (
+      {attention.length > 0 || alerts.length > 0 ? (
         <section className="rounded-xl border border-amber-200 bg-white">
           <h2 className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-base font-semibold text-amber-900">
-            Payments needing attention
+            Needs your attention
           </h2>
           <ul className="divide-y divide-gray-100">
+            {alerts.map((a) => (
+              <li key={a.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-4 py-2.5 text-sm">
+                <span
+                  aria-hidden
+                  className={
+                    "inline-block h-2 w-2 shrink-0 rounded-full " +
+                    (a.tone === "red" ? "bg-red-500" : "bg-amber-400")
+                  }
+                />
+                <Link href={a.href} className="font-medium text-gray-900 hover:underline">
+                  {a.title}
+                </Link>
+                <span className="text-gray-600">{a.detail}</span>
+              </li>
+            ))}
             {attention.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
                 <Link
@@ -297,6 +419,11 @@ export default async function DashboardPage({
             ))}
           </ul>
         </section>
+      ) : !setupStage ? (
+        <p className="rounded-xl border border-kelly-100 bg-kelly-50 px-4 py-3 text-sm font-medium text-pine-900">
+          Nothing needs your attention right now. Payments, leases, tenant insurance, taxes, and
+          maintenance are all in order.
+        </p>
       ) : null}
 
       {showHarvestCard ? (
@@ -411,6 +538,50 @@ export default async function DashboardPage({
           <span className="text-kelly-600">&rarr;</span>
         </div>
       </Link>
+
+      {setupStage ? (
+        <section className="rounded-xl border border-kelly-100 bg-white">
+          <h2 className="rounded-t-xl border-b border-kelly-100 bg-kelly-50 px-4 py-3 text-base font-semibold text-pine-900">
+            Set up your land in four steps
+          </h2>
+          <ol className="divide-y divide-gray-100">
+            {[
+              {
+                href: "/import/county",
+                title: "Bring in your parcels from county records",
+                detail: "Search by owner name and the boundaries arrive already drawn. No files needed.",
+              },
+              {
+                href: "/entities",
+                title: "Name who holds the land",
+                detail: "An LLC, a trust, your own name. Every page can then be filtered by owner.",
+              },
+              {
+                href: "/leases/new",
+                title: "Add your leases",
+                detail: "Upload the lease and it is read for you, or enter the terms by hand. Payments due follow.",
+              },
+              {
+                href: "/taxes/upload",
+                title: "Upload this year's tax statements",
+                detail: "Each parcel is matched to its statement so nothing quietly goes delinquent.",
+              },
+            ].map((step, i) => (
+              <li key={step.href}>
+                <Link href={step.href} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-50">
+                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-kelly-500 text-xs font-semibold text-white">
+                    {i + 1}
+                  </span>
+                  <span>
+                    <span className="block text-sm font-medium text-gray-900">{step.title}</span>
+                    <span className="block text-sm text-gray-500">{step.detail}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       <AskEntryCard />
 

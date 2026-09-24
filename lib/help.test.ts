@@ -46,7 +46,7 @@ function loadTopics(): HelpTopic[] {
 
 function navRoutes(): string[] {
   const routes = new Set<string>();
-  for (const file of ["AppHeader.tsx", "MobileNav.tsx"]) {
+  for (const file of ["nav.ts", "AppHeader.tsx", "MobileNav.tsx"]) {
     const src = readFileSync(join(root, "components", "layout", file), "utf8");
     for (const m of src.matchAll(/href:\s*"([^"]+)"/g)) routes.add(m[1]);
   }

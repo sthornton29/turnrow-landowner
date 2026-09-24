@@ -158,6 +158,21 @@ export default function TaxStatusClient({
     visibleLines.filter((l) => l.line_type === "real_property" && l.parcel_id).map((l) => l.parcel_id!)
   );
   const missingParcels = visibleParcels.filter((p) => !coveredParcelIds.has(p.id));
+  // The missing list grouped by property (name order), so 80 parcels
+  // read as 20 properties, each with one upload link.
+  const missingByProperty = (() => {
+    const groups = new Map<string, { key: string; name: string; county: string | null; parcels: typeof missingParcels }>();
+    for (const p of missingParcels) {
+      const key = p.property_id ?? "none";
+      let g = groups.get(key);
+      if (!g) {
+        g = { key, name: propertyName.get(p.property_id) ?? "No property", county: p.county ?? null, parcels: [] };
+        groups.set(key, g);
+      }
+      g.parcels.push(p);
+    }
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
+  })();
   // Unmatched = real-property lines with no parcel (personal property
   // never needs one).
   const unmatchedLines = visibleLines.filter((l) => l.line_type === "real_property" && !l.parcel_id);
@@ -658,19 +673,40 @@ export default function TaxStatusClient({
           <h2 className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-base font-semibold text-amber-900">
             Not on any {year} statement: {formatNumber(missingParcels.length)} parcel{missingParcels.length === 1 ? "" : "s"}
           </h2>
+          <p className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+            Grouped by property. A statement usually covers every parcel on a property, so one upload
+            clears a whole row. Expand a property to see its parcel numbers.
+          </p>
           <ul className="divide-y divide-gray-100">
-            {missingParcels.map((p) => (
-              <li key={p.id} className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
-                <span className="font-medium text-gray-900">Parcel {p.parcel_number}</span>
-                <span className="text-gray-500">
-                  {propertyName.get(p.property_id) ?? ""}
-                  {p.county ? ` · ${p.county}` : ""}
-                </span>
-                {canUpload ? (
-                  <Link href="/taxes/upload" className="ml-auto text-sm font-medium text-kelly-700 hover:underline">
-                    Upload statement
-                  </Link>
-                ) : null}
+            {missingByProperty.map((g) => (
+              <li key={g.key}>
+                <details className="group">
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-4 py-2.5 text-sm hover:bg-gray-50">
+                    <span className="text-gray-400 transition group-open:rotate-90">&#9656;</span>
+                    <span className="font-medium text-gray-900">{g.name}</span>
+                    <span className="text-gray-500">
+                      {formatNumber(g.parcels.length)} parcel{g.parcels.length === 1 ? "" : "s"}
+                      {g.county ? ` · ${g.county}` : ""}
+                    </span>
+                    {canUpload ? (
+                      <Link
+                        href="/taxes/upload"
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-auto text-sm font-medium text-kelly-700 hover:underline"
+                      >
+                        Upload statement
+                      </Link>
+                    ) : null}
+                  </summary>
+                  <ul className="bg-gray-50 px-4 pb-2 pl-10 text-sm text-gray-700">
+                    {g.parcels.map((p) => (
+                      <li key={p.id} className="py-1">
+                        Parcel {p.parcel_number}
+                        {p.county && p.county !== g.county ? ` · ${p.county}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               </li>
             ))}
           </ul>

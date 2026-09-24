@@ -8,7 +8,7 @@ keywords: property tax, statement, upload, account, parcel match, PPIN, identifi
 ---
 ## What this page is for
 
-Track every county tax statement and what you paid on it, and make sure every parcel is covered each year. A missing statement is how a parcel quietly goes delinquent.
+Track every county tax statement and what you paid on it, and make sure every parcel is covered each year. A missing statement is how a parcel quietly goes delinquent. Parcels not yet on a statement are listed by property (expand one to see its parcel numbers), since one statement usually covers a whole property and one upload clears the row.
 
 ## Statements and their lines
 

@@ -2,8 +2,6 @@ import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatNumber } from "@/lib/format";
 import { ENTITY_TYPE_LABELS, NO_ENTITY } from "@/lib/entities";
-import EntityPicker from "@/components/entities/EntityPicker";
-import DeletePropertyButton from "@/components/properties/DeletePropertyButton";
 import PropertySectionTabs from "@/components/entities/PropertySectionTabs";
 import type { LandEntity } from "@/types/db";
 import { createProperty } from "./actions";
@@ -15,7 +13,7 @@ export default async function PropertiesPage({
 }: {
   searchParams: Promise<{ view?: string }>;
 }) {
-  const { supabase, profile } = await requireOrg();
+  const { supabase } = await requireOrg();
   const { view } = await searchParams;
 
   const [
@@ -23,10 +21,6 @@ export default async function PropertiesPage({
     { data: parcels },
     { data: fields },
     { data: entities },
-    { data: stands },
-    { data: roads },
-    { data: assets },
-    { data: leaseLands },
   ] = await Promise.all([
     supabase
       .from("properties")
@@ -35,10 +29,6 @@ export default async function PropertiesPage({
     supabase.from("parcels").select("id, property_id"),
     supabase.from("fields").select("id, property_id, acres"),
     supabase.from("entities").select("*").order("name"),
-    supabase.from("timber_stands").select("id, property_id"),
-    supabase.from("roads").select("id, property_id"),
-    supabase.from("assets").select("id, property_id"),
-    supabase.from("lease_lands").select("id, property_id"),
   ]);
 
   const parcelCount = new Map<string, number>();
@@ -55,36 +45,10 @@ export default async function PropertiesPage({
     );
   }
 
-  // What deleting each property takes with it (for the confirmation).
-  const countBy = (rows: Array<{ property_id: string | null }> | null) => {
-    const map = new Map<string, number>();
-    for (const row of rows ?? []) {
-      if (!row.property_id) continue;
-      map.set(row.property_id, (map.get(row.property_id) ?? 0) + 1);
-    }
-    return map;
-  };
-  const standCount = countBy(stands);
-  const roadCount = countBy(roads);
-  const assetCount = countBy(assets);
-  const leaseLinkCount = countBy(leaseLands);
-  const cascadeSummaryOf = (propertyId: string) => {
-    const parts = [
-      [parcelCount.get(propertyId) ?? 0, "parcel"],
-      [fieldCount.get(propertyId) ?? 0, "field"],
-      [standCount.get(propertyId) ?? 0, "timber stand"],
-      [roadCount.get(propertyId) ?? 0, "road"],
-      [assetCount.get(propertyId) ?? 0, "asset"],
-    ] as Array<[number, string]>;
-    return parts
-      .filter(([count]) => count > 0)
-      .map(([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`)
-      .join(", ");
-  };
-
   const totalAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const entityList = (entities ?? []) as LandEntity[];
   const hasEntities = entityList.length > 0;
+  const entityName = new Map(entityList.map((e) => [e.id, e.name]));
   // Grouped by entity is the default once entities exist; ?view=flat keeps
   // the plain list one tap away.
   const grouped = hasEntities && view !== "flat";
@@ -116,23 +80,25 @@ export default async function PropertiesPage({
             : ""}
         </p>
       </Link>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-500">
-        <span className="text-xs">Held by</span>
-        <EntityPicker
-          orgId={profile.organization_id!}
-          propertyId={p.id}
-          entities={entityList}
-          value={p.entity_id}
-        />
-        <span className="ml-auto">
-          <DeletePropertyButton
-            propertyId={p.id}
-            propertyName={p.name}
-            cascadeSummary={cascadeSummaryOf(p.id)}
-            leaseLinkCount={leaseLinkCount.get(p.id) ?? 0}
-          />
-        </span>
-      </div>
+      {/* The list is for finding and reading. Changing who holds a
+          property and deleting it live on the property page, so a stray
+          tap here cannot reassign or remove a tract. In the grouped view
+          the entity is the section heading; the flat view names it. */}
+      {!grouped && hasEntities ? (
+        <p className="mt-1 text-xs text-gray-500">
+          Held by{" "}
+          {p.entity_id ? (
+            <Link
+              href={`/entities/${p.entity_id}`}
+              className="font-medium text-gray-700 hover:underline"
+            >
+              {entityName.get(p.entity_id) ?? "entity"}
+            </Link>
+          ) : (
+            <span className="text-gray-500">no entity yet</span>
+          )}
+        </p>
+      ) : null}
     </li>
   );
 
