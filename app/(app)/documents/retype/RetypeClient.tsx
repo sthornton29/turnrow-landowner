@@ -17,6 +17,7 @@ const ENTITY_LABEL: Record<string, string> = {
   field: "Ag field",
   pasture: "Pasture/Grassland",
   wetland: "Wetland",
+  pollinator_habitat: "Pollinator habitat",
   timber_stand: "Timber stand",
   road: "Road",
   easement: "Easement",

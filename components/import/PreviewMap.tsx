@@ -20,6 +20,7 @@ const COLOR: Record<EntityType, string> = {
   field: "#39b54a",
   pasture: "#d2b48c",
   wetland: "#6487a8",
+  pollinator_habitat: "#d4699c",
   timber_stand: "#a7f3d0",
   road: "#e5e7eb",
   easement: "#dc2626",

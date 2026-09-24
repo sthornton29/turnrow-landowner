@@ -4,7 +4,7 @@ route: /map
 group: Map
 order: 1
 updated: 2026-08-30
-keywords: map, satellite, layers, legend, filter, hide, hidden, parcels, ag fields, pastures, grassland, cemeteries, wetlands, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
+keywords: map, satellite, layers, legend, filter, hide, hidden, parcels, ag fields, pastures, grassland, cemeteries, wetlands, pollinator habitat, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
 ---
 ## What this page is for
 
@@ -12,7 +12,7 @@ The Map is the home page: your properties on satellite imagery with every bounda
 
 ## Layers and legend
 
-The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Field names** for every other name label (ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, asset names). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, pollinator habitats, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Field names** for every other name label (ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, asset names). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
 
 - **Cemeteries** are a muted violet: a traced plot, or a "C" marker for a single pin.
 
@@ -24,7 +24,7 @@ The Layers box (top left) turns each kind of thing on or off: properties, parcel
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. On an ag field, pasture, timber stand, or anything else that sits on a property, the panel's Property row is a link: tap the name to open that property's own panel (acres, entity, tenant activity, its tools), or **Page** beside it to go straight to the property page. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). A pollinator habitat's panel adds **Add photos**, which opens the camera on a phone and files the pictures on the habitat's page. Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
 
 ## Other controls
 

@@ -22,6 +22,7 @@ export const ITEM_TYPE_LABELS: Record<EntityType, string> = {
   field: LAND_TYPE_LABELS.field.plural,
   pasture: LAND_TYPE_LABELS.pasture.plural,
   wetland: LAND_TYPE_LABELS.wetland.plural,
+  pollinator_habitat: LAND_TYPE_LABELS.pollinator_habitat.plural,
   timber_stand: LAND_TYPE_LABELS.timber_stand.plural,
   road: LAND_TYPE_LABELS.road.plural,
   easement: LAND_TYPE_LABELS.easement.plural,

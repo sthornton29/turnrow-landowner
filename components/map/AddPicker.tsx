@@ -20,6 +20,7 @@ import {
   PASTURE_TAN,
   PINE,
   PIVOT_BLUE,
+  POLLINATOR_ROSE,
   WETLAND_BLUE,
 } from "./drawColors";
 
@@ -28,7 +29,7 @@ import {
 // the crosshair pin), the draft color, and the save form's inline
 // fields all follow it.
 export type DrawType =
-  | { kind: "boundary"; entityType: "property" | "parcel" | "field" | "pasture" | "wetland" | "timber_stand" | "cemetery" }
+  | { kind: "boundary"; entityType: "property" | "parcel" | "field" | "pasture" | "wetland" | "pollinator_habitat" | "timber_stand" | "cemetery" }
   | { kind: "boundary"; entityType: "easement"; shape: "polygon" }
   | { kind: "line"; entityType: "easement"; shape: "line" }
   | { kind: "line"; entityType: "road" | "underground_pipe" | "fence" }
@@ -85,6 +86,8 @@ const SECTIONS: Section[] = [
         pick: { t: "draw", type: { kind: "boundary", entityType: "pasture" } } },
       { key: "wetland", label: "Wetland", hint: "Open marsh, sloughs", swatch: { color: WETLAND_BLUE, kind: "fill" },
         pick: { t: "draw", type: { kind: "boundary", entityType: "wetland" } } },
+      { key: "pollinator_habitat", label: "Pollinator habitat", hint: "Wildflowers and native grasses for bees and butterflies", swatch: { color: POLLINATOR_ROSE, kind: "fill" },
+        pick: { t: "draw", type: { kind: "boundary", entityType: "pollinator_habitat" } } },
       { key: "cemetery", label: "Cemetery", hint: "Family or church plot; draw the plot or drop a pin", swatch: { color: CEMETERY_VIOLET, kind: "fill" },
         pick: { t: "sub", step: "cemetery" } },
     ],

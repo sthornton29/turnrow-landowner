@@ -131,7 +131,7 @@ const listProperties: ToolImpl = async (supabase) => {
 const landSummary: ToolImpl = async (supabase, input) => {
   const county = typeof input.county === "string" ? input.county.trim().toLowerCase() : null;
   const entityFilter = typeof input.entity === "string" ? input.entity.trim().toLowerCase() : null;
-  const [props, entities, fields, pastures, wetlands, stands, parcels] = await Promise.all([
+  const [props, entities, fields, pastures, wetlands, habitats, stands, parcels] = await Promise.all([
     fetchProperties(supabase),
     fetchEntities(supabase),
     all<{ id: string; property_id: string; acres: number | null; irrigated_acres: number | null }>(
@@ -142,6 +142,9 @@ const landSummary: ToolImpl = async (supabase, input) => {
     ),
     all<{ id: string; property_id: string; acres: number | null }>(
       supabase.from("wetlands").select("id, property_id, acres")
+    ),
+    all<{ id: string; property_id: string; acres: number | null }>(
+      supabase.from("pollinator_habitats").select("id, property_id, acres")
     ),
     all<{ id: string; property_id: string; stand_type: string | null; acres: number | null }>(
       supabase.from("timber_stands").select("id, property_id, stand_type, acres")
@@ -189,6 +192,7 @@ const landSummary: ToolImpl = async (supabase, input) => {
       dryland_acres: r1(Math.max(fieldAcres - irrigated, 0)),
       pasture_acres: r1(sum(pastures, p.id)),
       wetland_acres: r1(sum(wetlands, p.id)),
+      pollinator_habitat_acres: r1(sum(habitats, p.id)),
       timber_acres: r1(sum(stands, p.id)),
       timber_by_type: Object.fromEntries(
         Object.entries(timberByType).map(([k, v]) => [STAND_TYPE_LABELS[k] ?? k, v])
@@ -208,13 +212,14 @@ const landSummary: ToolImpl = async (supabase, input) => {
   return {
     sources: [
       describeProperties(selected) + (county || entityFilter ? " (filtered)" : ""),
-      "ag field, pasture, wetland, and timber stand boundaries",
+      "ag field, pasture, wetland, pollinator habitat, and timber stand boundaries",
     ],
     total_acres: r1(selected.reduce((a, p) => a + num(p.acres), 0)),
     ag_field_acres: r1(sum(fields)),
     irrigated_acres: r1(fields.filter((f) => ids.has(f.property_id)).reduce((a, f) => a + num(f.irrigated_acres), 0)),
     pasture_acres: r1(sum(pastures)),
     wetland_acres: r1(sum(wetlands)),
+    pollinator_habitat_acres: r1(sum(habitats)),
     timber_acres: r1(sum(stands)),
     by_county: byCounty,
     by_entity: byEntity,
@@ -665,7 +670,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "land_summary",
-    description: "Acres by property, county, and entity with the land breakdown: ag fields (irrigated vs dryland), pastures, wetlands, timber by stand type, parcels and deeded acres. Same numbers as the dashboard and property pages.",
+    description: "Acres by property, county, and entity with the land breakdown: ag fields (irrigated vs dryland), pastures, wetlands, pollinator habitats, timber by stand type, parcels and deeded acres. Same numbers as the dashboard and property pages.",
     input_schema: {
       type: "object",
       properties: {

@@ -4,11 +4,11 @@ route: /map
 group: Map
 order: 2
 updated: 2026-08-29
-keywords: draw, boundary, polygon, line, add, filter, property boundary, parcel, ag field, timber stand, pasture, grassland, cemetery, wetland, road, fence, pipe, easement, maintenance issue, wash, sinkhole, terrace, washout, multi-area, add area, cut area, discard shape, cancel, escape, edit boundary, split
+keywords: draw, boundary, polygon, line, add, filter, property boundary, parcel, ag field, timber stand, pasture, grassland, cemetery, wetland, pollinator habitat, road, fence, pipe, easement, maintenance issue, wash, sinkhole, terrace, washout, multi-area, add area, cut area, discard shape, cancel, escape, edit boundary, split
 ---
 ## Pick first, then draw
 
-Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Pollinator habitat, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
 
 ## Drawing a shape
 
@@ -24,6 +24,10 @@ After the first area is finished, the save form offers **+ Add area** and **Cut 
 ## Cemeteries
 
 A family or church plot is usually small. Trace its edge when you know it (the plot shows acres like any land type) or drop a single pin on the marker. Either way it gets its own violet look and a "C" marker so it stays findable when zoomed out.
+
+## Pollinator habitats
+
+A pollinator habitat is wildflowers and native grasses planted or managed for bees, butterflies, and other pollinators: a CRP CP-42 planting, an EQIP practice, a monarch waystation, a field border, or a corner taken out of production. Draw it like any other land area; its record keeps the program, the year it went in, and the seed mix. Photos are the point of the record: the map panel and the habitat's page both have an **Add photos** button that opens the phone's camera, so you can shoot the stand each season, and the pictures collect in the gallery on its page.
 
 ## Maintenance issues
 

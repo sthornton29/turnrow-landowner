@@ -11,7 +11,7 @@ export const metadata = { title: "Documents" };
 export default async function DocumentsPage() {
   const { supabase, profile } = await requireOrg();
   const [
-    docs, properties, parcels, fields, pastures, wetlands, stands, roads,
+    docs, properties, parcels, fields, pastures, wetlands, habitats, stands, roads,
     easements, assets, leases, sales, entities, tenants, taxStatements, links,
     cemeteries, issues,
   ] = await Promise.all([
@@ -21,6 +21,7 @@ export default async function DocumentsPage() {
     supabase.from("fields").select("id, name, property_id"),
     supabase.from("pastures").select("id, name, property_id"),
     supabase.from("wetlands").select("id, name, property_id"),
+    supabase.from("pollinator_habitats").select("id, name, property_id"),
     supabase.from("timber_stands").select("id, name, property_id"),
     supabase.from("roads").select("id, name, property_id"),
     supabase.from("easements").select("id, name, property_id"),
@@ -65,6 +66,7 @@ export default async function DocumentsPage() {
   push("field", fields.data as Row[], (r) => `Ag field ${r.name ?? ""}`, (r) => `/fields/${r.id}`);
   push("pasture", pastures.data as Row[], (r) => `Pasture/Grassland ${r.name ?? ""}`, (r) => `/pastures/${r.id}`);
   push("wetland", wetlands.data as Row[], (r) => `Wetland ${r.name ?? ""}`, (r) => `/wetlands/${r.id}`);
+  push("pollinator_habitat", habitats.data as Row[], (r) => `Pollinator habitat ${r.name ?? ""}`, (r) => `/pollinator-habitats/${r.id}`);
   push("timber_stand", stands.data as Row[], (r) => `Stand ${r.name ?? ""}`, (r) => `/timber/${r.id}`);
   push("road", roads.data as Row[], (r) => `Road ${r.name ?? ""}`, (r) => `/roads/${r.id}`);
   push("easement", easements.data as Row[], (r) => `Easement ${r.name ?? ""}`, (r) => `/easements/${r.id}`);

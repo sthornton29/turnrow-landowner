@@ -11,6 +11,7 @@ import type {
   TimberStandGeo,
   EasementGeo,
   WetlandGeo,
+  PollinatorHabitatGeo,
 } from "@/types/db";
 
 export type MapMode = "view" | "draw" | "edit" | "place" | "split" | "pivot" | "circle";
@@ -26,6 +27,7 @@ export type AnyGeoRow =
   | FieldGeo
   | PastureGeo
   | WetlandGeo
+  | PollinatorHabitatGeo
   | TimberStandGeo
   | RoadGeo
   | EasementGeo
@@ -42,6 +44,7 @@ export interface LayerVisibility {
   field: boolean;
   pasture: boolean;
   wetland: boolean;
+  pollinator_habitat: boolean;
   timber_stand: boolean;
   road: boolean;
   easement: boolean;

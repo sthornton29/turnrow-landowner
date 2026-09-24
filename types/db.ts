@@ -131,6 +131,25 @@ export interface WetlandGeo {
   updated_at: string;
 }
 
+// Pollinator habitat (migration 0043): wildflower and native-grass
+// plantings for bees and butterflies (CRP CP-42, EQIP, a monarch
+// waystation, a field border). Polygon-only; photos attach like any
+// other land type.
+export interface PollinatorHabitatGeo {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  name: string;
+  notes: string | null;
+  program: string | null;
+  year_established: number | null;
+  seed_mix: string | null;
+  acres: number | null;
+  boundary_geojson: MultiPolygon | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type AssetType =
   | "well"
   | "irrigation_pivot"
@@ -331,6 +350,7 @@ export type EntityType =
   | "field"
   | "pasture"
   | "wetland"
+  | "pollinator_habitat"
   | "timber_stand"
   | "road"
   | "easement"

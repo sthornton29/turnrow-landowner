@@ -61,6 +61,7 @@ async function primaryAttachment(
     field: { table: "fields", prefix: "Ag field", href: "/fields" },
     pasture: { table: "pastures", prefix: "Pasture/Grassland", href: "/pastures" },
     wetland: { table: "wetlands", prefix: "Wetland", href: "/wetlands" },
+    pollinator_habitat: { table: "pollinator_habitats", prefix: "Pollinator habitat", href: "/pollinator-habitats" },
     timber_stand: { table: "timber_stands", prefix: "Stand", href: "/timber" },
     road: { table: "roads", prefix: "Road", href: "/roads" },
     easement: { table: "easements", prefix: "Easement", href: "/easements" },

@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-09-24, version 0.1.0, build 4b37ac5. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-09-24, version 0.1.0, build 39b9870. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -355,7 +355,7 @@ Upload boundary files you already have: a zipped shapefile from a surveyor, a KM
 
 ## How to use it
 
-- Drop the file in. Polygons can become a property, parcel, ag field, pasture/grassland, wetland, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
+- Drop the file in. Polygons can become a property, parcel, ag field, pasture/grassland, wetland, pollinator habitat, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
 - Each row suggests the property that contains it (a "Suggested from location" chip). Confirm or change it. Properties in the same batch save first so other rows can attach to them.
 - Rows that fail are skipped and listed so you can fix and retry them.
 
@@ -500,7 +500,7 @@ The Map is the home page: your properties on satellite imagery with every bounda
 
 ## Layers and legend
 
-The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Field names** for every other name label (ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, asset names). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
+The Layers box (top left) turns each kind of thing on or off: properties, parcels, ag fields, pastures/grassland, wetlands, pollinator habitats, timber, cemeteries, roads, easements, and assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Field names** for every other name label (ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, asset names). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
 
 - **Cemeteries** are a muted violet: a traced plot, or a "C" marker for a single pin.
 
@@ -512,7 +512,7 @@ The Layers box (top left) turns each kind of thing on or off: properties, parcel
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. On an ag field, pasture, timber stand, or anything else that sits on a property, the panel's Property row is a link: tap the name to open that property's own panel (acres, entity, tenant activity, its tools), or **Page** beside it to go straight to the property page. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). A pollinator habitat's panel adds **Add photos**, which opens the camera on a phone and files the pictures on the habitat's page. Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
 
 ## Other controls
 
@@ -532,7 +532,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 
 ## Pick first, then draw
 
-Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Pollinator habitat, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
 
 ## Drawing a shape
 
@@ -548,6 +548,10 @@ After the first area is finished, the save form offers **+ Add area** and **Cut 
 ## Cemeteries
 
 A family or church plot is usually small. Trace its edge when you know it (the plot shows acres like any land type) or drop a single pin on the marker. Either way it gets its own violet look and a "C" marker so it stays findable when zoomed out.
+
+## Pollinator habitats
+
+A pollinator habitat is wildflowers and native grasses planted or managed for bees, butterflies, and other pollinators: a CRP CP-42 planting, an EQIP practice, a monarch waystation, a field border, or a corner taken out of production. Draw it like any other land area; its record keeps the program, the year it went in, and the seed mix. Photos are the point of the record: the map panel and the habitat's page both have an **Add photos** button that opens the phone's camera, so you can shoot the stand each season, and the pictures collect in the gallery on its page.
 
 ## Maintenance issues
 
@@ -648,7 +652,7 @@ Neighbor parcels are drawn live from public county records and are never saved t
 
 A **property** is a piece of land you think of as one place (the home place, the river farm). Each has a boundary, county and state, optional FSA farm numbers, and notes. **Parcels** are the county's tax parcels inside it, each with a parcel number, its own boundary, and deeded acres when the county supplied them. Tax statements match to parcels, so keeping parcel numbers accurate pays off at tax time.
 
-The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures/grassland, wetlands, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
+The Properties page lists every property with acres and counts. Each property page shows its map, details, and sections for parcels, ag fields, pastures/grassland, wetlands, pollinator habitats, timber stands, roads, easements, assets, leases, taxes, documents, and government program base acres.
 
 ## Entities
 
@@ -656,7 +660,7 @@ Under Properties then **Entities**, create the owners of record: an individual, 
 
 ## Moving things between properties
 
-Every parcel, ag field, pasture/grassland, wetland, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
+Every parcel, ag field, pasture/grassland, wetland, pollinator habitat, timber stand, road, and asset has a **Move to another property** control on its page. Use it when two properties should become one, or when an import put something on the wrong place. Properties with nothing left on them can be deleted.
 
 ## Acres
 

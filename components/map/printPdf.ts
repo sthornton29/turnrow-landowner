@@ -12,7 +12,16 @@ import { jsPDF } from "jspdf";
 import type { FeatureCollection } from "geojson";
 import { STAND_TYPE_COLORS } from "@/lib/assetTypes";
 import { distanceFt } from "@/lib/geo/pivot";
-import { CEMETERY_VIOLET, CEMETERY_VIOLET_DARK, KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
+import {
+  CEMETERY_VIOLET,
+  CEMETERY_VIOLET_DARK,
+  KELLY,
+  PASTURE_TAN,
+  PINE,
+  POLLINATOR_ROSE,
+  POLLINATOR_ROSE_DARK,
+  WETLAND_BLUE,
+} from "./drawColors";
 import { ISSUE_COLORS } from "@/lib/maintenance";
 import { addEasementLayers } from "./easementLayers";
 
@@ -22,6 +31,7 @@ export interface PrintLayerFlags {
   field: boolean;
   pasture: boolean;
   wetland: boolean;
+  pollinator_habitat: boolean;
   timber_stand: boolean;
   road: boolean;
   easement: boolean;
@@ -38,6 +48,7 @@ export interface PrintLabelFlags {
   field: boolean;
   pasture: boolean;
   wetland: boolean;
+  pollinator_habitat: boolean;
   timber_stand: boolean;
   road: boolean;
   easement: boolean;
@@ -51,6 +62,7 @@ export interface PrintSources {
   fields: FeatureCollection;
   pastures: FeatureCollection;
   wetlands: FeatureCollection;
+  pollinatorHabitats: FeatureCollection;
   timber: FeatureCollection;
   roads: FeatureCollection;
   easements: FeatureCollection;
@@ -62,6 +74,7 @@ export interface PrintSources {
   fieldLabels: FeatureCollection;
   pastureLabels: FeatureCollection;
   wetlandLabels: FeatureCollection;
+  pollinatorHabitatLabels: FeatureCollection;
   timberLabels: FeatureCollection;
   easementLabels: FeatureCollection;
   cemeteryLabels: FeatureCollection;
@@ -179,6 +192,7 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
   src("fields", layers.field ? sources.fields : empty);
   src("pastures", layers.pasture ? sources.pastures : empty);
   src("wetlands", layers.wetland ? sources.wetlands : empty);
+  src("pollinator-habitats", layers.pollinator_habitat ? sources.pollinatorHabitats : empty);
   src("timber", layers.timber_stand ? sources.timber : empty);
   src("roads", layers.road ? sources.roads : empty);
   src("easements", layers.easement ? sources.easements : empty);
@@ -207,6 +221,10 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
     paint: { "fill-color": WETLAND_BLUE, "fill-opacity": 0.3 } });
   map.addLayer({ id: "wetlands-line", type: "line", source: "wetlands",
     paint: { "line-color": WETLAND_BLUE, "line-width": 2 } });
+  map.addLayer({ id: "pollinator-habitats-fill", type: "fill", source: "pollinator-habitats",
+    paint: { "fill-color": POLLINATOR_ROSE, "fill-opacity": 0.3 } });
+  map.addLayer({ id: "pollinator-habitats-line", type: "line", source: "pollinator-habitats",
+    paint: { "line-color": POLLINATOR_ROSE, "line-width": 2 } });
   map.addLayer({ id: "cemeteries-fill", type: "fill", source: "cemeteries",
     filter: ["==", ["geometry-type"], "Polygon"],
     paint: { "fill-color": CEMETERY_VIOLET, "fill-opacity": 0.35 } });
@@ -334,6 +352,9 @@ function addPrintLayers(map: mapboxgl.Map, job: PrintJob) {
   }
   if (layers.wetland && labels.wetland) {
     labelLayer("wetland-labels", sources.wetlandLabels, 11.5, "#e2ecf5", "#2c3f52");
+  }
+  if (layers.pollinator_habitat && labels.pollinator_habitat) {
+    labelLayer("pollinator-habitat-labels", sources.pollinatorHabitatLabels, 11.5, "#fbe4ef", POLLINATOR_ROSE_DARK);
   }
   if (layers.timber_stand && labels.timber_stand) {
     labelLayer("timber-labels", sources.timberLabels, 11.5, "#ffffff", PINE);

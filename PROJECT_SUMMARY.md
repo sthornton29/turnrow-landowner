@@ -955,6 +955,18 @@ Tables:
   entity outlines). Appears everywhere pastures do plus
   /wetlands/[id]. FUTURE AREA: no wetland program management features
   yet (deliberate).
+- pollinator_habitats (migration 0043): the wetlands pattern (polygon
+  only, acres generated, *_geo view, set_geometry, restrictive entity
+  scope policy, documents attach) plus program, year_established, and
+  seed_mix columns for the CRP CP-42 / EQIP / monarch waystation case.
+  Map color coneflower rose #d4699c (the only pink on the map).
+  Photos are the point of the record: the map panel and
+  /pollinator-habitats/[id] both carry the asset pages' quick "Add
+  photos" path (camera capture on phones, stored typed other, no AI
+  reading), and the page leads with the gallery. Appears everywhere
+  wetlands do (layers, add picker, filter, print, import, property
+  page section and delete summary, dashboard acres tile, documents
+  index and retype, assistant schema and land_summary).
 - documents: generic attachments via entity_type + entity_id
   (entity_type check now covers property, parcel, field, timber_stand,
   road, asset; Phase 3+ adds lease, timber_sale, tax_statement). Files live

@@ -120,6 +120,7 @@ export default function EntityDocuments({
     if (entityType === "property" || entityType === "organization") return;
     const table: Partial<Record<DocumentEntityType, string>> = {
       parcel: "parcels", field: "fields", pasture: "pastures", wetland: "wetlands",
+      pollinator_habitat: "pollinator_habitats",
       timber_stand: "timber_stands", road: "roads", easement: "easements", asset: "assets",
       cemetery: "cemeteries", maintenance_issue: "maintenance_issues",
     };
@@ -137,8 +138,9 @@ export default function EntityDocuments({
       });
   }, [supabase, entityType, entityId, label]);
 
-  // Quick gallery photos (asset pages): stored as-is, typed other, no
-  // reading. Documents go through the intake flow.
+  // Quick gallery photos (asset and pollinator habitat pages): stored
+  // as-is, typed other, no reading. Documents go through the intake flow.
+  const quickPhotos = entityType === "asset" || entityType === "pollinator_habitat";
   async function uploadPhotos(files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
@@ -181,7 +183,7 @@ export default function EntityDocuments({
         >
           Add document
         </button>
-        {entityType === "asset" ? (
+        {quickPhotos ? (
           <>
             <button
               onClick={() => photoInputRef.current?.click()}

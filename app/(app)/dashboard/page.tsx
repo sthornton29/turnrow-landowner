@@ -41,6 +41,7 @@ export default async function DashboardPage({
     { data: fields },
     { data: pastures },
     { data: wetlands },
+    { data: habitats },
     { data: timber },
     { data: assets },
     { data: entities },
@@ -65,6 +66,7 @@ export default async function DashboardPage({
     supabase.from("fields").select("id, acres, irrigated_acres, property_id"),
     supabase.from("pastures").select("id, acres, property_id"),
     supabase.from("wetlands").select("id, acres, property_id"),
+    supabase.from("pollinator_habitats").select("id, acres, property_id"),
     supabase.from("timber_stands").select("id, acres, property_id"),
     supabase
       .from("assets")
@@ -235,6 +237,7 @@ export default async function DashboardPage({
   const scopedFields = (fields ?? []).filter(inScope);
   const scopedPastures = (pastures ?? []).filter(inScope);
   const scopedWetlands = (wetlands ?? []).filter(inScope);
+  const scopedHabitats = (habitats ?? []).filter(inScope);
   const scopedTimber = (timber ?? []).filter(inScope);
   const scopedAssets = (assets ?? []).filter(inScope);
 
@@ -246,6 +249,7 @@ export default async function DashboardPage({
   );
   const pastureAcres = scopedPastures.reduce((s, p) => s + (p.acres ?? 0), 0);
   const wetlandAcres = scopedWetlands.reduce((s, w) => s + (w.acres ?? 0), 0);
+  const habitatAcres = scopedHabitats.reduce((s, h) => s + (h.acres ?? 0), 0);
   const timberAcres = scopedTimber.reduce((s, t) => s + (t.acres ?? 0), 0);
   const box = bboxOf(
     (properties ?? []).map((p) => p.boundary_geojson as MultiPolygon | null)
@@ -346,6 +350,9 @@ export default async function DashboardPage({
       : []),
     ...(pastureAcres > 0.05
       ? [{ label: "Pasture/Grassland acres", value: formatAcres(pastureAcres) }]
+      : []),
+    ...(habitatAcres > 0.05
+      ? [{ label: "Pollinator habitat acres", value: formatAcres(habitatAcres) }]
       : []),
     ...(wetlandAcres > 0.05
       ? [{ label: "Wetland acres", value: formatAcres(wetlandAcres) }]

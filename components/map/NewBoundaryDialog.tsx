@@ -22,6 +22,7 @@ export type BoundaryType =
   | "field"
   | "pasture"
   | "wetland"
+  | "pollinator_habitat"
   | "parcel"
   | "property"
   | "timber_stand"
@@ -59,6 +60,7 @@ export const BOUNDARY_TYPE_LABEL: Record<BoundaryType, string> = {
   field: "Ag field",
   pasture: "Pasture/Grassland",
   wetland: "Wetland",
+  pollinator_habitat: "Pollinator habitat",
   parcel: "Parcel",
   property: "Property",
   timber_stand: "Timber stand",
@@ -243,6 +245,14 @@ export default function NewBoundaryDialog({
             Open wetlands: marsh, sloughs, duck holes, WRP/easement ground.
             Forested bottomland stays a timber stand (hardwood with a wetland
             note).
+          </p>
+        ) : null}
+
+        {entityType === "pollinator_habitat" ? (
+          <p className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600">
+            Pollinator habitat: wildflower and native-grass plantings for bees
+            and butterflies (CRP CP-42, EQIP, a monarch waystation, a field
+            border). Photos of the stand can be added from its page.
           </p>
         ) : null}
 

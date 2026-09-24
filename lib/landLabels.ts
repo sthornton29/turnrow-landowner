@@ -14,6 +14,7 @@ export const LAND_TYPE_LABELS: Record<string, LandTypeLabel> = {
   field: { singular: "Ag field", plural: "Ag fields" },
   pasture: { singular: "Pasture/Grassland", plural: "Pastures/Grassland" },
   wetland: { singular: "Wetland", plural: "Wetlands" },
+  pollinator_habitat: { singular: "Pollinator habitat", plural: "Pollinator habitats" },
   timber_stand: { singular: "Timber stand", plural: "Timber stands" },
   road: { singular: "Road", plural: "Roads" },
   easement: { singular: "Easement", plural: "Easements" },

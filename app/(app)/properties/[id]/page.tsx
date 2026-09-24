@@ -49,6 +49,7 @@ export default async function PropertyDetailPage({
     { data: fields },
     { data: pastures },
     { data: wetlandRows },
+    { data: habitatRows },
     { data: stands },
     { data: roads },
     { data: assets },
@@ -73,6 +74,11 @@ export default async function PropertyDetailPage({
     supabase
       .from("wetlands")
       .select("id, name, notes, acres")
+      .eq("property_id", id)
+      .order("name"),
+    supabase
+      .from("pollinator_habitats")
+      .select("id, name, notes, program, year_established, seed_mix, acres")
       .eq("property_id", id)
       .order("name"),
     supabase
@@ -146,6 +152,7 @@ export default async function PropertyDetailPage({
   );
   const pastureAcres = (pastures ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const wetlandAcres = (wetlandRows ?? []).reduce((s, w) => s + (w.acres ?? 0), 0);
+  const habitatAcres = (habitatRows ?? []).reduce((s, h) => s + (h.acres ?? 0), 0);
   const timberAcres = (stands ?? []).reduce((s, t) => s + (t.acres ?? 0), 0);
   const roadMiles = (roads ?? []).reduce((s, r) => s + (r.miles ?? 0), 0);
 
@@ -369,6 +376,53 @@ export default async function PropertyDetailPage({
               items={(wetlandRows ?? []).map((w) => ({
                 id: w.id,
                 label: `${w.name} (${formatAcres(w.acres)} ac)`,
+              }))}
+              properties={moveTargets}
+              currentPropertyId={property.id}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {(habitatRows ?? []).length > 0 ? (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-gray-900">
+            Pollinator habitats{" "}
+            <span className="text-sm font-normal text-gray-500">
+              {formatNumber((habitatRows ?? []).length)} · {formatAcres(habitatAcres)} ac
+            </span>
+          </h2>
+          <ul className="space-y-2">
+            {(habitatRows ?? []).map((h) => (
+              <li key={h.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Link
+                    href={`/pollinator-habitats/${h.id}`}
+                    className="font-medium text-gray-900 hover:underline"
+                  >
+                    {h.name}
+                  </Link>
+                  <span className="text-sm text-pine-900">{formatAcres(h.acres)} ac</span>
+                </div>
+                {h.program || h.year_established ? (
+                  <p className="mt-1 text-sm text-gray-600">
+                    {[h.program, h.year_established ? `planted ${h.year_established}` : null]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </p>
+                ) : null}
+                {h.notes ? <p className="mt-1 text-sm text-gray-600">{h.notes}</p> : null}
+                <RowEditor entityType="pollinator_habitat" row={h} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2">
+            <MoveChildren
+              table="pollinator_habitats"
+              itemLabel="pollinator habitat"
+              items={(habitatRows ?? []).map((h) => ({
+                id: h.id,
+                label: `${h.name} (${formatAcres(h.acres)} ac)`,
               }))}
               properties={moveTargets}
               currentPropertyId={property.id}
@@ -717,6 +771,7 @@ export default async function PropertyDetailPage({
             [(fields ?? []).length, "ag field"],
             [(pastures ?? []).length, "pasture"],
             [(wetlandRows ?? []).length, "wetland"],
+            [(habitatRows ?? []).length, "pollinator habitat"],
             [(stands ?? []).length, "timber stand"],
             [(roads ?? []).length, "road"],
             [(assets ?? []).length, "asset"],
@@ -731,7 +786,8 @@ export default async function PropertyDetailPage({
         />
         <p className="mt-1 text-xs text-gray-500">
           Deletes this property and everything on it (parcels, ag fields,
-          pastures, wetlands, timber stands, roads, assets) and removes any
+          pastures, wetlands, pollinator habitats, timber stands, roads,
+          assets) and removes any
           lease land links. Leases,
           payments, and tax records are kept; tax statements on deleted
           parcels become unmatched. Move anything you want to keep to another

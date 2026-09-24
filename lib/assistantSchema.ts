@@ -15,6 +15,7 @@ LAND
 - fields_geo(id, property_id, name, notes, acres, irrigated_acres, boundary_geojson)   -- "Ag Fields" in the app; dryland = acres - irrigated_acres
 - pastures_geo(id, property_id, name, notes, acres)   -- shown to users as "Pasture/Grassland"
 - wetlands_geo(id, property_id, name, notes, acres)   -- open wetlands only; forested bottomland is a timber stand
+- pollinator_habitats_geo(id, property_id, name, notes, program, year_established, seed_mix, acres)   -- wildflower/native-grass plantings for pollinators (CRP CP-42, EQIP)
 - timber_stands_geo(id, property_id, name, stand_type 'planted_pine'|'natural_pine'|'hardwood'|'mixed'|'other', species, year_established, site_index, last_thinning_year, last_burn_year, notes, acres)
 - cemeteries_geo(id, property_id, name, notes, acres (polygons only), geom_geojson)   -- a plot or a single marker
 - maintenance_issues_geo(id, property_id nullable, field_id nullable, issue_type 'wash'|'sinkhole'|'broken_terrace'|'road_washout'|'other', label, notes, severity 'low'|'medium'|'high' nullable, status 'open'|'resolved', resolved_at, acres, geom_geojson, created_at)   -- problems needing attention, NOT land
@@ -49,7 +50,7 @@ PROPERTY TAXES
   NOTE: tax status (paid, partial, unpaid, delinquent) is computed from payments vs amount_due; prefer taxes_status.
 
 DOCUMENTS
-- documents(id, entity_type ('property','parcel','field','pasture','wetland','easement','timber_stand','road','asset','entity','tenant','lease','timber_sale','tax_statement'), entity_id, file_name, storage_path, content_type, size_bytes, doc_type (deed_warranty, deed_quitclaim, deed_timber, deed_mineral, title_insurance, title_opinion, closing_statement, probate_estate, survey_plat, legal_description, easement_deed, mortgage_dot, lien_release, fsa_156ez, fsa_map, crp_contract, nrcs_conservation_plan, wetland_determination, hel_determination, appraisal, timber_cruise, management_plan, soil_survey, insurance_policy, hunting_agreement, current_use_application, other), title, extracted jsonb, extracted_at, extraction_reviewed, created_at)
+- documents(id, entity_type ('property','parcel','field','pasture','wetland','pollinator_habitat','easement','timber_stand','road','asset','entity','tenant','lease','timber_sale','tax_statement'), entity_id, file_name, storage_path, content_type, size_bytes, doc_type (deed_warranty, deed_quitclaim, deed_timber, deed_mineral, title_insurance, title_opinion, closing_statement, probate_estate, survey_plat, legal_description, easement_deed, mortgage_dot, lien_release, fsa_156ez, fsa_map, crp_contract, nrcs_conservation_plan, wetland_determination, hel_determination, appraisal, timber_cruise, management_plan, soil_survey, insurance_policy, hunting_agreement, current_use_application, other), title, extracted jsonb, extracted_at, extraction_reviewed, created_at)
 
 GOVERNMENT PAYMENTS (FSA)
 - fsa_farms(id, farm_number, state, county, farmland_acres, cropland_acres, dcp_cropland_acres, notes)

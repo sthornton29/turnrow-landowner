@@ -60,6 +60,8 @@ import {
   MINT,
   PASTURE_TAN,
   PINE,
+  POLLINATOR_ROSE,
+  POLLINATOR_ROSE_DARK,
   WETLAND_BLUE,
   applyDraftColor,
   draftColorFor,
@@ -67,7 +69,7 @@ import {
 import { ISSUE_COLORS, issueColor, issueTitle } from "@/lib/maintenance";
 import NewIssueDialog, { type NewIssuePayload } from "./NewIssueDialog";
 import AddPicker, { type AssetPlacement, type DrawType } from "./AddPicker";
-export { KELLY, PASTURE_TAN, PINE, WETLAND_BLUE } from "./drawColors";
+export { KELLY, PASTURE_TAN, PINE, POLLINATOR_ROSE, WETLAND_BLUE } from "./drawColors";
 import { entityColor } from "@/lib/entities";
 import { suggestPropertyId } from "@/lib/geo/propertyMatch";
 import {
@@ -109,6 +111,7 @@ import type {
   TimberStandGeo,
   EasementGeo,
   WetlandGeo,
+  PollinatorHabitatGeo,
 } from "@/types/db";
 import LayerToggle, { type LabelVisibility } from "./LayerToggle";
 import NeighborPanel, {
@@ -141,10 +144,12 @@ import type { AnyGeoRow, LayerVisibility, MapMode, SelectedFeature } from "./typ
 // from kelly, every crop color, the timber palette including planted
 // pine's deep teal #0f766e and the "other" gray #6b7280, pivot light
 // blue #7dd3fc/#38bdf8, pasture tan, and entity outlines.
+// Pollinator habitats: rose (drawColors.ts), distinct from every land
+// and crop color above.
 
 const POLYGON_TYPES: EntityType[] = [
-  "property", "parcel", "field", "pasture", "wetland", "timber_stand",
-  "easement", "cemetery", "maintenance_issue",
+  "property", "parcel", "field", "pasture", "wetland", "pollinator_habitat",
+  "timber_stand", "easement", "cemetery", "maintenance_issue",
 ];
 
 // A pick-first draw session: what the Add menu chose before the first
@@ -184,6 +189,7 @@ const LAYER_DEFAULTS: LayerVisibility = {
   field: true,
   pasture: true,
   wetland: true,
+  pollinator_habitat: true,
   timber_stand: true,
   road: true,
   easement: true,
@@ -457,6 +463,7 @@ export default function MapView({
   const [fields, setFields] = useState<FieldGeo[]>([]);
   const [pastures, setPastures] = useState<PastureGeo[]>([]);
   const [wetlands, setWetlands] = useState<WetlandGeo[]>([]);
+  const [pollinatorHabitats, setPollinatorHabitats] = useState<PollinatorHabitatGeo[]>([]);
   const [timber, setTimber] = useState<TimberStandGeo[]>([]);
   const [roads, setRoads] = useState<RoadGeo[]>([]);
   const [easements, setEasements] = useState<EasementGeo[]>([]);
@@ -675,12 +682,14 @@ export default function MapView({
     useState<"landscape" | "portrait">("landscape");
   const [printLayers, setPrintLayers] = useState<PrintLayerFlags>({
     property: true, parcel: false, field: true, pasture: true, wetland: true,
+    pollinator_habitat: true,
     timber_stand: true, road: true, easement: true, asset: true,
     cemetery: true, maintenance: true,
     crops: false, entity: false,
   });
   const [printLabels, setPrintLabels] = useState<PrintLabelFlags>({
     property: true, parcel: false, field: true, pasture: true, wetland: true,
+    pollinator_habitat: true,
     timber_stand: true, road: true, easement: true, asset: true, cemetery: true,
   });
   const [printTitle, setPrintTitle] = useState("");
@@ -703,12 +712,13 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, pas, w, t, r, ue, a, mappings, farmData, projYields, connections, ents, cem, iss] = await Promise.all([
+    const [p, pa, f, pas, w, ph, t, r, ue, a, mappings, farmData, projYields, connections, ents, cem, iss] = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
       supabase.from("pastures_geo").select("*").order("name"),
       supabase.from("wetlands_geo").select("*").order("name"),
+      supabase.from("pollinator_habitats_geo").select("*").order("name"),
       supabase.from("timber_stands_geo").select("*").order("name"),
       supabase.from("roads_geo").select("*").order("name"),
       supabase.from("easements_geo").select("*").order("name"),
@@ -732,6 +742,7 @@ export default function MapView({
     setFields((f.data as FieldGeo[]) ?? []);
     setPastures((pas.data as PastureGeo[]) ?? []);
     setWetlands((w.data as WetlandGeo[]) ?? []);
+    setPollinatorHabitats((ph.data as PollinatorHabitatGeo[]) ?? []);
     setTimber((t.data as TimberStandGeo[]) ?? []);
     setRoads((r.data as RoadGeo[]) ?? []);
     setEasements((ue.data as EasementGeo[]) ?? []);
@@ -815,6 +826,7 @@ export default function MapView({
       field: fields,
       pasture: pastures,
       wetland: wetlands,
+      pollinator_habitat: pollinatorHabitats,
       timber_stand: timber,
       road: roads,
       easement: easements,
@@ -822,7 +834,7 @@ export default function MapView({
       cemetery: cemeteries,
       maintenance_issue: issues,
     }),
-    [properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, cemeteries, issues]
+    [properties, parcels, fields, pastures, wetlands, pollinatorHabitats, timber, roads, easements, assets, cemeteries, issues]
   );
 
   const selectedRow: AnyGeoRow | null = useMemo(() => {
@@ -830,12 +842,16 @@ export default function MapView({
     return rowLists[selected.entityType].find((r) => r.id === selected.id) ?? null;
   }, [selected, rowLists]);
 
-  const selectedPropertyName = useMemo(() => {
+  // The property a selected land unit sits on (null for a property
+  // itself, or when the id points at nothing loaded). The panel turns
+  // the name into a button that opens that property's own panel.
+  const selectedProperty = useMemo(() => {
     if (!selectedRow || !selected || selected.entityType === "property") return null;
     const pid = (selectedRow as { property_id?: string | null }).property_id;
     if (!pid) return null;
-    return properties.find((p) => p.id === pid)?.name ?? null;
+    return properties.find((p) => p.id === pid) ?? null;
   }, [selected, selectedRow, properties]);
+  const selectedPropertyName = selectedProperty?.name ?? null;
 
   // Holding entity for a selected property's panel
   const selectedEntityName = useMemo(() => {
@@ -981,8 +997,8 @@ export default function MapView({
   clickRef.current = (e) => {
     const map = mapRef.current;
     if (!map || modeRef.current !== "view") return;
-    // Priority: assets, then roads, then ag fields > pastures > timber >
-    // parcels > properties
+    // Priority: assets, then roads, then ag fields > pastures > wetlands >
+    // pollinator habitats > timber > parcels > properties
     const groups: string[][] = [
       ["maintenance-circle", "maintenance-line", "maintenance-fill"],
       ["assets-child-circle", "assets-circle", "assets-line", "assets-fill", "pivot-circles-fill"],
@@ -993,6 +1009,7 @@ export default function MapView({
       ["pastures-fill"],
       ["cemeteries-fill"],
       ["wetlands-fill"],
+      ["pollinator-habitats-fill"],
       ["timber-fill"],
       ["parcels-fill"],
       ["properties-fill"],
@@ -1089,10 +1106,11 @@ export default function MapView({
     map.on("load", () => {
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
-        "properties", "parcels", "fields", "pastures", "wetlands", "timber",
-        "roads", "easements", "assets", "cemeteries", "maintenance",
+        "properties", "parcels", "fields", "pastures", "wetlands", "pollinator-habitats",
+        "timber", "roads", "easements", "assets", "cemeteries", "maintenance",
         "property-labels", "parcel-labels", "field-labels", "pasture-labels",
-        "wetland-labels", "timber-labels", "easement-labels", "cemetery-labels",
+        "wetland-labels", "pollinator-habitat-labels", "timber-labels", "easement-labels",
+        "cemetery-labels",
       ]) {
         map.addSource(id, { type: "geojson", data: empty });
       }
@@ -1135,6 +1153,12 @@ export default function MapView({
         paint: { "fill-color": WETLAND_BLUE, "fill-opacity": 0.3 } });
       map.addLayer({ id: "wetlands-line", type: "line", source: "wetlands",
         paint: { "line-color": WETLAND_BLUE, "line-width": 2 } });
+
+      // Pollinator habitats: rose
+      map.addLayer({ id: "pollinator-habitats-fill", type: "fill", source: "pollinator-habitats",
+        paint: { "fill-color": POLLINATOR_ROSE, "fill-opacity": 0.3 } });
+      map.addLayer({ id: "pollinator-habitats-line", type: "line", source: "pollinator-habitats",
+        paint: { "line-color": POLLINATOR_ROSE, "line-width": 2 } });
 
       // Cemeteries: muted violet plot (the "C" marker sits on top, below)
       map.addLayer({ id: "cemeteries-fill", type: "fill", source: "cemeteries",
@@ -1191,7 +1215,7 @@ export default function MapView({
         paint: { "line-color": ASSET_LIGHT_BLUE, "line-width": 2, "line-dasharray": [2, 2] } });
 
       // Selection highlights
-      for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber", "cemeteries"]) {
+      for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "pollinator-habitats", "timber", "cemeteries"]) {
         map.addLayer({ id: `${src}-selected`, type: "line", source: src,
           paint: { "line-color": "#ffffff", "line-width": 4.5 },
           filter: ["==", ["get", "id"], ""] });
@@ -1231,6 +1255,10 @@ export default function MapView({
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
         paint: { "text-color": "#e2ecf5", "text-halo-color": "#2c3f52", "text-halo-width": 1.2 } });
+      map.addLayer({ id: "pollinator-habitat-labels", type: "symbol", source: "pollinator-habitat-labels",
+        layout: { "text-field": ["get", "name"], "text-size": 11.5,
+          "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
+        paint: { "text-color": "#fbe4ef", "text-halo-color": POLLINATOR_ROSE_DARK, "text-halo-width": 1.2 } });
       map.addLayer({ id: "timber-labels", type: "symbol", source: "timber-labels",
         layout: { "text-field": ["get", "name"], "text-size": 11.5,
           "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] },
@@ -1492,7 +1520,7 @@ export default function MapView({
     map.on("click", (e) => clickRef.current(e));
     for (const layer of [
       "properties-fill", "parcels-fill", "fields-fill", "pastures-fill",
-      "wetlands-fill", "timber-fill", "roads-hit", "easements-fill",
+      "wetlands-fill", "pollinator-habitats-fill", "timber-fill", "roads-hit", "easements-fill",
       "easements-hatch-base", "easements-hit",
       "assets-circle", "assets-child-circle", "assets-line", "assets-fill",
       "cemeteries-fill", "cemeteries-circle",
@@ -1570,6 +1598,7 @@ export default function MapView({
     setData("fields", fieldsFCWithCrops(inc(fields, "field") as FieldGeo[], farmActivity.byField));
     setData("pastures", rowsToFC(inc(pastures, "pasture"), "pasture"));
     setData("wetlands", rowsToFC(inc(wetlands, "wetland"), "wetland"));
+    setData("pollinator-habitats", rowsToFC(inc(pollinatorHabitats, "pollinator_habitat"), "pollinator_habitat"));
     setData("timber", rowsToFC(inc(timber, "timber_stand"), "timber_stand"));
     setData("roads", rowsToFC(inc(roads, "road"), "road"));
     setData("easements", rowsToFC(inc(easements, "easement"), "easement"));
@@ -1582,6 +1611,7 @@ export default function MapView({
     setData("field-labels", rowsToLabelFC(inc(fields, "field"), "field"));
     setData("pasture-labels", rowsToLabelFC(inc(pastures, "pasture"), "pasture"));
     setData("wetland-labels", rowsToLabelFC(inc(wetlands, "wetland"), "wetland"));
+    setData("pollinator-habitat-labels", rowsToLabelFC(inc(pollinatorHabitats, "pollinator_habitat"), "pollinator_habitat"));
     setData("timber-labels", rowsToLabelFC(inc(timber, "timber_stand"), "timber_stand"));
     setData("easement-labels", rowsToLabelFC(inc(easements, "easement"), "easement"));
 
@@ -1608,7 +1638,7 @@ export default function MapView({
     if (!didFitRef.current) {
       const box = bboxOf([
         ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
-        ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
+        ...pastures.map(geomOf), ...wetlands.map(geomOf), ...pollinatorHabitats.map(geomOf), ...timber.map(geomOf),
         ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
         ...cemeteries.map(geomOf), ...issues.map(geomOf),
       ]);
@@ -1617,7 +1647,7 @@ export default function MapView({
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, mapFilterExcluded, visibility, rowLists]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, pollinatorHabitats, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, mapFilterExcluded, visibility, rowLists]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -1706,6 +1736,7 @@ export default function MapView({
       [visibility.field, ["fields-fill", "fields-line"]],
       [visibility.pasture, ["pastures-fill", "pastures-line"]],
       [visibility.wetland, ["wetlands-fill", "wetlands-line"]],
+      [visibility.pollinator_habitat, ["pollinator-habitats-fill", "pollinator-habitats-line"]],
       [visibility.timber_stand, ["timber-fill", "timber-line"]],
       [visibility.road, ["roads-casing", "roads-line", "roads-hit"]],
       [visibility.easement, easementLayerIdsRef.current],
@@ -1717,6 +1748,7 @@ export default function MapView({
       [visibility.field && labelVisibility.items, ["field-labels"]],
       [visibility.pasture && labelVisibility.items, ["pasture-labels"]],
       [visibility.wetland && labelVisibility.items, ["wetland-labels"]],
+      [visibility.pollinator_habitat && labelVisibility.items, ["pollinator-habitat-labels"]],
       [visibility.timber_stand && labelVisibility.items, ["timber-labels"]],
       [visibility.road && labelVisibility.items, ["road-labels"]],
       [visibility.easement && labelVisibility.items, ["easement-labels"]],
@@ -1752,12 +1784,13 @@ export default function MapView({
     if (!map || !mapLoaded) return;
     const bySource: Record<string, string> = {
       properties: "", parcels: "", fields: "", pastures: "", wetlands: "",
-      timber: "", roads: "", easements: "", assets: "", cemeteries: "", maintenance: "",
+      "pollinator-habitats": "", timber: "", roads: "", easements: "", assets: "", cemeteries: "", maintenance: "",
     };
     if (selected) {
       const srcName: Record<EntityType, string> = {
         property: "properties", parcel: "parcels", field: "fields",
-        pasture: "pastures", wetland: "wetlands", timber_stand: "timber",
+        pasture: "pastures", wetland: "wetlands", pollinator_habitat: "pollinator-habitats",
+        timber_stand: "timber",
         road: "roads", easement: "easements", asset: "assets",
         cemetery: "cemeteries", maintenance_issue: "maintenance",
       };
@@ -1775,7 +1808,7 @@ export default function MapView({
           ["case", ["==", ["get", "id"], bySource[key]], 3.5, 2]);
       }
     }
-    for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "timber", "cemeteries"]) {
+    for (const src of ["properties", "parcels", "fields", "pastures", "wetlands", "pollinator-habitats", "timber", "cemeteries"]) {
       if (map.getLayer(`${src}-selected`)) {
         map.setFilter(`${src}-selected`, ["==", ["get", "id"], bySource[src]]);
       }
@@ -2958,6 +2991,7 @@ export default function MapView({
       field: visibility.field,
       pasture: visibility.pasture,
       wetland: visibility.wetland,
+      pollinator_habitat: visibility.pollinator_habitat,
       timber_stand: visibility.timber_stand,
       road: visibility.road,
       easement: visibility.easement,
@@ -2976,6 +3010,7 @@ export default function MapView({
       field: labelVisibility.items,
       pasture: labelVisibility.items,
       wetland: labelVisibility.items,
+      pollinator_habitat: labelVisibility.items,
       timber_stand: labelVisibility.items,
       road: labelVisibility.items,
       easement: labelVisibility.items,
@@ -3183,6 +3218,7 @@ export default function MapView({
     const incFields = printInc(fields, "field");
     const incPastures = printInc(pastures, "pasture");
     const incWetlands = printInc(wetlands, "wetland");
+    const incPollinatorHabitats = printInc(pollinatorHabitats, "pollinator_habitat");
     const incTimber = printInc(timber, "timber_stand");
     const incRoads = printInc(roads, "road");
     const incEasements = printInc(easements, "easement");
@@ -3212,6 +3248,9 @@ export default function MapView({
     }
     if (flags.wetland && incWetlands.length > 0) {
       out.push({ label: "Wetlands", color: WETLAND_BLUE, kind: "fill" });
+    }
+    if (flags.pollinator_habitat && incPollinatorHabitats.length > 0) {
+      out.push({ label: "Pollinator habitats", color: POLLINATOR_ROSE, kind: "fill" });
     }
     if (flags.timber_stand) {
       for (const type of Object.keys(STAND_TYPE_LABELS)) {
@@ -3298,6 +3337,7 @@ export default function MapView({
           fields: fieldsFCWithCrops(printInc(fields, "field"), farmActivity.byField),
           pastures: rowsToFC(printInc(pastures, "pasture"), "pasture"),
           wetlands: rowsToFC(printInc(wetlands, "wetland"), "wetland"),
+          pollinatorHabitats: rowsToFC(printInc(pollinatorHabitats, "pollinator_habitat"), "pollinator_habitat"),
           timber: rowsToFC(printInc(timber, "timber_stand"), "timber_stand"),
           roads: rowsToFC(printInc(roads, "road"), "road"),
           easements: rowsToFC(printInc(easements, "easement"), "easement"),
@@ -3310,6 +3350,7 @@ export default function MapView({
           fieldLabels: rowsToLabelFC(printInc(fields, "field"), "field"),
           pastureLabels: rowsToLabelFC(printInc(pastures, "pasture"), "pasture"),
           wetlandLabels: rowsToLabelFC(printInc(wetlands, "wetland"), "wetland"),
+          pollinatorHabitatLabels: rowsToLabelFC(printInc(pollinatorHabitats, "pollinator_habitat"), "pollinator_habitat"),
           timberLabels: rowsToLabelFC(printInc(timber, "timber_stand"), "timber_stand"),
           easementLabels: rowsToLabelFC(printInc(easements, "easement"), "easement"),
         },
@@ -3334,7 +3375,7 @@ export default function MapView({
     if (!map) return;
     const box = bboxOf([
       ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
-      ...pastures.map(geomOf), ...wetlands.map(geomOf), ...timber.map(geomOf),
+      ...pastures.map(geomOf), ...wetlands.map(geomOf), ...pollinatorHabitats.map(geomOf), ...timber.map(geomOf),
       ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
       ...cemeteries.map(geomOf), ...issues.map(geomOf),
     ]);
@@ -3578,6 +3619,7 @@ export default function MapView({
                   ["timber_stand", "Timber stands", true],
                   ["pasture", LAND_TYPE_LABELS.pasture.plural, true],
                   ["wetland", "Wetlands", true],
+                  ["pollinator_habitat", "Pollinator habitats", true],
                   ["road", "Roads", true],
                   ["easement", "Easements", true],
                   ["asset", "Assets", true],
@@ -4402,6 +4444,7 @@ export default function MapView({
           entityType={selected.entityType}
           row={selectedRow}
           propertyName={selectedPropertyName}
+          propertyId={selectedProperty?.id ?? null}
           entityName={selectedEntityName}
           farmActivity={
             selected.entityType === "field"
@@ -4435,6 +4478,7 @@ export default function MapView({
               : null
           }
           onSelectAsset={(id) => setSelected({ entityType: "asset", id })}
+          onSelectProperty={(id) => setSelected({ entityType: "property", id })}
           onAddBin={() => startAddBinToSite(selected.id)}
           onClose={() => setSelected(null)}
           onEditGeometry={startEditGeometry}

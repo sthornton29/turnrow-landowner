@@ -15,6 +15,10 @@ export const PASTURE_TAN = "#d2b48c";
 // bottomland stays a timber stand): muted steel blue, apart from kelly,
 // every crop color, the timber palette, pivot light blue, and pasture tan.
 export const WETLAND_BLUE = "#6487a8";
+// Pollinator habitat: coneflower rose, the one pink on the map, apart
+// from every land, crop, timber, easement, water, and entity color.
+export const POLLINATOR_ROSE = "#d4699c";
+export const POLLINATOR_ROSE_DARK = "#7a2d55";
 // Asset lines/footprints and the pivot coverage blues.
 export const ASSET_LIGHT_BLUE = "#bae6fd";
 export const PIVOT_BLUE = "#38bdf8";
@@ -33,6 +37,7 @@ export function draftColorFor(key: string): string {
     case "field": return KELLY;
     case "pasture": return PASTURE_TAN;
     case "wetland": return WETLAND_BLUE;
+    case "pollinator_habitat": return POLLINATOR_ROSE;
     case "timber_stand": return STAND_TYPE_COLORS.planted_pine;
     case "road": return "#ffffff";
     case "fence":

@@ -69,7 +69,7 @@ export function isGroup(entry: NavItem | NavGroup): entry is NavGroup {
 // Entities is a tab of the Properties section; Tenants and Timber sales
 // are tabs of Leases; the tax upload lives under Property Taxes.
 const ALIASES: Record<string, string[]> = {
-  "/properties": ["/entities", "/parcels", "/fields", "/pastures", "/wetlands", "/cemeteries", "/easements", "/roads"],
+  "/properties": ["/entities", "/parcels", "/fields", "/pastures", "/wetlands", "/pollinator-habitats", "/cemeteries", "/easements", "/roads"],
   "/leases": ["/tenants", "/timber-sales"],
   "/timber": ["/timber-scan"],
   "/farm-activity": ["/farms"],

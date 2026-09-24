@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { uploadDocument } from "@/components/documents/classify";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   ASSET_TYPES,
@@ -39,6 +40,7 @@ export const ENTITY_TABLE: Record<EntityType, string> = {
   field: "fields",
   pasture: "pastures",
   wetland: "wetlands",
+  pollinator_habitat: "pollinator_habitats",
   timber_stand: "timber_stands",
   road: "roads",
   easement: "easements",
@@ -53,6 +55,7 @@ const TYPE_LABEL: Record<EntityType, string> = {
   field: LAND_TYPE_LABELS.field.singular,
   pasture: LAND_TYPE_LABELS.pasture.singular,
   wetland: LAND_TYPE_LABELS.wetland.singular,
+  pollinator_habitat: LAND_TYPE_LABELS.pollinator_habitat.singular,
   timber_stand: LAND_TYPE_LABELS.timber_stand.singular,
   road: LAND_TYPE_LABELS.road.singular,
   easement: LAND_TYPE_LABELS.easement.singular,
@@ -94,6 +97,13 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
   ],
   wetland: [
     { key: "name", label: "Name", input: "text", required: true },
+    { key: "notes", label: "Notes", input: "textarea" },
+  ],
+  pollinator_habitat: [
+    { key: "name", label: "Name", input: "text", required: true },
+    { key: "program", label: "Program (CRP CP-42, EQIP, monarch waystation)", input: "text" },
+    { key: "year_established", label: "Year established", input: "number" },
+    { key: "seed_mix", label: "Seed mix", input: "text" },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   timber_stand: [
@@ -183,6 +193,7 @@ export function detailPagePath(entityType: EntityType, id: string): string {
     field: "/fields",
     pasture: "/pastures",
     wetland: "/wetlands",
+    pollinator_habitat: "/pollinator-habitats",
     timber_stand: "/timber",
     road: "/roads",
     easement: "/easements",
@@ -214,7 +225,11 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
       ]);
     }
   }
-  if (entityType === "timber_stand") {
+  if (entityType === "pollinator_habitat") {
+    push("Program", r.program);
+    push("Established", r.year_established);
+    push("Seed mix", r.seed_mix);
+  } else if (entityType === "timber_stand") {
     push("Stand type", r.stand_type, STAND_TYPE_LABELS);
     push("Species", r.species);
     push("Established", r.year_established);
@@ -360,6 +375,7 @@ export default function FeaturePanel({
   entityType,
   row,
   propertyName,
+  propertyId = null,
   entityName = null,
   farmActivity = null,
   assetChildren = null,
@@ -370,12 +386,17 @@ export default function FeaturePanel({
   onPivotCircle,
   onCircleFootprint,
   onSelectAsset,
+  onSelectProperty,
   onAddBin,
   onChanged,
 }: {
   entityType: EntityType;
   row: AnyGeoRow;
   propertyName: string | null;
+  // The property a land unit sits on: tapping its name in the panel
+  // opens the property's own panel, so a field or stand leads up to
+  // the property level without leaving the map.
+  propertyId?: string | null;
   entityName?: string | null; // holding entity, shown for properties
   farmActivity?: FarmActivityInfo[] | null;
   // A bin site's child bins (name + capacity), and a child's parent
@@ -388,6 +409,7 @@ export default function FeaturePanel({
   onPivotCircle?: () => void; // irrigation pivots: parametric coverage circle
   onCircleFootprint?: () => void; // round assets: parametric circle footprint
   onSelectAsset?: (id: string) => void; // tap a child bin in a site panel
+  onSelectProperty?: (id: string) => void; // tap the property row of a land unit
   onAddBin?: () => void; // bin sites: place a new child bin
   onChanged: () => void;
 }) {
@@ -395,6 +417,42 @@ export default function FeaturePanel({
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Pollinator habitats take photos straight from the map panel (a
+  // phone in the field): stored like the asset pages' quick photos,
+  // typed other, no reading. They show in the gallery on the page.
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  const takesPhotos = entityType === "pollinator_habitat";
+
+  async function uploadPhotos(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setPhotoBusy(true);
+    setPhotoNote(null);
+    let saved = 0;
+    let failure: string | null = null;
+    for (const file of Array.from(files)) {
+      const result = await uploadDocument(supabase, {
+        orgId: row.organization_id,
+        entityType,
+        entityId: row.id,
+        file,
+        docType: "other",
+        title: null,
+        aiSuggestedType: null,
+        propertyIds: [],
+      });
+      if ("error" in result) failure = result.error;
+      else saved += 1;
+    }
+    setPhotoBusy(false);
+    if (photoInputRef.current) photoInputRef.current.value = "";
+    setPhotoNote(
+      failure
+        ? failure
+        : `${saved} photo${saved === 1 ? "" : "s"} added. See them on the full page.`
+    );
+  }
 
   const isIssue = entityType === "maintenance_issue";
   const issue = isIssue ? (row as MaintenanceIssueGeo) : null;
@@ -608,9 +666,29 @@ export default function FeaturePanel({
               </div>
             ) : null}
             {propertyName ? (
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-3">
                 <dt className="text-gray-500">Property</dt>
-                <dd className="font-medium text-gray-900">{propertyName}</dd>
+                <dd className="text-right font-medium text-gray-900">
+                  {propertyId && onSelectProperty ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onSelectProperty(propertyId)}
+                        className="text-kelly-700 hover:underline"
+                      >
+                        {propertyName}
+                      </button>
+                      <Link
+                        href={detailPagePath("property", propertyId)}
+                        className="ml-2 text-xs font-medium text-gray-500 hover:text-kelly-700 hover:underline"
+                      >
+                        Page &rarr;
+                      </Link>
+                    </>
+                  ) : (
+                    propertyName
+                  )}
+                </dd>
               </div>
             ) : null}
             {entityName ? (
@@ -794,6 +872,26 @@ export default function FeaturePanel({
                 Split
               </button>
             ) : null}
+            {takesPhotos ? (
+              <>
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoBusy}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {photoBusy ? "Uploading..." : "Add photos"}
+                </button>
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => uploadPhotos(e.target.files)}
+                />
+              </>
+            ) : null}
             {entityType === "property" ? (
               <Link
                 href={`/timber-scan/${row.id}`}
@@ -810,6 +908,11 @@ export default function FeaturePanel({
               {entityType === "asset" ? "Deactivate" : "Delete"}
             </button>
           </div>
+          {photoNote ? (
+            <p className={"text-sm " + (photoNote.endsWith("full page.") ? "text-gray-600" : "text-red-600")}>
+              {photoNote}
+            </p>
+          ) : null}
           {entityType === "asset" ? (
             <button
               onClick={() => setEditing(true)}

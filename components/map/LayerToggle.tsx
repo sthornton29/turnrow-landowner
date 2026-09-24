@@ -14,6 +14,7 @@ const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
   { key: "field", label: "Ag Fields" },
   { key: "pasture", label: "Pastures/Grassland" },
   { key: "wetland", label: "Wetlands" },
+  { key: "pollinator_habitat", label: "Pollinator habitat" },
   { key: "timber_stand", label: "Timber" },
   { key: "cemetery", label: "Cemeteries" },
   { key: "road", label: "Roads" },
@@ -23,8 +24,9 @@ const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
 
 // Name labels only, split from the layer toggles: "Property names" is
 // the property boundary labels; "Field names" covers EVERY sub-property
-// item's name label (ag fields, pastures, timber, wetlands, cemeteries,
-// roads, easements, parcels, asset names, issue names). Polygons,
+// item's name label (ag fields, pastures, timber, wetlands, pollinator
+// habitats, cemeteries, roads, easements, parcels, asset names, issue
+// names). Polygons,
 // markers, and asset letters are untouched.
 export interface LabelVisibility {
   property: boolean;
@@ -95,7 +97,7 @@ export default function LayerToggle({
       {labelRow(
         "items",
         "Field names",
-        "Show or hide every other name label: ag fields, pastures, timber, wetlands, cemeteries, roads, easements, parcels, assets"
+        "Show or hide every other name label: ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets"
       )}
       <div className="mt-1 border-t border-gray-200 pt-1">
         <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-0.5 text-[13px] text-gray-800 hover:bg-gray-50">

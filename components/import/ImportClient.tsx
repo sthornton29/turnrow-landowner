@@ -38,6 +38,7 @@ const TABLE: Record<string, string> = {
   field: "fields",
   pasture: "pastures",
   wetland: "wetlands",
+  pollinator_habitat: "pollinator_habitats",
   timber_stand: "timber_stands",
   road: "roads",
   asset: "assets",
@@ -50,6 +51,7 @@ const POLYGON_OPTIONS: Array<[EntityType, string]> = [
   ["field", "Ag field"],
   ["pasture", "Pasture/Grassland"],
   ["wetland", "Wetland (open)"],
+  ["pollinator_habitat", "Pollinator habitat"],
   ["timber_stand", "Timber stand"],
   ["cemetery", "Cemetery"],
 ];
@@ -155,7 +157,7 @@ export default function ImportClient({
         r.entityType !== "asset" &&
         !r.propertyRef
       ) {
-        return "Parcels, ag fields, pastures, wetlands, timber stands, and roads must be assigned to a property.";
+        return "Parcels, ag fields, pastures, wetlands, pollinator habitats, timber stands, and roads must be assigned to a property.";
       }
     }
     return null;

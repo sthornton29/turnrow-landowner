@@ -20,10 +20,21 @@ const sql37 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0037_entity_scope_read_after_write.sql"),
   "utf8"
 );
-const sql = sql34 + sql37;
+// 0043 adds pollinator_habitats with its own restrictive policy, in
+// the same form; it joins the checked text so the table list below
+// can require it.
+const sql43 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0043_pollinator_habitats.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
-  sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope"));
+  sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
+  sql43.slice(
+    sql43.indexOf("create policy pollinator_habitats_entity_scope"),
+    sql43.indexOf("create trigger set_updated_at before update on public.pollinator_habitats")
+  );
 
 // The scoped-table list. Deliberately absent (documented in the
 // migration header): tenants, farm_connections (reads), county_tax_defaults,
@@ -37,6 +48,7 @@ const SCOPED_TABLES = [
   "fields",
   "pastures",
   "wetlands",
+  "pollinator_habitats",
   "timber_stands",
   "roads",
   "cemeteries",
