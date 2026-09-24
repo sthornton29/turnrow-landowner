@@ -44,7 +44,7 @@ export const DESKTOP_NAV: Array<NavItem | NavGroup> = [
     items: [NAV_ITEMS.properties, NAV_ITEMS.timber, NAV_ITEMS.assets, NAV_ITEMS.maintenance],
   },
   {
-    label: "Money",
+    label: "Financial",
     items: [NAV_ITEMS.leases, NAV_ITEMS.income, NAV_ITEMS.taxes, NAV_ITEMS.gov],
   },
   {
@@ -57,7 +57,7 @@ export const DESKTOP_NAV: Array<NavItem | NavGroup> = [
 // Phone "More" sheet: every section, grouped the same way.
 export const MOBILE_GROUPS: NavGroup[] = [
   { label: "Land", items: [NAV_ITEMS.map, NAV_ITEMS.properties, NAV_ITEMS.timber, NAV_ITEMS.assets, NAV_ITEMS.maintenance] },
-  { label: "Money", items: [NAV_ITEMS.leases, NAV_ITEMS.income, NAV_ITEMS.taxes, NAV_ITEMS.gov] },
+  { label: "Financial", items: [NAV_ITEMS.leases, NAV_ITEMS.income, NAV_ITEMS.taxes, NAV_ITEMS.gov] },
   { label: "Records", items: [NAV_ITEMS.documents, NAV_ITEMS.farm, NAV_ITEMS.import] },
   { label: "Help", items: [NAV_ITEMS.ask] },
 ];

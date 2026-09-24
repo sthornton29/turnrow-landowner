@@ -5,7 +5,7 @@ navigation model moved to components/layout/nav.ts (one list of
 sections with a one-line hint each, DESKTOP_NAV groups, MOBILE_GROUPS,
 isActive with the sub-page aliases): the header went from fourteen
 flat pills to Map, Home, Land (Properties, Timber, Assets,
-Maintenance), Money (Leases, Income, Property Taxes, Government
+Maintenance), Financial (Leases, Income, Property Taxes, Government
 Payments), Records (Documents, Farm Data, Import), Ask; a group is a
 click-to-open menu (outside click, Escape, and route change close it)
 whose pill names the current page inside it. The phone bar is Map,

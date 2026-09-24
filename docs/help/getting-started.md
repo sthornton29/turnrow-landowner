@@ -19,7 +19,7 @@ Turnrow Landowner keeps the records of land you own and lease out: where the bou
 
 ## Finding your way around
 
-The menu has six stops. **Map** and **Home** stand alone. **Land** holds Properties, Timber, Assets, and Maintenance. **Money** holds Leases, Income, Property Taxes, and Government Payments. **Records** holds Documents, Farm Data, and Import. **Ask** answers questions from your records. Tap a group to see its pages with a one-line description of each; the group's pill names the page you are on. On a phone, the bottom bar has Map, Home, Properties, Leases, and **More**, which opens every section and Settings.
+The menu has six stops. **Map** and **Home** stand alone. **Land** holds Properties, Timber, Assets, and Maintenance. **Financial** holds Leases, Income, Property Taxes, and Government Payments. **Records** holds Documents, Farm Data, and Import. **Ask** answers questions from your records. Tap a group to see its pages with a one-line description of each; the group's pill names the page you are on. On a phone, the bottom bar has Map, Home, Properties, Leases, and **More**, which opens every section and Settings.
 
 ## Home
 
