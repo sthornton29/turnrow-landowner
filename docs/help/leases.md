@@ -3,8 +3,8 @@ title: Leases
 route: /leases
 group: Leases
 order: 1
-updated: 2026-08-31
-keywords: lease, tenant, agricultural, hunting, cash rent, flex, crop share, terms, payment schedule, expected payments, record payment, insurance, auto renew, notice, leased acres, upload lease, ai extraction, special provisions, active, status, tenant data, automatic, projections, final price, hand edit
+updated: 2026-09-24
+keywords: how this is figured, breakdown, calculation, lease, tenant, agricultural, hunting, cash rent, flex, crop share, terms, payment schedule, expected payments, record payment, insurance, auto renew, notice, leased acres, upload lease, ai extraction, special provisions, active, status, tenant data, automatic, projections, final price, hand edit
 ---
 ## Tenants and leases
 
@@ -27,6 +27,10 @@ Every automatic value shows its source and as-of date in small print under the c
 ## Government payments on share and flex leases
 
 Crop share and flex leases ask one required question: does the landowner receive a share of government payments (ARC and PLC on the leased base acres), or does the tenant retain them all? If you receive a share, the percent prefills from your crop share and you say how it arrives: FSA pays you directly (you are a party on the farm record) or the tenant remits your share. A tenant-remitted share becomes an expected payment due each October of the following year, so a tenant check can be matched to it in Rent upload. An FSA-direct share is projected as income but is never expected in a tenant check. When you upload a lease, the reader looks for the government payment clause and proposes the answer in amber for you to confirm.
+
+## How a year's number is figured
+
+Each year's assumption row ends with its Projected total and a **How this is figured** link. It opens a page that shows the arithmetic behind that total step by step, with a chip on every input saying where it came from and what is still missing, and the payments received against it. The Income page's by-lease table opens the same page.
 
 ## Payments
 

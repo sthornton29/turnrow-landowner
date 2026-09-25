@@ -210,6 +210,81 @@ function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
   return entries;
 }
 
+// ---- Per-lease rows for a year (the Income page's by-lease table) ----
+
+export interface LeaseYearRow {
+  leaseId: string;
+  expected: number; // rent only (the government share is its own type)
+  received: number; // payments dated in the year, excluding government rows
+  projection: boolean; // expected is a computed projection, not a schedule
+  incomplete: boolean; // active in the year but nothing could be computed
+  // Fraction of the lease's leased acres inside the caller's property
+  // scope (1 when unscoped); the page scales expected and received by it
+  // so the rows add up to the filtered totals.
+  scopeShare: number;
+}
+
+// One row per lease that carries anything in the year: an effective
+// expected amount (schedule or projection), a received payment, or a
+// still-incomplete projection on a lease active in the year. Same rules
+// as summarizeByYear, so the rows add up to the by-type table.
+export function leaseYearRows(
+  inputs: IncomeInputs,
+  year: number,
+  scope: Set<string> | null = null
+): LeaseYearRow[] {
+  const rows = new Map<string, LeaseYearRow>();
+  const get = (leaseId: string) => {
+    if (!rows.has(leaseId)) {
+      rows.set(leaseId, {
+        leaseId,
+        expected: 0,
+        received: 0,
+        projection: false,
+        incomplete: false,
+        scopeShare: 1,
+      });
+    }
+    return rows.get(leaseId)!;
+  };
+  for (const e of effectiveExpectedEntries(inputs)) {
+    if (!e.leaseId || e.year !== year || e.gov) continue;
+    const r = get(e.leaseId);
+    r.expected += e.amount;
+    if (e.projection) r.projection = true;
+  }
+  const govIds = govExpectedIds(inputs);
+  for (const p of inputs.payments) {
+    if (!p.lease_id || Number(p.received_date.slice(0, 4)) !== year) continue;
+    if (p.expected_payment_id && govIds.has(p.expected_payment_id)) continue;
+    get(p.lease_id).received += p.amount;
+  }
+  // Leases active in the year whose projection could not be computed
+  // (a missing rate or crop input): shown so the gap is visible.
+  for (const lease of inputs.leases) {
+    if (rows.has(lease.id)) continue;
+    if (lease.status === "expired" || lease.status === "terminated") continue;
+    if (!lease.start_date || !lease.end_date) continue;
+    if (year < Number(lease.start_date.slice(0, 4)) || year > Number(lease.end_date.slice(0, 4))) continue;
+    get(lease.id).incomplete = true;
+  }
+  if (scope) {
+    for (const r of rows.values()) {
+      const shares = sharesFor(inputs, r.leaseId, null);
+      if (!shares) {
+        r.scopeShare = 0;
+        continue;
+      }
+      let share = 0;
+      for (const [pid, frac] of shares) if (scope.has(pid)) share += frac;
+      r.scopeShare = share;
+    }
+  }
+  return Array.from(rows.values())
+    .filter((r) => r.scopeShare > 0)
+    .sort((a, b) => b.expected * b.scopeShare - a.expected * a.scopeShare);
+}
+
 // ---- Government payments (ARC/PLC on leased base acres) ----
 
 export interface GovShareRow {

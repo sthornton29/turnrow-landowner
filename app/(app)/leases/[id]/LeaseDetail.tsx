@@ -681,6 +681,7 @@ export default function LeaseDetail({
               return (
                 <AssumptionRowEditor
                   key={year}
+                  leaseId={lease.id}
                   year={year}
                   structure={lease.rent_structure!}
                   value={a}
@@ -775,6 +776,7 @@ function sourceTagLine(e: CropAssumption): string | null {
 }
 
 function AssumptionRowEditor({
+  leaseId,
   year,
   structure,
   value,
@@ -786,6 +788,7 @@ function AssumptionRowEditor({
   fillSignal = null,
   onSave,
 }: {
+  leaseId: string;
   year: number;
   structure: "flex" | "crop_share" | "cash";
   value: YearAssumptions;
@@ -986,6 +989,13 @@ function AssumptionRowEditor({
           {helperFor(0) ? <div className="w-full basis-full">{helperFor(0)}</div> : null}
           <span className="ml-auto text-sm text-gray-500">
             {projected !== null ? `Projected: ${formatDollars(projected)}` : "Incomplete"}
+            {" "}
+            <Link
+              href={`/leases/${leaseId}/breakdown?year=${year}`}
+              className="font-medium text-kelly-700 hover:underline"
+            >
+              How this is figured
+            </Link>
           </span>
           {dirty ? (
             <button
@@ -1107,6 +1117,13 @@ function AssumptionRowEditor({
               {projected !== null
                 ? `Projected: ${formatDollars(projected)}`
                 : "Incomplete"}
+              {" "}
+              <Link
+                href={`/leases/${leaseId}/breakdown?year=${year}`}
+                className="font-medium text-kelly-700 hover:underline"
+              >
+                How this is figured
+              </Link>
             </span>
             {dirty ? (
               <button

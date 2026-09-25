@@ -3,8 +3,8 @@ title: Income views
 route: /income
 group: Income
 order: 1
-updated: 2026-08-30
-keywords: income, projected, received, rent, timber, hunting, government payments, taxes, net, by property, by entity, entity filter, multi-select, by year, chart, rent upload, photograph check, match payment
+updated: 2026-09-24
+keywords: income, projected, received, rent, by lease, breakdown, how figured, calculation, assumptions, step by step, timber, hunting, government payments, taxes, net, by property, by entity, entity filter, multi-select, by year, chart, rent upload, photograph check, match payment
 ---
 ## What this page shows
 
@@ -13,6 +13,10 @@ A year at a time: expected and received income by type (agricultural rent, hunti
 ## Filtering by entity
 
 The entity chips are a multi-select: tap one or more entities (or "No entity") and EVERY number on the page recomputes within the selection - the by-type table, the chart, the government payments line, and the tax rows, not just the by-property list. "All entities" clears it. The same selection follows you to Government Payments and the Dashboard tiles and is remembered on this device. Income with no land linked shows as Unassigned only under All entities.
+
+## By lease, and how each number is figured
+
+Between the by-type and by-property tables sits **by lease**: every lease with rent expected or received in the year, with a Basis chip (Projection, Schedule, or Incomplete) and expected, received, and outstanding. Tap a lease (or its **How** link) to open its breakdown page: the year's expected, received, and still-to-come figures, a one-sentence summary, and then the arithmetic step by step. A crop share lease shows each crop as an equation: acres times yield is production, times price is crop value, times your share is your rent, less your share of expenses where the lease shares them. Cash rent shows leased acres times the rate; a flex lease shows base rent plus the year's bonus estimate. Every input carries a chip saying where it came from (lease terms, tenant actual, tenant final, tenant projected, or entered by hand) and the date it was as of, and anything missing is listed so you know what to fill in. Below the math, the payment schedule and recorded payments show actual against expected. The same page opens from the lease's **How this is figured** link beside each year's Projected total.
 
 ## Projected vs received
 

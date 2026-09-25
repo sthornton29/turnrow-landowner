@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-09-24, version 0.1.0, build 39b9870. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-09-25, version 0.1.0, build baa1d1c. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -395,6 +395,10 @@ A year at a time: expected and received income by type (agricultural rent, hunti
 
 The entity chips are a multi-select: tap one or more entities (or "No entity") and EVERY number on the page recomputes within the selection - the by-type table, the chart, the government payments line, and the tax rows, not just the by-property list. "All entities" clears it. The same selection follows you to Government Payments and the Dashboard tiles and is remembered on this device. Income with no land linked shows as Unassigned only under All entities.
 
+## By lease, and how each number is figured
+
+Between the by-type and by-property tables sits **by lease**: every lease with rent expected or received in the year, with a Basis chip (Projection, Schedule, or Incomplete) and expected, received, and outstanding. Tap a lease (or its **How** link) to open its breakdown page: the year's expected, received, and still-to-come figures, a one-sentence summary, and then the arithmetic step by step. A crop share lease shows each crop as an equation: acres times yield is production, times price is crop value, times your share is your rent, less your share of expenses where the lease shares them. Cash rent shows leased acres times the rate; a flex lease shows base rent plus the year's bonus estimate. Every input carries a chip saying where it came from (lease terms, tenant actual, tenant final, tenant projected, or entered by hand) and the date it was as of, and anything missing is listed so you know what to fill in. Below the math, the payment schedule and recorded payments show actual against expected. The same page opens from the lease's **How this is figured** link beside each year's Projected total.
+
 ## Projected vs received
 
 - **Expected** comes from generated payment schedules where they exist, otherwise from each lease's terms and year assumptions. A banner notes when part of the year is a projection, and says so when those assumptions rest on your tenant's own projected prices and yields (they flow in and update automatically each sync; values you enter by hand on a lease are never changed).
@@ -433,6 +437,10 @@ Every automatic value shows its source and as-of date in small print under the c
 ## Government payments on share and flex leases
 
 Crop share and flex leases ask one required question: does the landowner receive a share of government payments (ARC and PLC on the leased base acres), or does the tenant retain them all? If you receive a share, the percent prefills from your crop share and you say how it arrives: FSA pays you directly (you are a party on the farm record) or the tenant remits your share. A tenant-remitted share becomes an expected payment due each October of the following year, so a tenant check can be matched to it in Rent upload. An FSA-direct share is projected as income but is never expected in a tenant check. When you upload a lease, the reader looks for the government payment clause and proposes the answer in amber for you to confirm.
+
+## How a year's number is figured
+
+Each year's assumption row ends with its Projected total and a **How this is figured** link. It opens a page that shows the arithmetic behind that total step by step, with a chip on every input saying where it came from and what is still missing, and the payments received against it. The Income page's by-lease table opens the same page.
 
 ## Payments
 
