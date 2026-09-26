@@ -272,15 +272,34 @@ function IssueBang() {
   );
 }
 
+// The import card's search text: anything a landowner might type when
+// looking for a way to bring in a file.
+const IMPORT_SEARCH =
+  "import a file upload kml kmz geojson json shapefile zip google earth onx surveyor boundaries";
+
+function UploadGlyph() {
+  return (
+    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[3px] border border-kelly-500 bg-kelly-50">
+      <svg viewBox="0 0 24 24" fill="none" stroke={PINE} strokeWidth={2} className="h-3.5 w-3.5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" />
+      </svg>
+    </span>
+  );
+}
+
 export default function AddPicker({
   onPickDraw,
   onPickAsset,
   onPickPivot,
+  onPickImport,
   onCancel,
 }: {
   onPickDraw: (type: DrawType) => void;
   onPickAsset: (assetType: AssetType, placement: AssetPlacement) => void;
   onPickPivot: () => void;
+  // Bring shapes in from a file (KML, KMZ, GeoJSON, shapefile) instead
+  // of drawing them; the map opens its file chooser and review panel.
+  onPickImport: () => void;
   onCancel: () => void;
 }) {
   const [step, setStep] = useState<"main" | "easement" | "cemetery" | "issue" | "asset">("main");
@@ -315,6 +334,7 @@ export default function AddPicker({
 
   // Type-to-filter over label and hint; sections with no matches hide.
   const q = query.trim().toLowerCase();
+  const importMatches = !q || IMPORT_SEARCH.includes(q);
   const visibleSections = useMemo(
     () =>
       SECTIONS.map((s) => ({
@@ -509,12 +529,13 @@ export default function AddPicker({
                 if (e.key === "Enter") {
                   const first = visibleSections[0]?.items[0];
                   if (first) doPick(first.pick);
+                  else if (importMatches) onPickImport();
                 }
               }}
-              placeholder="Type to filter: barn, fence, wash..."
+              placeholder="Type to filter: barn, fence, wash, kml..."
               className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
             />
-            {visibleSections.length === 0 ? (
+            {visibleSections.length === 0 && !importMatches ? (
               <p className="mt-4 text-sm text-gray-500">Nothing matches. Try a shorter word.</p>
             ) : null}
             {visibleSections.map((s) => (
@@ -547,6 +568,23 @@ export default function AddPicker({
                 </div>
               </div>
             ))}
+            {/* Not drawn: shapes from a file. One quiet card at the end
+                so the map itself carries no import button. */}
+            {importMatches ? (
+              <div className="mt-4 border-t border-gray-200 pt-3">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  From a file
+                </p>
+                <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 md:gap-2">
+                  <PickerCard
+                    onClick={onPickImport}
+                    leading={<UploadGlyph />}
+                    label="Import a file"
+                    hint="KML, KMZ, GeoJSON, or a zipped shapefile; you review before saving"
+                  />
+                </div>
+              </div>
+            ) : null}
           </>
         )}
       </div>

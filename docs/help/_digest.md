@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-09-25, version 0.1.0, build baa1d1c. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-09-26, version 0.1.0, build e158819. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -353,6 +353,10 @@ This page lists every topic grouped like the menu, with search across titles, ke
 
 Upload boundary files you already have: a zipped shapefile from a surveyor, a KML or KMZ from Google Earth, or GeoJSON. Each feature in the file is previewed, you say what it is, and it saves.
 
+## From the map
+
+You do not have to leave the Map. Tap **+ Add** and pick **Import a file** at the bottom of the picker, or drag the file from your computer and drop it anywhere on the map. The shapes appear on the satellite view in the color of what they will become (dashed, so they read as not yet saved), the map zooms to them, and a review panel on the right sets each one's type, name, and property, the same choices as this page. Uncheck a shape to leave it out; it fades on the map. **Save** writes them and they join the map right where they were previewed. Nothing is stored until you save; **Cancel** clears the preview.
+
 ## How to use it
 
 - Drop the file in. Polygons can become a property, parcel, ag field, pasture/grassland, wetland, pollinator habitat, timber stand, or easement; lines become roads, pipes, fences, or line easements; points become assets with a type.
@@ -520,14 +524,14 @@ The Layers box (top left) turns each kind of thing on or off: properties, parcel
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. On an ag field, pasture, timber stand, or anything else that sits on a property, the panel's Property row is a link: tap the name to open that property's own panel (acres, entity, tenant activity, its tools), or **Page** beside it to go straight to the property page. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). A pollinator habitat's panel adds **Add photos**, which opens the camera on a phone and files the pictures on the habitat's page. Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. On an ag field, pasture, timber stand, or anything else that sits on a property, the panel's Property row is a link: tap the name to open that property's own panel (acres, entity, tenant activity, its tools), or **Page** beside it to go straight to the property page. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). A pollinator habitat's panel adds **Add photos**, which opens the camera on a phone and files the pictures on the habitat's page. Every panel has a **KML** button that downloads that one shape as a file for Google Earth or other mapping software. Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
 
 ## Other controls
 
 - **Zoom all** fits everything you own on screen.
 - **Fullscreen** hides the app frame; on a phone the panels stay usable.
-- **Print** (top right) makes a PDF of the framed area. See the Printing topic.
-- **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics.
+- **Print** and **Export** share one pill at the top right. Print makes a PDF of the framed area (see the Printing topic). Export downloads what the map shows as a KML or GeoJSON file (see the Exporting topic).
+- **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics. At the bottom of the picker, **Import a file** brings in shapes from a KML, KMZ, GeoJSON, or zipped shapefile instead of drawing them; you can also drag a file straight onto the map. See the Import files topic.
 - **Filter** (under the Layers box) hides individual items from the map: tap property chips to hide a whole property with everything on it, or open the searchable item tree and uncheck single fields, stands, or assets. Hidden items leave the map and its labels, an amber "N hidden" pill offers one-tap clear, and your choices stick on this device. Layers stay the coarse control; Filter works within them.
 
 ## Common questions
@@ -540,7 +544,7 @@ Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its 
 
 ## Pick first, then draw
 
-Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Pollinator habitat, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), and at the bottom, under **Needs attention**, a Maintenance issue. A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
+Tap **+ Add**. One picker holds everything addable, in groups: **Land and boundaries** (Property boundary, Parcel, Ag field, Timber stand, Pasture/Grassland, Wetland, Pollinator habitat, Cemetery with Draw the plot or Drop a pin), **Lines and corridors** (Road, Easement with Line or Area, Fence), **Assets** (see the Assets topic), under **Needs attention**, a Maintenance issue, and last, under **From a file**, **Import a file** for shapes you already have as a KML, KMZ, GeoJSON, or zipped shapefile (see the Import files topic). A filter box at the top narrows the list as you type. Once you pick, the right tool loads, the shape you draw shows in that type's color, and the save form already knows what it is, with its extra fields visible from the start (stand type and species for timber, easement type and holder for easements). The type stays fixed for that session; to draw something else, finish or cancel and start again.
 
 ## Drawing a shape
 
@@ -630,6 +634,27 @@ Generate renders the framed area at print resolution and downloads a Letter PDF 
 
 - **Why is the legend short?** It lists only layers that are checked and present in the frame.
 - **Can I print more than one page?** Each print is one page. Frame a second area and generate again.
+
+# Exporting boundaries as KML or GeoJSON  (page: /map)
+
+## What you can export
+
+Every shape on the map can leave the app as a file: property and parcel boundaries, ag fields, pastures/grassland, wetlands, pollinator habitats, timber stands, cemeteries, roads, easements, assets, and maintenance issues. Two formats: **KML**, which opens in Google Earth, onX, and most farm and mapping software, and **GeoJSON** for GIS tools like QGIS and ArcGIS. Each shape carries its name, what it is, its acres or length, the property it sits on, and its details (parcel number and deeded acres, stand type and species, easement type and holder). The file is grouped in folders by kind, colored the way the map draws them.
+
+## The whole map, or part of it
+
+Tap **Export** in the pill at the top right (beside Print). The panel starts from exactly what the map shows: layers that are off and items hidden by Filter are already left out. Change your mind with the property chips (a whole property with everything on it), the **Choose items** tree (single fields, stands, or assets), or the "N items left out" pill to include everything. The map follows your choices while the panel is open, so what you see is what goes in the file. Pick the format and tap **Download**. The file is named after your organization and the date.
+
+## One shape
+
+Tap anything on the map and press **KML** in its panel. You get a file with just that shape, named after it. Handy for sending a tenant one field, or a surveyor one parcel.
+
+## Common questions
+
+- **Which format should I send?** KML unless the person asked for something else. Google Earth, onX Hunt, most farm software, and every surveyor read it. GeoJSON is for GIS people.
+- **Can I export a shapefile?** Not directly. Export KML or GeoJSON; QGIS (free) and most GIS tools convert either to a shapefile in a few clicks.
+- **Will it re-import cleanly?** Yes. Drop the same KML back on the map or on the Import page and each shape comes back with its name, ready to be typed and saved again.
+- **Do hidden things export?** Not unless you include them. Export starts from the screen; use the item tree to add anything the map is hiding.
 
 # Neighbors  (page: /map)
 

@@ -17,6 +17,7 @@ import {
   easementShowsEmergencyPhoneProminently,
 } from "@/lib/easements";
 import { circleFromDetails, formatFootprint } from "@/lib/geo/circle";
+import { EXPORT_MIME, buildKml, downloadTextFile, fileSlug } from "@/lib/geo/kml";
 import { LAND_TYPE_LABELS } from "@/lib/landLabels";
 import {
   GEOMETRY_KIND_LABELS,
@@ -33,6 +34,7 @@ import {
 import turfArea from "@turf/area";
 import type { AssetGeo, EasementGeo, EntityType, MaintenanceIssueGeo, ParcelGeo, RoadGeo } from "@/types/db";
 import type { AnyGeoRow } from "./types";
+import { rowToExportFeature } from "./exportFeatures";
 
 export const ENTITY_TABLE: Record<EntityType, string> = {
   property: "properties",
@@ -479,6 +481,21 @@ export default function FeaturePanel({
     onChanged();
   }
 
+  // This one shape as a KML file (Google Earth, onX, a surveyor's
+  // software). Its name, acres, and property travel along.
+  const exportFeature = rowToExportFeature(row, entityType, propertyName);
+  function downloadKml() {
+    if (!exportFeature) return;
+    downloadTextFile(
+      `${fileSlug(exportFeature.name, "shape")}.kml`,
+      buildKml([exportFeature], {
+        documentName: exportFeature.name,
+        description: exportFeature.description,
+      }),
+      EXPORT_MIME.kml
+    );
+  }
+
   const geometryButtonLabel =
     entityType === "road"
       ? "Edit line"
@@ -899,6 +916,15 @@ export default function FeaturePanel({
               >
                 Timber Scan
               </Link>
+            ) : null}
+            {exportFeature ? (
+              <button
+                onClick={downloadKml}
+                title="Download this shape as a KML file for Google Earth or other mapping software"
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                KML
+              </button>
             ) : null}
             <button
               onClick={remove}

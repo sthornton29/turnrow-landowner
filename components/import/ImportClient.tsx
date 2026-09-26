@@ -3,11 +3,19 @@
 import { useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { Geometry, MultiPolygon } from "geojson";
+import type { MultiPolygon } from "geojson";
 import { createClient } from "@/lib/supabase/client";
-import { parseBoundaryFile, type FeatureKind } from "@/lib/geo/parse";
-import { approxAcres } from "@/lib/geo/normalize";
-import { suggestPropertyId } from "@/lib/geo/propertyMatch";
+import { parseBoundaryFile } from "@/lib/geo/parse";
+import {
+  IMPORT_ACCEPT,
+  IMPORT_POLYGON_OPTIONS,
+  buildImportRows,
+  defaultPolygonTypeFor,
+  importValidationError,
+  saveImportRows,
+  type ImportRow,
+  type ImportSaveResult,
+} from "@/lib/geo/importRows";
 import { formatAcres } from "@/lib/format";
 import { ASSET_TYPES, ASSET_TYPE_ORDER } from "@/lib/assetTypes";
 import type { AssetType, EntityType } from "@/types/db";
@@ -15,46 +23,9 @@ import type { PreviewFeature } from "./PreviewMap";
 
 const PreviewMap = dynamic(() => import("./PreviewMap"), { ssr: false });
 
-interface ImportRow {
-  localId: string;
-  include: boolean;
-  kind: FeatureKind;
-  entityType: EntityType;
-  assetType: AssetType; // used when entityType === "asset"
-  name: string;
-  // "existing:<uuid>" | "new:<localId>" | ""
-  propertyRef: string;
-  // The location-based suggestion, kept so the UI can show when the
-  // current assignment came from it (and when the user overrode it).
-  suggestedRef: string | null;
-  geometry: Geometry;
-  acres: number | null;
-  sourceFile: string;
-}
-
-const TABLE: Record<string, string> = {
-  property: "properties",
-  parcel: "parcels",
-  field: "fields",
-  pasture: "pastures",
-  wetland: "wetlands",
-  pollinator_habitat: "pollinator_habitats",
-  timber_stand: "timber_stands",
-  road: "roads",
-  asset: "assets",
-  cemetery: "cemeteries",
-};
-
-const POLYGON_OPTIONS: Array<[EntityType, string]> = [
-  ["property", "Property"],
-  ["parcel", "Parcel"],
-  ["field", "Ag field"],
-  ["pasture", "Pasture/Grassland"],
-  ["wetland", "Wetland (open)"],
-  ["pollinator_habitat", "Pollinator habitat"],
-  ["timber_stand", "Timber stand"],
-  ["cemetery", "Cemetery"],
-];
+// The rows, validation, and save live in lib/geo/importRows.ts, shared
+// with the map's own import panel so a file imports the same way from
+// either screen.
 
 export default function ImportClient({
   orgId,
@@ -81,10 +52,9 @@ export default function ImportClient({
   const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ saved: number; failures: string[] } | null>(null);
+  const [result, setResult] = useState<ImportSaveResult | null>(null);
 
-  const defaultPolygonType: EntityType =
-    existingProperties.length > 0 ? "field" : "property";
+  const defaultPolygonType = defaultPolygonTypeFor(existingProperties.length);
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
@@ -98,34 +68,11 @@ export default function ImportClient({
       try {
         const parsed = await parseBoundaryFile(file);
         newSkipped.push(...parsed.skipped.map((s) => `${file.name}: ${s}`));
-        for (const f of parsed.features) {
-          const entityType: EntityType =
-            f.kind === "polygon"
-              ? defaultPolygonType
-              : f.kind === "line"
-                ? "road"
-                : "asset";
-          // Which property contains this feature? Preselected as a
-          // suggestion; the user confirms or changes it in the review.
-          const suggestedId = suggestPropertyId(f.geometry, matchableProperties);
-          const suggestedRef = suggestedId ? `existing:${suggestedId}` : null;
-          newRows.push({
-            localId: `${file.name}-${f.sourceIndex}-${Math.random().toString(36).slice(2, 8)}`,
-            include: true,
-            kind: f.kind,
-            entityType,
-            assetType: f.kind === "line" ? "underground_pipe" : "other",
-            name: f.suggestedName,
-            propertyRef: entityType === "property" ? "" : (suggestedRef ?? ""),
-            suggestedRef,
-            geometry: f.geometry,
-            acres:
-              f.kind === "polygon"
-                ? approxAcres(f.geometry as MultiPolygon)
-                : null,
-            sourceFile: file.name,
-          });
-        }
+        // Each row is preassigned to the property that contains it; the
+        // user confirms or changes it in the review.
+        newRows.push(
+          ...buildImportRows(file.name, parsed, { defaultPolygonType, matchableProperties })
+        );
       } catch (err) {
         newErrors.push(err instanceof Error ? err.message : String(err));
       }
@@ -149,109 +96,22 @@ export default function ImportClient({
   );
 
   const included = rows.filter((r) => r.include);
-  const validationError = useMemo(() => {
-    for (const r of included) {
-      if (!r.name.trim()) return "Every included feature needs a name.";
-      if (
-        r.entityType !== "property" &&
-        r.entityType !== "asset" &&
-        !r.propertyRef
-      ) {
-        return "Parcels, ag fields, pastures, wetlands, pollinator habitats, timber stands, and roads must be assigned to a property.";
-      }
-    }
-    return null;
-  }, [included]);
+  const validationError = useMemo(() => importValidationError(rows), [rows]);
 
   async function saveAll() {
     if (validationError || included.length === 0) return;
     setSaving(true);
-    const failures: string[] = [];
-    let saved = 0;
-    const newPropertyIds = new Map<string, string>();
-
-    async function setGeometry(entityType: EntityType, id: string, g: Geometry) {
-      const { error } = await supabase.rpc("set_geometry", {
-        p_entity_type: entityType,
-        p_entity_id: id,
-        p_geojson: g,
-      });
-      return error;
-    }
-
-    function resolveProperty(r: ImportRow): string | null {
-      if (r.propertyRef.startsWith("existing:")) {
-        return r.propertyRef.slice("existing:".length);
-      }
-      if (r.propertyRef.startsWith("new:")) {
-        return newPropertyIds.get(r.propertyRef.slice("new:".length)) ?? null;
-      }
-      return null;
-    }
-
-    // Pass 1: properties, so other rows in the batch can reference them.
-    for (const r of included.filter((x) => x.entityType === "property")) {
-      const { data, error } = await supabase
-        .from("properties")
-        .insert({ organization_id: orgId, name: r.name.trim() })
-        .select("id")
-        .single();
-      if (error || !data) {
-        failures.push(`${r.name}: ${error?.message ?? "insert failed"}`);
-        continue;
-      }
-      const gErr = await setGeometry("property", data.id, r.geometry);
-      if (gErr) {
-        failures.push(`${r.name}: geometry failed (${gErr.message})`);
-        continue;
-      }
-      newPropertyIds.set(r.localId, data.id);
-      saved++;
-    }
-
-    // Pass 2: everything else.
-    for (const r of included.filter((x) => x.entityType !== "property")) {
-      const propertyId = resolveProperty(r);
-      if (!propertyId && r.entityType !== "asset") {
-        failures.push(`${r.name}: its property was not saved, skipped.`);
-        continue;
-      }
-      let insert: Record<string, unknown>;
-      if (r.entityType === "parcel") {
-        insert = { organization_id: orgId, property_id: propertyId, parcel_number: r.name.trim() };
-      } else if (r.entityType === "asset") {
-        insert = {
-          organization_id: orgId,
-          property_id: propertyId,
-          name: r.name.trim(),
-          asset_type: r.assetType,
-        };
-      } else {
-        insert = { organization_id: orgId, property_id: propertyId, name: r.name.trim() };
-      }
-      const { data, error } = await supabase
-        .from(TABLE[r.entityType])
-        .insert(insert)
-        .select("id")
-        .single();
-      if (error || !data) {
-        failures.push(`${r.name}: ${error?.message ?? "insert failed"}`);
-        continue;
-      }
-      const gErr = await setGeometry(r.entityType, data.id, r.geometry);
-      if (gErr) {
-        failures.push(`${r.name}: geometry failed (${gErr.message})`);
-        continue;
-      }
-      saved++;
-    }
-
+    const outcome = await saveImportRows(supabase, orgId, rows);
     setSaving(false);
-    setResult({ saved, failures });
-    if (failures.length === 0) {
+    setResult(outcome);
+    if (outcome.failures.length === 0) {
       setRows([]);
       setSkipped([]);
       setFileErrors([]);
+    } else {
+      // Keep only what did not save, so a retry never doubles a shape.
+      const saved = new Set(outcome.savedLocalIds);
+      setRows((prev) => prev.filter((r) => !saved.has(r.localId)));
     }
   }
 
@@ -298,7 +158,7 @@ export default function ImportClient({
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".geojson,.json,.kml,.kmz,.zip"
+          accept={IMPORT_ACCEPT}
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
@@ -385,7 +245,7 @@ export default function ImportClient({
                       }}
                       className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
                     >
-                      {POLYGON_OPTIONS.map(([value, label]) => (
+                      {IMPORT_POLYGON_OPTIONS.map(([value, label]) => (
                         <option key={value} value={value}>
                           {label}
                         </option>

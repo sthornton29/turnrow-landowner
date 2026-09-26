@@ -3,8 +3,8 @@ title: The map
 route: /map
 group: Map
 order: 1
-updated: 2026-08-30
-keywords: map, satellite, layers, legend, filter, hide, hidden, parcels, ag fields, pastures, grassland, cemeteries, wetlands, pollinator habitat, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels
+updated: 2026-09-26
+keywords: map, satellite, layers, legend, filter, hide, hidden, parcels, ag fields, pastures, grassland, cemeteries, wetlands, pollinator habitat, timber, roads, easements, assets, maintenance issues, click, panel, zoom, fullscreen, crops, by entity, labels, export, kml, import, drop a file
 ---
 ## What this page is for
 
@@ -24,14 +24,14 @@ The Layers box (top left) turns each kind of thing on or off: properties, parcel
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. On an ag field, pasture, timber stand, or anything else that sits on a property, the panel's Property row is a link: tap the name to open that property's own panel (acres, entity, tenant activity, its tools), or **Page** beside it to go straight to the property page. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). A pollinator habitat's panel adds **Add photos**, which opens the camera on a phone and files the pictures on the habitat's page. Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
+Tapping a feature opens a panel (a card on desktop, a sheet on phones) with its acres or length, property, details, notes, and buttons: Edit details, Edit boundary or line, Move pin, and the feature's special tools (Split for a timber stand, Edit coverage for a pivot, Edit circle for a round footprint). View full page opens its summary page with documents. On an ag field, pasture, timber stand, or anything else that sits on a property, the panel's Property row is a link: tap the name to open that property's own panel (acres, entity, tenant activity, its tools), or **Page** beside it to go straight to the property page. A maintenance issue's panel adds **Mark resolved** (or **Reopen**). A pollinator habitat's panel adds **Add photos**, which opens the camera on a phone and files the pictures on the habitat's page. Every panel has a **KML** button that downloads that one shape as a file for Google Earth or other mapping software. Where things overlap, maintenance issues and assets win, then roads, easements, ag fields, pastures/grassland, cemeteries, wetlands, timber, parcels, and properties.
 
 ## Other controls
 
 - **Zoom all** fits everything you own on screen.
 - **Fullscreen** hides the app frame; on a phone the panels stay usable.
-- **Print** (top right) makes a PDF of the framed area. See the Printing topic.
-- **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics.
+- **Print** and **Export** share one pill at the top right. Print makes a PDF of the framed area (see the Printing topic). Export downloads what the map shows as a KML or GeoJSON file (see the Exporting topic).
+- **+ Add** opens one picker with everything addable (land, lines, assets, maintenance issues) and a filter box for a fast pick. See the Drawing and Assets topics. At the bottom of the picker, **Import a file** brings in shapes from a KML, KMZ, GeoJSON, or zipped shapefile instead of drawing them; you can also drag a file straight onto the map. See the Import files topic.
 - **Filter** (under the Layers box) hides individual items from the map: tap property chips to hide a whole property with everything on it, or open the searchable item tree and uncheck single fields, stands, or assets. Hidden items leave the map and its labels, an amber "N hidden" pill offers one-tap clear, and your choices stick on this device. Layers stay the coarse control; Filter works within them.
 
 ## Common questions

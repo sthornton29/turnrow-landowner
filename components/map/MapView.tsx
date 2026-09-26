@@ -24,6 +24,23 @@ import {
   toMultiPolygon,
 } from "@/lib/geo/normalize";
 import { drawAreaReadout, type DrawAreaReadout } from "@/lib/geo/drawArea";
+import { parseBoundaryFile } from "@/lib/geo/parse";
+import {
+  IMPORT_ACCEPT,
+  buildImportRows,
+  defaultPolygonTypeFor,
+  saveImportRows,
+  type ImportRow,
+  type ImportSaveResult,
+} from "@/lib/geo/importRows";
+import {
+  EXPORT_MIME,
+  downloadTextFile,
+  exportFileName,
+  fileSlug,
+  serializeExport,
+  type ExportFormat,
+} from "@/lib/geo/kml";
 import { LAND_TYPE_LABELS } from "@/lib/landLabels";
 import {
   ASSET_TYPES,
@@ -132,6 +149,8 @@ import {
   type PrintLayerFlags,
 } from "./printPdf";
 import FeaturePanel, { ENTITY_TABLE } from "./FeaturePanel";
+import ImportPanel, { importPreviewFC } from "./ImportPanel";
+import { rowsToExportFeatures } from "./exportFeatures";
 import NewBoundaryDialog, { type BoundaryType, type NewBoundaryPayload } from "./NewBoundaryDialog";
 import NewLineDialog, { type NewLinePayload } from "./NewLineDialog";
 import NewAssetDialog, { type NewAssetPayload } from "./NewAssetDialog";
@@ -707,6 +726,40 @@ export default function MapView({
   const [printViewVersion, setPrintViewVersion] = useState(0);
   const printOpenRef = useRef(printOpen);
   printOpenRef.current = printOpen;
+
+  // ----------------------------------------------------------- export setup
+  // What the map shows, as a KML or GeoJSON file. The exclusion set
+  // starts from the live filter plus every layer that is off, so the
+  // file matches the screen; the property chips and the item tree edit
+  // it, and while the panel is open the map draws only what will export.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("kml");
+  const [exportExcluded, setExportExcluded] = useState<Set<string>>(new Set());
+  const [exportDrawerOpen, setExportDrawerOpen] = useState(false);
+  const [exportItemFilter, setExportItemFilter] = useState("");
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // ------------------------------------------------------- import from file
+  // Shapes from a chosen or dropped file (KML, KMZ, GeoJSON, shapefile)
+  // preview on the map in the color they will become while the review
+  // panel (ImportPanel.tsx) sets their type and property. Null = no
+  // import in progress; an empty list keeps the panel up to show why a
+  // file yielded nothing.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
+  const [importNotes, setImportNotes] = useState<string[]>([]);
+  const [importParsing, setImportParsing] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
+  const [importResult, setImportResult] = useState<ImportSaveResult | null>(null);
+  const [dropActive, setDropActive] = useState(false);
+  const [importToast, setImportToast] = useState<string | null>(null);
+  const importOpen = importRows !== null;
+
+  useEffect(() => {
+    if (!importToast) return;
+    const t = window.setTimeout(() => setImportToast(null), 4500);
+    return () => window.clearTimeout(t);
+  }, [importToast]);
 
   // ---------------------------------------------------------------- data
 
@@ -1415,6 +1468,30 @@ export default function MapView({
           "circle-opacity": 0.35, "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.5, "circle-stroke-opacity": 0.5 } });
 
+      // Import preview: shapes from a file, dashed, in the color of the
+      // type each will save as; unchecked rows fade.
+      map.addSource("import-preview", { type: "geojson", data: empty });
+      const included: mapboxgl.ExpressionSpecification = ["boolean", ["get", "included"], true];
+      map.addLayer({ id: "import-preview-fill", type: "fill", source: "import-preview",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "fill-color": ["get", "color"],
+          "fill-opacity": ["case", included, 0.35, 0.08] } });
+      map.addLayer({ id: "import-preview-outline", type: "line", source: "import-preview",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "line-color": ["get", "color"], "line-width": 2.5,
+          "line-dasharray": [2, 1.5],
+          "line-opacity": ["case", included, 1, 0.4] } });
+      map.addLayer({ id: "import-preview-line", type: "line", source: "import-preview",
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": ["get", "color"], "line-width": 3,
+          "line-dasharray": [2, 1.5],
+          "line-opacity": ["case", included, 1, 0.4] } });
+      map.addLayer({ id: "import-preview-point", type: "circle", source: "import-preview",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 8, "circle-color": ["get", "color"],
+          "circle-opacity": ["case", included, 0.9, 0.3],
+          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+
       // Acre labels on completed areas of the boundary being drawn.
       map.addSource("draw-area-labels", { type: "geojson", data: empty });
       map.addLayer({
@@ -1585,9 +1662,15 @@ export default function MapView({
       (map.getSource(source) as GeoJSONSource)?.setData(fc);
 
     // Item exclusions: while the print setup is open its own set rules
-    // (excluded items ghost); otherwise the LIVE MAP FILTER applies and
-    // hidden items simply leave their layers and labels.
-    const excluded = printOpen ? printExcluded : mapFilterExcluded;
+    // (excluded items ghost); while the export setup is open its set
+    // rules (excluded items leave, so the screen matches the file);
+    // otherwise the LIVE MAP FILTER applies and hidden items simply
+    // leave their layers and labels.
+    const excluded = printOpen
+      ? printExcluded
+      : exportOpen
+        ? exportExcluded
+        : mapFilterExcluded;
     const inc = <T extends AnyGeoRow>(rows: T[], type: EntityType): T[] =>
       excluded.size === 0
         ? rows
@@ -1647,7 +1730,16 @@ export default function MapView({
         didFitRef.current = true;
       }
     }
-  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, pollinatorHabitats, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, mapFilterExcluded, visibility, rowLists]);
+  }, [mapLoaded, properties, parcels, fields, pastures, wetlands, pollinatorHabitats, timber, roads, easements, assets, cemeteries, issues, farmActivity, entities, printOpen, printExcluded, exportOpen, exportExcluded, mapFilterExcluded, visibility, rowLists]);
+
+  // Import preview follows the review rows (and clears when it ends).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    (map.getSource("import-preview") as GeoJSONSource | undefined)?.setData(
+      importPreviewFC(importRows ?? [])
+    );
+  }, [importRows, mapLoaded]);
 
   // Color-by-entity toggle: recolor property outlines by holding entity
   useEffect(() => {
@@ -3156,6 +3248,8 @@ export default function MapView({
   const togglePrintKeys = (keys: string[]) => toggleKeysIn(setPrintExcluded, keys);
   const toggleFilterProperty = (pid: string) => togglePropertyIn(setMapFilterExcluded, pid);
   const toggleFilterKeys = (keys: string[]) => toggleKeysIn(setMapFilterExcluded, keys);
+  const toggleExportProperty = (pid: string) => togglePropertyIn(setExportExcluded, pid);
+  const toggleExportKeys = (keys: string[]) => toggleKeysIn(setExportExcluded, keys);
 
   // Every row on the map, grouped for the filter tree (unlike the print
   // drawer, NOT frame-limited: the filter panel lists everything).
@@ -3179,6 +3273,128 @@ export default function MapView({
     }
     return items;
   }, [rowLists]);
+
+  const propertyNames = useMemo(
+    () => new Map(properties.map((p) => [p.id, p.name])),
+    [properties]
+  );
+
+  // What the export panel will write: every row not excluded, in layer
+  // order, with a shape. Its length is the count on the button.
+  const exportFeatures = useMemo(
+    () => (exportOpen ? rowsToExportFeatures(rowLists, propertyNames, exportExcluded) : []),
+    [exportOpen, rowLists, propertyNames, exportExcluded]
+  );
+
+  function openExportSetup() {
+    setSelected(null);
+    setFilterOpen(false);
+    setPrintOpen(false);
+    // Start from the screen: the live filter plus every layer that is off.
+    const excluded = new Set(mapFilterExcluded);
+    for (const [type, rows] of Object.entries(rowLists) as Array<[EntityType, AnyGeoRow[]]>) {
+      if (visibility[type]) continue;
+      for (const row of rows) excluded.add(`${type}:${row.id}`);
+    }
+    setExportExcluded(excluded);
+    setExportDrawerOpen(false);
+    setExportItemFilter("");
+    setExportError(null);
+    setExportOpen(true);
+  }
+
+  function generateExport() {
+    if (exportFeatures.length === 0) {
+      setExportError("Nothing is selected. Check at least one item.");
+      return;
+    }
+    const label = orgName?.trim() || "Turnrow";
+    const text = serializeExport(exportFeatures, exportFormat, {
+      documentName: `${label} boundaries`,
+      description: `Exported from Turnrow Landowner on ${new Date().toLocaleDateString()}`,
+    });
+    downloadTextFile(
+      exportFileName(`${fileSlug(orgName)}-boundaries`, exportFormat),
+      text,
+      EXPORT_MIME[exportFormat]
+    );
+    setExportOpen(false);
+  }
+
+  // ------------------------------------------------------- import from file
+
+  function startImportFiles() {
+    importInputRef.current?.click();
+  }
+
+  async function handleImportFiles(fileList: FileList | File[] | null) {
+    const files = fileList ? Array.from(fileList) : [];
+    if (files.length === 0) return;
+    setSelected(null);
+    setPickerOpen(false);
+    setPrintOpen(false);
+    setExportOpen(false);
+    setFilterOpen(false);
+    setImportParsing(true);
+    setImportResult(null);
+    const newRows: ImportRow[] = [];
+    const notes: string[] = [];
+    const defaultPolygonType = defaultPolygonTypeFor(properties.length);
+    for (const file of files) {
+      try {
+        const parsed = await parseBoundaryFile(file);
+        notes.push(...parsed.skipped.map((s) => `${file.name}: ${s}`));
+        if (parsed.features.length === 0) notes.push(`${file.name}: no shapes found.`);
+        newRows.push(
+          ...buildImportRows(file.name, parsed, { defaultPolygonType, matchableProperties })
+        );
+      } catch (err) {
+        notes.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    setImportRows((prev) => [...(prev ?? []), ...newRows]);
+    setImportNotes((prev) => [...prev, ...notes]);
+    setImportParsing(false);
+    if (importInputRef.current) importInputRef.current.value = "";
+    const box = bboxOf(newRows.map((r) => r.geometry));
+    if (box) mapRef.current?.fitBounds(box, { padding: 80, maxZoom: 16, duration: 600 });
+  }
+
+  function updateImportRow(localId: string, patch: Partial<ImportRow>) {
+    setImportRows((prev) =>
+      prev ? prev.map((r) => (r.localId === localId ? { ...r, ...patch } : r)) : prev
+    );
+  }
+
+  function cancelImport() {
+    setImportRows(null);
+    setImportNotes([]);
+    setImportResult(null);
+  }
+
+  async function saveImport() {
+    if (!importRows) return;
+    setImportSaving(true);
+    const outcome = await saveImportRows(supabase, orgId, importRows);
+    await loadData();
+    setImportSaving(false);
+    if (outcome.failures.length === 0) {
+      cancelImport();
+      setImportToast(
+        `Saved ${outcome.saved} feature${outcome.saved === 1 ? "" : "s"} from the file.`
+      );
+      return;
+    }
+    // Keep only what did not save, so a retry never doubles a shape.
+    const saved = new Set(outcome.savedLocalIds);
+    setImportRows((prev) => (prev ? prev.filter((r) => !saved.has(r.localId)) : prev));
+    setImportResult(outcome);
+  }
+
+  // Files dragged over the map: a drop imports them. Only real file
+  // drags count, and only while just viewing the map.
+  const dragHasFiles = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
   // Excluded items vanish from the PDF, its legend, and its labels;
   // this filter is what makes the exclusion real at generation time.
@@ -3415,10 +3631,51 @@ export default function MapView({
           ? "fixed inset-0 z-50 bg-black"
           : "relative h-[calc(100dvh-3.5rem-4rem)] md:h-[calc(100dvh-3.5rem)]"
       }
+      onDragOver={(e) => {
+        if (mode !== "view" || !dragHasFiles(e)) return;
+        e.preventDefault();
+        if (!dropActive) setDropActive(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDropActive(false);
+      }}
+      onDrop={(e) => {
+        if (!dragHasFiles(e)) return;
+        e.preventDefault();
+        setDropActive(false);
+        if (mode === "view") void handleImportFiles(e.dataTransfer.files);
+      }}
     >
       {/* Explicit h-full rather than absolute inset-0: mapbox-gl.css forces
           position:relative on this element, which would collapse it to 0 height */}
       <div ref={containerRef} className="h-full w-full" />
+
+      {/* Import: the file chooser behind the Add picker's card, and the
+          drop target that appears while a file is dragged over the map. */}
+      <input
+        ref={importInputRef}
+        type="file"
+        multiple
+        accept={IMPORT_ACCEPT}
+        className="hidden"
+        onChange={(e) => void handleImportFiles(e.target.files)}
+      />
+      {dropActive ? (
+        <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-white bg-pine-900/50">
+          <div className="rounded-lg bg-white/95 px-4 py-3 text-center shadow-lg">
+            <p className="text-sm font-semibold text-gray-900">Drop to import</p>
+            <p className="text-xs text-gray-500">
+              KML, KMZ, GeoJSON, or a zipped shapefile. You review before anything saves.
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {importToast ? (
+        <div className="pointer-events-none absolute inset-x-0 top-16 z-20 mx-auto w-fit max-w-[92%] rounded-full bg-pine-900/95 px-3 py-1.5 text-xs font-medium text-white shadow-md md:top-3">
+          {importToast}
+        </div>
+      ) : null}
 
       {/* Crosshair for placement: pans-under AND draggable (generous
           hit area for thumbs). Place here confirms where it sits. */}
@@ -3453,14 +3710,22 @@ export default function MapView({
         </div>
       ) : null}
 
-      {/* Print button (top right) */}
-      {mode === "view" && !selected && !printOpen ? (
-        <button
-          onClick={openPrintSetup}
-          className="absolute right-3 top-3 z-20 rounded-lg bg-white/95 px-3 py-2 text-sm font-semibold text-gray-800 shadow-md hover:bg-white"
-        >
-          Print
-        </button>
+      {/* Print and Export (top right): one pill, the two ways the map
+          leaves the app (a PDF, or a KML/GeoJSON file). */}
+      {mode === "view" && !selected && !printOpen && !exportOpen && !importOpen ? (
+        <div className="absolute right-3 top-3 z-20 flex items-stretch overflow-hidden rounded-lg bg-white/95 text-sm font-semibold text-gray-800 shadow-md">
+          <button onClick={openPrintSetup} className="px-3 py-2 hover:bg-white">
+            Print
+          </button>
+          <span className="my-1.5 w-px bg-gray-300" aria-hidden />
+          <button
+            onClick={openExportSetup}
+            title="Download boundaries as a KML or GeoJSON file"
+            className="px-3 py-2 hover:bg-white"
+          >
+            Export
+          </button>
+        </div>
       ) : null}
 
       {/* Print frame: the page-aspect print area; pan/zoom the map
@@ -3699,6 +3964,141 @@ export default function MapView({
         </div>
       ) : null}
 
+      {/* Export setup panel: what the map shows, as a KML or GeoJSON
+          file. Same right-hand slot as the print setup. */}
+      {exportOpen ? (
+        <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[62%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-72 md:rounded-xl md:border">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">Export boundaries</h2>
+            <button
+              onClick={() => setExportOpen(false)}
+              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Starts with what the map shows now. Uncheck anything to leave it
+            out; the map follows, so what you see is what goes in the file.
+          </p>
+
+          <div className="mt-2 space-y-2 text-sm">
+            <div className="flex gap-1.5">
+              {(
+                [
+                  ["kml", "KML", "Google Earth and most mapping software"],
+                  ["geojson", "GeoJSON", "GIS tools"],
+                ] as Array<[ExportFormat, string, string]>
+              ).map(([fmt, label, hint]) => (
+                <button
+                  key={fmt}
+                  onClick={() => setExportFormat(fmt)}
+                  title={hint}
+                  className={
+                    "flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium " +
+                    (exportFormat === fmt
+                      ? "border-kelly-500 bg-kelly-50 text-pine-900"
+                      : "border-gray-300 text-gray-600")
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {properties.length > 1 ? (
+              <div>
+                <p className="pt-1 text-xs font-medium text-gray-600">
+                  Properties (tap to include or exclude)
+                </p>
+                <PropertyChips
+                  propertyIds={properties.map((p) => p.id)}
+                  properties={properties}
+                  excluded={exportExcluded}
+                  onToggleProperty={toggleExportProperty}
+                  what="the export"
+                />
+              </div>
+            ) : null}
+
+            {exportExcluded.size > 0 ? (
+              <button
+                onClick={() => setExportExcluded(new Set())}
+                className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+              >
+                {exportExcluded.size} item{exportExcluded.size === 1 ? "" : "s"} left out ·
+                include everything
+              </button>
+            ) : null}
+
+            <div>
+              <button
+                onClick={() => setExportDrawerOpen((o) => !o)}
+                className="flex w-full items-center justify-between rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Choose items
+                <span className="text-gray-400">{exportDrawerOpen ? "▴" : "▾"}</span>
+              </button>
+              {exportDrawerOpen ? (
+                <div className="mt-1 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2">
+                  <input
+                    value={exportItemFilter}
+                    onChange={(e) => setExportItemFilter(e.target.value)}
+                    placeholder="Filter items..."
+                    className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                  />
+                  <ItemTree
+                    items={filterItems}
+                    properties={properties}
+                    excluded={exportExcluded}
+                    filter={exportItemFilter}
+                    emptyText={
+                      exportItemFilter.trim() ? "Nothing matches." : "Nothing on the map yet."
+                    }
+                    onToggleKeys={toggleExportKeys}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            {exportError ? <p className="text-xs text-red-600">{exportError}</p> : null}
+            <button
+              onClick={generateExport}
+              disabled={exportFeatures.length === 0}
+              className="w-full rounded-lg bg-kelly-500 px-3 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+            >
+              Download {exportFeatures.length} item{exportFeatures.length === 1 ? "" : "s"} (.{exportFormat})
+            </button>
+            <p className="text-[11px] text-gray-500">
+              Names, acres, and the property each shape sits on travel with
+              it. KML opens in Google Earth, onX, and most mapping and farm
+              software; GeoJSON suits GIS tools. Tap any single item on the
+              map for its own KML.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Import review: the file's shapes are on the map; this sets
+          their type and property, then saves. */}
+      {importOpen ? (
+        <ImportPanel
+          rows={importRows ?? []}
+          notes={importNotes}
+          properties={properties}
+          parsing={importParsing}
+          saving={importSaving}
+          result={importResult}
+          onUpdateRow={updateImportRow}
+          onAddFiles={startImportFiles}
+          onSave={saveImport}
+          onCancel={cancelImport}
+        />
+      ) : null}
+
       {/* Left control column. 11.5rem is sized so every layer name in
           the toggle box fits on one line at 13px, measured against a
           future "Government payments" (131px in Segoe UI); see
@@ -3739,8 +4139,9 @@ export default function MapView({
           </div>
         ) : null}
         {/* Live map filter: hide individual items (the layer toggles
-            above stay the coarse control). */}
-        {mode === "view" ? (
+            above stay the coarse control). Out of the way while the
+            export or import panel has its own say over what shows. */}
+        {mode === "view" && !exportOpen && !importOpen ? (
           <button
             onClick={() => setFilterOpen((o) => !o)}
             className={
@@ -3880,7 +4281,7 @@ export default function MapView({
             ) : null}
           </div>
         ) : null}
-        {mode === "view" ? (
+        {mode === "view" && !importOpen ? (
           <button
             onClick={startAdd}
             className="w-full rounded-lg bg-kelly-500 px-3 py-2 text-sm font-semibold text-white shadow-md hover:bg-kelly-600"
@@ -4233,8 +4634,9 @@ export default function MapView({
         <div className="absolute inset-x-0 top-16 z-10 mx-auto w-fit max-w-[90%] rounded-lg bg-white/95 px-4 py-3 text-center shadow-lg md:top-3">
           <p className="text-sm font-medium text-gray-800">Nothing on the map yet</p>
           <p className="text-xs text-gray-500">
-            Fastest start: Import, then {'"'}Import from county records{'"'}. Or
-            draw with the Add button on the left.
+            Fastest start: Import, then {'"'}Import from county records{'"'}.
+            Have a KML or shapefile? Drop it on the map. Or draw with the
+            Add button on the left.
           </p>
         </div>
       ) : null}
@@ -4243,7 +4645,7 @@ export default function MapView({
           tri-state item tree as the print setup, against the map's own
           persisted exclusion set. No tap-to-ghost here: tapping the
           live map keeps meaning "open the thing". */}
-      {filterOpen && !printOpen ? (
+      {filterOpen && !printOpen && !exportOpen && !importOpen ? (
         <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:left-[13rem] md:top-3 md:bottom-auto md:max-h-[calc(100%-1.5rem)] md:w-80 md:rounded-xl md:border">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -4308,7 +4710,7 @@ export default function MapView({
       ) : null}
 
       {/* One-tap recovery when the panel is closed but items are hidden. */}
-      {!filterOpen && !printOpen && mode === "view" && mapFilterExcluded.size > 0 ? (
+      {!filterOpen && !printOpen && !exportOpen && !importOpen && mode === "view" && mapFilterExcluded.size > 0 ? (
         <button
           onClick={() => setMapFilterExcluded(new Set())}
           className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 shadow-md hover:bg-amber-100"
@@ -4323,6 +4725,10 @@ export default function MapView({
           onPickDraw={beginDrawSession}
           onPickAsset={beginAssetPlacement}
           onPickPivot={startPivotPlacement}
+          onPickImport={() => {
+            setPickerOpen(false);
+            startImportFiles();
+          }}
           onCancel={() => setPickerOpen(false)}
         />
       ) : null}
