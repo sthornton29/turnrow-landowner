@@ -116,18 +116,26 @@ export function matchEntity(
   const target = careOfTarget(header.taxpayer_name, header.care_of) ?? (header.taxpayer_name ?? "").trim();
   if (!target) return { entityId: null, evidence: null, comparedName: null };
   const printedNorm = normalizeOwnerName(target).normalized;
-  let best: { e: MatchableEntityRef; score: number; via: string } | null = null;
+  // An exact name or alias (after normalizing) always outranks a fuzzy
+  // one. ownerSimilarity scores a name whose words are all contained in a
+  // longer one as 1 too ("MARTIN VIRGINIA L" inside "VIRGINIA LARKIN
+  // MARTIN TRUST..."), which used to tie with the person's own exact
+  // alias and win by list order.
+  let best: { e: MatchableEntityRef; score: number; exact: boolean; via: string } | null = null;
   for (const e of entities) {
     const names = [{ n: e.name, via: "name" }, ...e.aliases.map((a) => ({ n: a, via: `alias "${a}"` }))];
     for (const { n, via } of names) {
       const norm = normalizeOwnerName(n).normalized;
       if (!norm) continue;
-      const score = norm === printedNorm ? 1 : ownerSimilarity(printedNorm, norm);
-      if (score >= CLUSTER_THRESHOLD && (!best || score > best.score)) best = { e, score, via };
+      const exact = norm === printedNorm;
+      const score = exact ? 1 : ownerSimilarity(printedNorm, norm);
+      if (score < CLUSTER_THRESHOLD) continue;
+      const better = !best || (exact && !best.exact) || (exact === best.exact && score > best.score);
+      if (better) best = { e, score, exact, via };
     }
   }
   if (!best) return { entityId: null, evidence: null, comparedName: target };
-  const how = best.score === 1 ? "matches" : "is a close spelling of";
+  const how = best.exact ? "matches" : "is a close spelling of";
   return {
     entityId: best.e.id,
     evidence: `"${target}" ${how} ${best.via === "name" ? best.e.name : `${best.via} of ${best.e.name}`}`,

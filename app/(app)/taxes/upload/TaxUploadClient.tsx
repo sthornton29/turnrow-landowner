@@ -12,6 +12,7 @@ import { groupPages, reconcile, type PageHeader, type RegisteredAccount, type St
 import { careOfTarget, matchEntity, matchLine, matchLineViaCounty, type CountyLineMatch, type CountyLookupHit, type MatchableEntityRef } from "@/lib/taxMatch";
 import { extractFile, extractStored } from "@/components/documents/classify";
 import { confirmLineParcel, confirmStatementEntity, countyLookup, importParcelHref, type CountyLearn } from "@/components/taxes/taxLearn";
+import { mergeSameParcelLines } from "@/lib/taxLineMerge";
 
 // ---------------------------------------------------------------- types
 
@@ -594,8 +595,10 @@ export default function TaxUploadClient({
       await supabase.from("tax_statements").update({ source_document_id: doc.id }).eq("id", statementId);
     }
 
-    // Lines.
-    const lineRows = s.lines.map((l, i) => {
+    // Lines. A parcel printed twice on one statement (regular tax plus
+    // an additional bill) becomes one line with the summed tax, since a
+    // parcel carries one line per tax year.
+    const rawLineRows = s.lines.map((l, i) => {
       const parcelId = l.mode === "create" ? (createdParcels.get(l.localId) ?? null) : l.mode === "matched" && l.parcelId ? l.parcelId : null;
       const isPP = l.lineType === "personal_property";
       const matchSource = isPP || !parcelId ? null : l.mode === "create" ? "manual" : (l.matchSource ?? "manual");
@@ -619,6 +622,7 @@ export default function TaxUploadClient({
         confirmed: true,
       };
     });
+    const { rows: lineRows, sourceIndex } = mergeSameParcelLines(rawLineRows);
     if (lineRows.length > 0) {
       const { data: inserted, error: lnErr } = await supabase.from("tax_statement_lines").insert(lineRows).select("id, line_no, parcel_id");
       if (lnErr || !inserted) {
@@ -635,7 +639,7 @@ export default function TaxUploadClient({
       // Learning: every identifier printed on a matched line saves onto its parcel.
       let learnedStore = stored;
       for (const row of inserted) {
-        const l = s.lines[(row.line_no as number) - 1];
+        const l = s.lines[sourceIndex.get(row.line_no as number) ?? (row.line_no as number) - 1];
         const parcelId = row.parcel_id as string | null;
         if (!l || !parcelId) continue;
         const err = await confirmLineParcel(supabase, {

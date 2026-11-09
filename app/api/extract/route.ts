@@ -478,7 +478,11 @@ export async function POST(request: Request) {
     userId: user.id,
     orgId: profile?.organization_id ?? null,
     kind: "extract",
-    limitPerHour: 60,
+    // Every statement in a multi-account tax PDF and every file in a bulk
+    // document upload is one read, so a single year's county notices can
+    // use 20 and a folder upload hundreds. 60 stopped real backfills
+    // midway; 300 still caps a runaway loop.
+    limitPerHour: 300,
   });
   if (!limit.allowed) return rateLimited429("extract");
 

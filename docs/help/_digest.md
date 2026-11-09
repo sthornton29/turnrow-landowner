@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-09, version 0.1.0, build 3841ae1. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-09, version 0.1.0, build 24d5b8b. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -784,6 +784,10 @@ A statement whose lines do not add up to its total shows an amber chip with the 
 ## Uploading statements
 
 Upload one PDF with many statements in it, or several files, or photos. The app first sorts the pages into statements (a whole-account bill repeats its account number and total on every page, so ten pages become one statement), then reads each statement's header and lines. Handwritten notes on the pages are ignored. You review a list of the statements found (county, account, taxpayer and entity, year, total, lines, whether the lines reconcile), open any to check its lines, and confirm one at a time or all at once. Nothing saves without confirmation. Each confirmed statement also files its source PDF in Documents under Property taxes, linked back to the statement; deleting a statement offers to remove the file too (a PDF shared by other statements stays).
+
+**Additional bills.** Some years a county prints a parcel twice on one statement, its regular tax and an additional bill. Those are saved as one line for the parcel with the two amounts added together, since a parcel carries one line per tax year.
+
+**Postcard bills and master receipts.** A bill that prints only a total (no parcel lines) can still be confirmed; the gap is kept on the statement and shown on the Property Taxes page. A county master receipt that summarizes several accounts may be read as its own statement with no county; skip it, because the accounts on it are already counted on their own statements.
 
 ## How parcels are matched
 
