@@ -42,6 +42,13 @@ export default function EntityDocuments({
   const [linksByDoc, setLinksByDoc] = useState<Record<string, string[]>>({});
   const [allProperties, setAllProperties] = useState<SelectableProperty[]>([]);
   const [intakeOpen, setIntakeOpen] = useState(false);
+  // A bulk upload with read but unsaved documents asks before closing.
+  const intakeDirty = useRef(false);
+  const closeIntake = useCallback(() => {
+    if (intakeDirty.current && !window.confirm("Close the upload? Documents that were read but not saved will be discarded.")) return;
+    intakeDirty.current = false;
+    setIntakeOpen(false);
+  }, []);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const isProperty = entityType === "property";
   const [busy, setBusy] = useState(false);
@@ -211,10 +218,10 @@ export default function EntityDocuments({
             <div className="mb-3 flex items-start justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Add a document</h2>
-                <p className="text-xs text-gray-500">Drop the file, confirm what was read, save. Nothing is stored until you confirm.</p>
+                <p className="text-xs text-gray-500">Drop one file or a whole folder, confirm what was read, save. Nothing is stored until you confirm.</p>
               </div>
               <button
-                onClick={() => setIntakeOpen(false)}
+                onClick={closeIntake}
                 aria-label="Close"
                 className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
@@ -232,7 +239,13 @@ export default function EntityDocuments({
                 propertyId: contextPropertyId,
               }}
               onSaved={() => load()}
-              onClose={() => setIntakeOpen(false)}
+              onClose={() => {
+                intakeDirty.current = false;
+                setIntakeOpen(false);
+              }}
+              onDirtyChange={(d) => {
+                intakeDirty.current = d;
+              }}
             />
           </div>
         </div>

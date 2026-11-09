@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-09-26, version 0.1.0, build e158819. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-09, version 0.1.0, build 3841ae1. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -131,6 +131,20 @@ Property matches are checked against your own records before they are shown: a p
 **Entering details by hand.** A quiet "Enter details manually instead" link sits on the upload and confirm screens. It switches to a plain form (type, properties, an optional record, title, and the type's fields), keeping your file. If the reader had already made suggestions, you choose whether to keep them as starting values. If a file cannot be read at all, you land on that form with a short message and the file attached; there is no dead end and no retry loop.
 
 Older files uploaded before types existed sit under Other; the **Type untyped** screen lets you classify them and apply in bulk.
+
+## Many documents at once
+
+Drop several files, or a whole folder, on the same Upload box (or use **Choose files** or **Choose a folder**). One file opens the full review above; several open a review table instead.
+
+- **Each file is read in the background**, three at a time, with a progress bar. You can review and save rows while the rest are still being read.
+- **Every row shows** the file, its proposed type, title, and properties, and a status: **Ready** (checked for you), **Needs a look** (with the reason: no property found, the parcel numbers and the description disagree, the type is uncertain, or the file could not be read), **Already in Turnrow**, or **Different upload** (a lease, tax bill, timber contract, or rent payment, which have their own upload).
+- **Folder names count.** A file inside a folder named after one of your properties (or a name it is also called) is attached to that property when the reader finds nothing better. When the folder and the document disagree, both are proposed and the row asks for a look.
+- **Nothing is saved twice.** A file with the same size and name as one already in Turnrow (even renamed with a prefix) is marked Already in Turnrow, unchecked, with a link to the copy.
+- **Fix in place.** Change a row's type, title, or properties right in the table, or check several rows and use **For checked rows** to add a property or set a type for all of them at once.
+- **Save checked** stores each checked file with its type, title, and properties. The reader's field details (owners, dates, acres) are not saved from the table, because those are only saved after a field-by-field review: open a document and use **Scan** to pull and review them.
+- Closing the box with read but unsaved rows asks first; files you leave are discarded.
+
+Word files upload too; the reader does not open them, so pick the type yourself.
 
 ## Scanning again
 

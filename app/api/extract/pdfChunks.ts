@@ -17,9 +17,37 @@ const DEFAULT_MAX_PAGES = 90;
 const DEFAULT_MAX_BYTES = 18 * 1024 * 1024;
 export const MODEL_PDF_MAX_BYTES = DEFAULT_MAX_BYTES;
 
+// Some scanner PDFs (older copier firmware especially) carry syntax
+// pdf-lib cannot parse ("Failed to parse number") while every viewer,
+// and the model, reads them fine. Those files cannot be split, so a
+// file small enough to send whole goes to the model as is; only a file
+// both unparseable and over the byte cap still fails, with a message
+// saying how to fix it.
+export class UnsplittablePdfError extends Error {
+  constructor() {
+    super(
+      "This PDF is too large to read in one piece and its internal structure cannot be split. Re-save it (Print to PDF) or split it, then upload again."
+    );
+  }
+}
+
+async function loadPdf(buffer: Buffer | Uint8Array): Promise<PDFDocument | null> {
+  try {
+    return await PDFDocument.load(buffer, { ignoreEncryption: true, updateMetadata: false });
+  } catch {
+    return null;
+  }
+}
+
+// Page count from the raw bytes, for files pdf-lib cannot parse.
+export function rawPageCount(buffer: Buffer | Uint8Array): number {
+  const text = Buffer.from(buffer).toString("latin1");
+  return Math.max(1, (text.match(/\/Type\s*\/Page(?!s)\b/g) ?? []).length);
+}
+
 export async function pageCount(buffer: Buffer | Uint8Array): Promise<number> {
-  const doc = await PDFDocument.load(buffer, { ignoreEncryption: true });
-  return doc.getPageCount();
+  const doc = await loadPdf(buffer);
+  return doc ? doc.getPageCount() : rawPageCount(buffer);
 }
 
 // Split into sub-PDFs of at most maxPages pages; a chunk that still
@@ -30,7 +58,11 @@ export async function splitPdf(
 ): Promise<Buffer[]> {
   const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const src = await loadPdf(buffer);
+  if (!src) {
+    if (buffer.byteLength <= maxBytes) return [Buffer.from(buffer)];
+    throw new UnsplittablePdfError();
+  }
   const total = src.getPageCount();
   if (total <= maxPages && buffer.byteLength <= maxBytes) {
     return [Buffer.from(buffer)];
@@ -61,7 +93,12 @@ export async function slicePages(
   buffer: Buffer | Uint8Array,
   pages: number[]
 ): Promise<Buffer> {
-  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const src = await loadPdf(buffer);
+  if (!src) {
+    // Cannot cut pages out; the whole (small) file stands in for them.
+    if (buffer.byteLength <= DEFAULT_MAX_BYTES) return Buffer.from(buffer);
+    throw new UnsplittablePdfError();
+  }
   const total = src.getPageCount();
   const indices = [...new Set(pages)]
     .filter((p) => Number.isInteger(p) && p >= 1 && p <= total)
@@ -81,7 +118,11 @@ export async function pageGroups(
   maxPages: number,
   maxBytes: number = DEFAULT_MAX_BYTES
 ): Promise<Array<{ bytes: Buffer; firstPage: number; pages: number }>> {
-  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const src = await loadPdf(buffer);
+  if (!src) {
+    if (buffer.byteLength <= maxBytes) return [{ bytes: Buffer.from(buffer), firstPage: 1, pages: rawPageCount(buffer) }];
+    throw new UnsplittablePdfError();
+  }
   const total = src.getPageCount();
   const out: Array<{ bytes: Buffer; firstPage: number; pages: number }> = [];
   let start = 0;
@@ -111,7 +152,14 @@ export async function firstPages(
   n: number,
   maxBytes: number = DEFAULT_MAX_BYTES
 ): Promise<{ bytes: Buffer; pages: number; total: number }> {
-  const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const src = await loadPdf(buffer);
+  if (!src) {
+    if (buffer.byteLength <= maxBytes) {
+      const total = rawPageCount(buffer);
+      return { bytes: Buffer.from(buffer), pages: total, total };
+    }
+    throw new UnsplittablePdfError();
+  }
   const total = src.getPageCount();
   if (total <= n && buffer.byteLength <= maxBytes) {
     return { bytes: Buffer.from(buffer), pages: total, total };

@@ -24,6 +24,7 @@ import {
   type MatchableParcel,
   type MatchableProperty,
 } from "@/lib/leaseLand";
+import { safeStorageName } from "@/lib/batchIntake";
 
 export interface LeasePrefill {
   lease_type?: LeaseType | null;
@@ -310,7 +311,7 @@ export default function LeaseForm({
 
     // Attach the source document the terms were extracted from.
     if (sourceFile) {
-      const path = `${orgId}/lease/${crypto.randomUUID()}-${sourceFile.name}`;
+      const path = `${orgId}/lease/${crypto.randomUUID()}-${safeStorageName(sourceFile.name)}`;
       const { error: upErr } = await supabase.storage
         .from("documents")
         .upload(path, sourceFile, { contentType: sourceFile.type });

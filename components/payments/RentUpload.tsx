@@ -40,6 +40,7 @@ import SettlementReview, {
   type SaleOption,
   type SettlementExtraction,
 } from "@/components/timber/SettlementReview";
+import { safeStorageName } from "@/lib/batchIntake";
 
 interface Tenant {
   id: string;
@@ -321,7 +322,7 @@ export default function RentUpload({
     entityType: "lease" | "timber_sale",
     entityId: string
   ): Promise<string | null> {
-    const path = `${orgId}/${entityType}/${crypto.randomUUID()}-${item.file.name}`;
+    const path = `${orgId}/${entityType}/${crypto.randomUUID()}-${safeStorageName(item.file.name)}`;
     const { error: upErr } = await supabase.storage
       .from("documents")
       .upload(path, item.file, { contentType: item.file.type || undefined });

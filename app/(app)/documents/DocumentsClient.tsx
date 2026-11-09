@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DOC_GROUPS,
@@ -73,6 +73,13 @@ function DocumentsInner({
   const type = (params.get("type") ?? "") as DocType | "";
   const groupBy = (params.get("groupBy") ?? "none") as GroupBy;
   const [uploadOpen, setUploadOpen] = useState(false);
+  // A bulk upload with read but unsaved documents asks before closing.
+  const uploadDirty = useRef(false);
+  const closeUpload = useCallback(() => {
+    if (uploadDirty.current && !window.confirm("Close the upload? Documents that were read but not saved will be discarded.")) return;
+    uploadDirty.current = false;
+    setUploadOpen(false);
+  }, []);
 
   const setParams = useCallback(
     (patch: Record<string, string>) => {
@@ -425,10 +432,10 @@ function DocumentsInner({
             <div className="mb-3 flex items-start justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Add a document</h2>
-                <p className="text-xs text-gray-500">Drop the file, confirm what was read, save. Nothing is stored until you confirm.</p>
+                <p className="text-xs text-gray-500">Drop one file or a whole folder, confirm what was read, save. Nothing is stored until you confirm.</p>
               </div>
               <button
-                onClick={() => setUploadOpen(false)}
+                onClick={closeUpload}
                 aria-label="Close"
                 className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
@@ -437,7 +444,17 @@ function DocumentsInner({
                 </svg>
               </button>
             </div>
-            <IntakeFlow orgId={orgId} onSaved={() => router.refresh()} onClose={() => setUploadOpen(false)} />
+            <IntakeFlow
+              orgId={orgId}
+              onSaved={() => router.refresh()}
+              onClose={() => {
+                uploadDirty.current = false;
+                setUploadOpen(false);
+              }}
+              onDirtyChange={(d) => {
+                uploadDirty.current = d;
+              }}
+            />
           </div>
         </div>
       ) : null}

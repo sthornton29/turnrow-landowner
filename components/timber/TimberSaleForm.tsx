@@ -14,6 +14,7 @@ import {
   type TimberSchedulePayment,
 } from "@/lib/leaseLogic";
 import type { AllocationMethod } from "@/lib/timberAllocation";
+import { safeStorageName } from "@/lib/batchIntake";
 
 export interface TimberPrefill {
   sale_name?: string | null;
@@ -205,7 +206,7 @@ export default function TimberSaleForm({
       }
     }
     if (sourceFile) {
-      const path = `${orgId}/timber_sale/${crypto.randomUUID()}-${sourceFile.name}`;
+      const path = `${orgId}/timber_sale/${crypto.randomUUID()}-${safeStorageName(sourceFile.name)}`;
       const { error: upErr } = await supabase.storage
         .from("documents")
         .upload(path, sourceFile, { contentType: sourceFile.type });

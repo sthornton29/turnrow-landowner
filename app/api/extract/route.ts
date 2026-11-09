@@ -8,7 +8,7 @@ import {
   type SettlementColumnMap,
 } from "@/lib/timberSettlement";
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
-import { MODEL_PDF_MAX_BYTES, firstPages, pageCount, pageGroups, slicePages, splitPdf } from "./pdfChunks";
+import { MODEL_PDF_MAX_BYTES, UnsplittablePdfError, firstPages, pageCount, pageGroups, slicePages, splitPdf } from "./pdfChunks";
 import { TAX_SEGMENT_PROMPT, TAX_SEGMENT_TOOL, TAX_STATEMENT_PROMPT, TAX_STATEMENT_TOOL } from "./taxTools";
 import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
 import { spatialEvidenceFor } from "@/lib/spatialEvidence";
@@ -774,6 +774,9 @@ export async function POST(request: Request) {
       const r = await run(bytes, isPdf, TAX_STATEMENT_TOOL, TAX_STATEMENT_PROMPT);
       return NextResponse.json({ extraction: r });
     } catch (err) {
+      if (err instanceof UnsplittablePdfError) {
+        return NextResponse.json({ error: err.message }, { status: 422 });
+      }
       const status = err instanceof Anthropic.APIError ? err.status : undefined;
       console.error("extract tax kind failed", kind, status, err instanceof Error ? err.message : err);
       return NextResponse.json(
@@ -958,6 +961,9 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ extraction, kind: vaultKind });
     } catch (err) {
+      if (err instanceof UnsplittablePdfError) {
+        return NextResponse.json({ error: err.message }, { status: 422 });
+      }
       if (err instanceof Error && err.message === "no tool use") {
         return NextResponse.json(
           { error: "The model did not return an extraction. Try again or enter the details by hand." },

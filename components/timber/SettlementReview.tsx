@@ -24,6 +24,7 @@ import {
   allocationShares,
   type AllocationMethod,
 } from "@/lib/timberAllocation";
+import { safeStorageName } from "@/lib/batchIntake";
 
 export interface SettlementExtraction {
   payer_name: string | null;
@@ -228,7 +229,7 @@ export default function SettlementReview({
       setError("Could not save the settlement: " + insErr.message);
       return;
     }
-    const path = `${orgId}/timber_sale/${crypto.randomUUID()}-${file.name}`;
+    const path = `${orgId}/timber_sale/${crypto.randomUUID()}-${safeStorageName(file.name)}`;
     const { error: upErr } = await supabase.storage
       .from("documents")
       .upload(path, file, { contentType: file.type || undefined });

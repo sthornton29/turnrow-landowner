@@ -1,17 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { scanKindFor, type DocType } from "@/lib/documents";
 import { proposeTitle } from "@/lib/documentTitle";
-import {
-  verifyMatches,
-  type MatchableEntity,
-  type MatchableParcel,
-  type MatchableProperty,
-  type PropertySuggestion,
-  type VerifiedMatches,
-} from "@/lib/documentMatch";
+import { verifyMatches, type PropertySuggestion, type VerifiedMatches } from "@/lib/documentMatch";
 import type { DocumentEntityType } from "@/types/db";
 import {
   intakeFile,
@@ -30,6 +23,8 @@ import ConfirmScreen from "./ConfirmScreen";
 import ManualForm from "./ManualForm";
 import SavedPanel from "./SavedPanel";
 import HandoffBanner from "./HandoffBanner";
+import BatchIntake from "./BatchIntake";
+import { intakeContextFrom, useMatchingContext } from "./useMatchingContext";
 import type { AttachOption, Draft, IntakeContextTarget } from "./types";
 
 type Step = "upload" | "reading" | "confirm" | "manual" | "saving" | "saved";
@@ -54,11 +49,15 @@ export default function IntakeFlow({
   context = null,
   onSaved,
   onClose,
+  onDirtyChange,
 }: {
   orgId: string;
   context?: IntakeContextTarget | null;
   onSaved: (documentId: string) => void;
   onClose: () => void;
+  // True while a bulk upload holds read documents that are not saved, so
+  // the modal can ask before closing.
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [step, setStep] = useState<Step>("upload");
@@ -76,60 +75,13 @@ export default function IntakeFlow({
   const [propsTouched, setPropsTouched] = useState(false);
 
   // Matching context, loaded once: properties, parcels, entities and
-  // their confirmed aliases. Session client; RLS scopes it.
-  const [properties, setProperties] = useState<MatchableProperty[]>([]);
-  const [propertyEntity, setPropertyEntity] = useState<Record<string, string | null>>({});
-  const [parcels, setParcels] = useState<MatchableParcel[]>([]);
-  const [entities, setEntities] = useState<MatchableEntity[]>([]);
+  // their confirmed aliases (shared with the bulk upload). Session
+  // client; RLS scopes it.
+  const matching = useMatchingContext(supabase);
+  const { properties, propertyEntity, parcels, entities } = matching;
   const [attachOptions, setAttachOptions] = useState<AttachOption[] | null>(null);
-
-  // Warm the land index (migration 0029) so the spatial tier matches by
-  // table lookup; idempotent and cheap when nothing changed.
-  useEffect(() => {
-    fetch("/api/land-index", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } }).catch(
-      () => undefined
-    );
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [p, pc, e, a, pa] = await Promise.all([
-        supabase.from("properties").select("id, name, county, state, fsa_numbers, acres, entity_id").order("name"),
-        supabase.from("parcels").select("id, property_id, parcel_number"),
-        supabase.from("entities").select("id, name").order("name"),
-        supabase.from("entity_aliases").select("entity_id, alias"),
-        supabase.from("property_aliases").select("property_id, alias"),
-      ]);
-      if (cancelled) return;
-      const props = (p.data ?? []) as Array<{ id: string; name: string; county: string | null; state: string | null; fsa_numbers: string[] | null; acres: number | string | null; entity_id: string | null }>;
-      const propAliases = new Map<string, string[]>();
-      for (const row of (pa.data ?? []) as Array<{ property_id: string; alias: string }>) {
-        propAliases.set(row.property_id, [...(propAliases.get(row.property_id) ?? []), row.alias]);
-      }
-      setProperties(
-        props.map((x) => ({
-          id: x.id,
-          name: x.name,
-          county: x.county,
-          state: x.state,
-          fsa_numbers: x.fsa_numbers ?? null,
-          acres: x.acres === null || x.acres === undefined ? null : Number(x.acres),
-          aliases: propAliases.get(x.id) ?? [],
-        }))
-      );
-      setPropertyEntity(Object.fromEntries(props.map((x) => [x.id, x.entity_id ?? null])));
-      setParcels(((pc.data ?? []) as MatchableParcel[]).map((x) => ({ id: x.id, property_id: x.property_id, parcel_number: x.parcel_number })));
-      const aliasesBy = new Map<string, string[]>();
-      for (const row of (a.data ?? []) as Array<{ entity_id: string; alias: string }>) {
-        aliasesBy.set(row.entity_id, [...(aliasesBy.get(row.entity_id) ?? []), row.alias]);
-      }
-      setEntities(((e.data ?? []) as Array<{ id: string; name: string }>).map((x) => ({ id: x.id, name: x.name, aliases: aliasesBy.get(x.id) ?? [] })));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase]);
+  // Several files dropped at once: the bulk review table takes over.
+  const [batch, setBatch] = useState<File[] | null>(null);
 
   const loadAttachOptions = useCallback(async () => {
     if (attachOptions !== null) return;
@@ -185,18 +137,10 @@ export default function IntakeFlow({
       return;
     }
     uploadedPathRef.current = path;
-    const res = await intakeFile({ storagePath: path, fileName: f.name, contentType: f.type || "application/pdf" }, {
-      properties: properties.map((p) => ({
-        name: p.name,
-        county: p.county,
-        state: p.state,
-        parcel_numbers: parcels.filter((pc) => pc.property_id === p.id).map((pc) => pc.parcel_number),
-        fsa_numbers: p.fsa_numbers ?? [],
-        acres: p.acres,
-        aliases: p.aliases ?? [],
-      })),
-      entities: entities.map((e) => ({ name: e.name, aliases: e.aliases })),
-    });
+    const res = await intakeFile(
+      { storagePath: path, fileName: f.name, contentType: f.type || "application/pdf" },
+      intakeContextFrom(matching)
+    );
     if ("error" in res) {
       // Never a dead end: the manual form with the file attached.
       setDraft(emptyDraft(context));
@@ -445,11 +389,30 @@ export default function IntakeFlow({
 
   const bigNote = file ? largeFileWarning(file) : null;
 
+  if (batch) {
+    return (
+      <BatchIntake
+        orgId={orgId}
+        files={batch}
+        context={context}
+        matching={matching}
+        onSaved={onSaved}
+        onDirtyChange={onDirtyChange}
+        onDone={onClose}
+        onStartOver={() => {
+          onDirtyChange?.(false);
+          setBatch(null);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-3">
       {step === "upload" ? (
         <DropZone
           onFile={handleFile}
+          onFiles={(files) => (files.length === 1 ? handleFile(files[0]) : setBatch(files))}
           onManual={goManual}
           intro={context ? `Adding to ${context.label}.` : null}
         />

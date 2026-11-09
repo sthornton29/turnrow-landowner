@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DocType } from "@/lib/documents";
+import { safeStorageName } from "@/lib/batchIntake";
 import type { AiEntityMatch, AiPropertyMatch, PropertyHints, SpatialEvidence } from "@/lib/documentMatch";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 
@@ -273,7 +274,7 @@ export async function uploadDocument(
 ): Promise<{ id: string } | { error: string }> {
   const path =
     args.storagePath ??
-    `${args.orgId}/${args.entityType}/${crypto.randomUUID()}-${args.file.name}`;
+    `${args.orgId}/${args.entityType}/${crypto.randomUUID()}-${safeStorageName(args.file.name)}`;
   if (!args.storagePath) {
     const upErr = await uploadToStorage(supabase, path, args.file);
     if (upErr) return { error: uploadErrorCopy(args.file.name, upErr) };
@@ -427,7 +428,7 @@ export async function replaceDocumentFile(
   >,
   file: File
 ): Promise<string | null> {
-  const path = `${doc.organization_id}/${doc.entity_type}/${crypto.randomUUID()}-${file.name}`;
+  const path = `${doc.organization_id}/${doc.entity_type}/${crypto.randomUUID()}-${safeStorageName(file.name)}`;
   const upErr = await uploadToStorage(supabase, path, file);
   if (upErr) return uploadErrorCopy(file.name, upErr);
   const { data: prior } = await supabase
@@ -488,7 +489,7 @@ export async function openDocument(
 
 // Storage path for a file read by the intake before its row exists.
 export function intakeStoragePath(orgId: string, file: File): string {
-  return `${orgId}/intake/${crypto.randomUUID()}-${file.name}`;
+  return `${orgId}/intake/${crypto.randomUUID()}-${safeStorageName(file.name)}`;
 }
 
 // Every extraction goes BY STORAGE PATH: the browser uploads the file
