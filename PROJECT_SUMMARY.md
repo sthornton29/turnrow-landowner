@@ -1,5 +1,28 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (OPS ACTIONS, migration 0044, not yet pushed). The write half of the
+ops API (turnrow-farm docs/OPS_ACTIONS.md; the read half, /api/ops/brief and
+/api/ops/data, came 2026-11-08). An Assignment in Turnrow Farm previews a fix
+here, a person confirms it there, and Farm calls apply. Routes:
+GET /api/ops/actions, POST /api/ops/actions/preview, POST /api/ops/actions/apply,
+on their own bearer token OPS_WRITE_TOKEN (OPS_WRITE_TOKEN_NEXT for rotation;
+the read token OPS_TOKEN is refused; unset answers 503), acting on OPS_ORG
+through the service role with every query filtered by it. lib/ops/actions.ts
+holds seven actions: set_expected_payments (a lease year's unpaid installments
+replaced; paid ones and government-share rows kept; stored rows win over the
+projection in lib/income.ts, so a December provisional payment plus a July
+final payment the next year can be set), set_crop_share_assumptions (the
+year's crop entries, as the lease page saves them), set_payment_schedule (1
+to 4 yearly payments, percents add to 100), add_land_to_lease and
+set_leased_acres (as the lease page's land links), set_lease_dates_tenant (as
+the lease form), set_tax_statement_dates (a misread due or delinquent date; a
+paid statement is refused). Preview fingerprints the normalized params and
+the before-state; apply re-previews (409 stale when it moved), replays a key
+already applied, and logs every call in ops_action_log (0044: outcome applied,
+stale, refused or failed; unique key among applied rows; admins read it).
+No action records a payment received or sends anything. Tested in
+lib/ops/actions.test.ts.
+
 2026-09-23 (ABSENTEE-LANDOWNER USABILITY PASS, no schema change). The
 navigation model moved to components/layout/nav.ts (one list of
 sections with a one-line hint each, DESKTOP_NAV groups, MOBILE_GROUPS,
