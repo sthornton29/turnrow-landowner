@@ -3,8 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Public routes that never require a session. /api/farm/sync is public at
 // the middleware level because the Vercel cron calls it; the route itself
-// enforces CRON_SECRET (GET) or a user session (POST).
-const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/api/farm/sync"];
+// enforces CRON_SECRET (GET) or a user session (POST). /api/ops (the
+// read-only ops API, 2026-11-08) is called with a bearer token by the
+// morning brief and Turnrow Farm; its routes enforce OPS_TOKEN.
+const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/api/farm/sync", "/api/ops"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
