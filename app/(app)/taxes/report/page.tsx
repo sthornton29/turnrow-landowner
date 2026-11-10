@@ -3,7 +3,7 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import { CU_STATUS_LABELS, buildTaxReport, type Finding, type ReportParcel } from "@/lib/taxReport";
-import { ParcelFlags, TaxReportControls } from "@/components/taxes/TaxReportControls";
+import { NoticeLog, ParcelFlags, TaxReportControls } from "@/components/taxes/TaxReportControls";
 
 export const metadata = { title: "Property tax report" };
 
@@ -40,7 +40,7 @@ export default async function TaxReportPage({
   searchParams: Promise<{ year?: string; entity?: string; property?: string; county?: string }>;
 }) {
   const sp = await searchParams;
-  const { supabase } = await requireOrg();
+  const { supabase, profile } = await requireOrg();
 
   const [
     { data: lines },
@@ -56,10 +56,13 @@ export default async function TaxReportPage({
     { data: leaseLands },
     { data: cuValues },
     { data: millage },
+    { data: notices },
   ] = await Promise.all([
-    supabase.from("tax_statement_lines").select("id, tax_statement_id, tax_year, tax_due, parcel_id, line_type"),
+    supabase
+      .from("tax_statement_lines")
+      .select("id, tax_statement_id, tax_year, tax_due, parcel_id, line_type, appraised_value, market_value, current_use_value"),
     supabase.from("tax_statements").select("id, tax_year, county, amount_due, delinquent_date, entity_id"),
-    supabase.from("tax_payments").select("tax_statement_id, amount"),
+    supabase.from("tax_payments").select("tax_statement_id, amount, paid_date"),
     supabase.from("parcels").select("id, parcel_number, county, property_id, acres, deeded_acres, attributes, current_use_status, is_homestead"),
     supabase.from("properties").select("id, name, entity_id").order("name"),
     supabase.from("entities").select("id, name").order("name"),
@@ -70,6 +73,7 @@ export default async function TaxReportPage({
     supabase.from("lease_lands").select("property_id"),
     supabase.from("tax_current_use_values").select("state, tax_year, land_type, rating, value_per_acre"),
     supabase.from("tax_millage_rates").select("state, county, district, tax_year, total_mills, timber_per_acre, dwelling_fee, verified"),
+    supabase.from("tax_valuation_notices").select("id, county, tax_year, notice_date, parcel_id").order("notice_date", { ascending: false }),
   ]);
 
   const years = Array.from(new Set((lines ?? []).map((l) => l.tax_year))).sort((a, b) => b - a);
@@ -133,7 +137,22 @@ export default async function TaxReportPage({
     incomeByProperty,
     cuValues: cuValues ?? [],
     millage: millage ?? [],
+    notices: notices ?? [],
   });
+
+  // The notice log shows the last two years of notices, open or closed.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const noticeRows = (notices ?? [])
+    .filter((n) => !county || n.county === county)
+    .slice(0, 8)
+    .map((n) => {
+      const d = new Date(n.notice_date + "T00:00:00");
+      d.setDate(d.getDate() + 30);
+      const deadline = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return { id: n.id, county: n.county, notice_date: n.notice_date, deadline, open: deadline >= todayIso };
+    });
+  const paidYears = Array.from(new Set(r.paidByYear.map((p) => p.year))).slice(0, 4);
+  const historyRows = r.parcels.filter((p) => p.history.some((h) => h.value));
 
   const counties = Array.from(new Set((parcels ?? []).map((p) => p.county).filter(Boolean))).sort() as string[];
   const scopeName = [
@@ -158,6 +177,9 @@ export default async function TaxReportPage({
           </p>
           <h1 className="text-xl font-semibold text-gray-900">Property tax report: {year}</h1>
           <p className="mt-0.5 text-sm text-gray-600">{scopeName}</p>
+          <Link href="/taxes/reread" className="text-xs font-medium text-kelly-700 hover:underline print:hidden">
+            Re-read bills for market and current use values
+          </Link>
         </div>
         <TaxReportControls
           year={year}
@@ -254,6 +276,9 @@ export default async function TaxReportPage({
           taxable land value per acre shows whether a parcel gets it: current use land is capped near{" "}
           {r.rates.cuYear ? `the ${r.rates.cuYear} state table` : "the state table"} ($532 an acre for the best crop and pasture
           land, $827 for timber). Set the &quot;Enrolled?&quot; answer where you know it; it overrides the estimate.
+          {r.cuSavesTotal > 0
+            ? ` Where a bill shows the market value, current use saves about ${money0(round10(r.cuSavesTotal))} a year on these parcels.`
+            : ""}
         </p>
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full min-w-[860px] text-sm">
@@ -361,6 +386,49 @@ export default async function TaxReportPage({
         </div>
       </section>
 
+      {/* 4b. Value history from the bills */}
+      {historyRows.length > 0 ? (
+        <section>
+          <h2 className="mb-1 text-lg font-semibold text-gray-900">Values on the bills</h2>
+          <p className="mb-2 text-sm text-gray-600">
+            The value each year&apos;s bill printed. &quot;Taxed&quot; is the value the tax was figured on; &quot;market&quot; is a
+            market value printed beside a lower current use value. Older bills mix the two, so{" "}
+            <Link href="/taxes/reread" className="text-kelly-700 hover:underline print:hidden">
+              re-reading the bills
+            </Link>{" "}
+            fills in both where they are printed.
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                  <th className="px-3 py-2">Parcel</th>
+                  <th className="px-3 py-2">Value by year</th>
+                  <th className="px-3 py-2 text-right">Current use saves</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyRows.map((p) => (
+                  <tr key={p.id} className="break-inside-avoid border-t border-gray-100 align-top">
+                    <td className="px-3 py-2">
+                      <span className="font-medium text-gray-900">{p.propertyName || "No property"}</span>
+                      <span className="block font-mono text-xs text-gray-500">{p.parcelNumber}</span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-700">
+                      {p.history
+                        .filter((h) => h.value)
+                        .map((h) => `${String(h.year).slice(2)}: ${money0(h.value!)}${h.kind === "market" ? " market" : h.kind === "taxed" ? "" : " ?"}`)
+                        .join("   ")}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-900">{p.cuSaves ? `${money0(p.cuSaves)} a year` : "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
       {/* 5. Next year */}
       {r.nextYear ? (
         <section className="rounded-xl border border-gray-200 bg-white p-4 text-sm">
@@ -388,6 +456,53 @@ export default async function TaxReportPage({
             </li>
           ))}
         </ul>
+        <div className="mt-3 rounded-xl border border-gray-200 bg-white p-4">
+          <h3 className="mb-1 font-semibold text-gray-900">Valuation notices</h3>
+          <p className="mb-2 text-sm text-gray-600">
+            When a county&apos;s valuation notice arrives, log the date printed on it. You have 30 days from it to protest a value to
+            the Board of Equalization, and the report counts that down at the top.
+          </p>
+          <NoticeLog orgId={profile.organization_id!} counties={counties} notices={noticeRows} />
+        </div>
+      </section>
+
+      {/* 6b. For the accountant */}
+      <section>
+        <h2 className="mb-1 text-lg font-semibold text-gray-900">Tax paid by calendar year</h2>
+        <p className="mb-2 text-sm text-gray-600">
+          For the accountant: property tax counts in the year it was paid, not the year on the bill (a 2025 bill paid in December
+          2025 is a 2025 deduction; paid in January 2026, a 2026 one). A bill covering several parcels is split by each
+          parcel&apos;s tax.
+        </p>
+        {r.paidByYear.length === 0 ? (
+          <p className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">No payments recorded.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {paidYears.map((y) => {
+              const rows = r.paidByYear.filter((p) => p.year === y);
+              const total = rows.reduce((s, p) => s + p.amount, 0);
+              return (
+                <div key={y} className="break-inside-avoid rounded-xl border border-gray-200 bg-white p-3 text-sm">
+                  <div className="mb-1 flex items-baseline justify-between">
+                    <span className="font-semibold text-gray-900">Paid in {y}</span>
+                    <span className="font-semibold text-pine-900">{formatDollars(total)}</span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {rows.map((p) => (
+                        <tr key={`${p.entity}|${p.property}`} className="border-t border-gray-100">
+                          <td className="py-1 pr-2 text-gray-700">{p.entity}</td>
+                          <td className="py-1 pr-2 text-gray-600">{p.property}</td>
+                          <td className="py-1 text-right text-gray-900">{formatDollars(p.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* 7. How we figured this */}

@@ -52,7 +52,12 @@ const sql49 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0049_tax_report_data.sql"),
   "utf8"
 );
-const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47 + sql48 + sql49;
+// 0050 adds the valuation notice log.
+const sql50 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0050_tax_report_finish.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47 + sql48 + sql49 + sql50;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
   sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
@@ -84,6 +89,10 @@ const policyBlocks =
   sql49.slice(
     sql49.indexOf("create policy parcel_valuations_all"),
     sql49.indexOf("create index parcel_valuations_org_idx")
+  ) +
+  sql50.slice(
+    sql50.indexOf("create policy tax_valuation_notices_all"),
+    sql50.indexOf("create index tax_valuation_notices_org_idx")
   );
 
 // The scoped-table list. Deliberately absent (documented in the
@@ -126,6 +135,7 @@ const SCOPED_TABLES = [
   "cost_share_payments",
   "timber_sale_bids",
   "parcel_valuations",
+  "tax_valuation_notices",
   "tax_statements",
   "tax_statement_lines",
   "tax_payments",

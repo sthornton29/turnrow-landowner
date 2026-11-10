@@ -1,5 +1,6 @@
 "use client";
 
+import { hasAnyValue, readLineValues, type LineValues } from "@/lib/taxLineValues";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -35,6 +36,8 @@ interface LineDraft {
   legal: string;
   address: string;
   acres: string;
+  // Bill values beyond the main fields (migration 0050), read-only.
+  values?: LineValues;
   // Match state
   mode: "matched" | "unmatched" | "create";
   parcelId: string;
@@ -307,6 +310,7 @@ export default function TaxUploadClient({
         legal: str(l.legal_description),
         address: str(l.property_address),
         acres: num(l.acres),
+        values: readLineValues(l),
         mode: m.parcelId ? "matched" : "unmatched",
         parcelId: m.parcelId ?? "",
         matchSource: m.parcelId ? "identifier" : null,
@@ -616,6 +620,7 @@ export default function TaxUploadClient({
         legal_description: l.legal.trim() || null,
         property_address: l.address.trim() || null,
         acres: money(l.acres),
+        ...(l.values && hasAnyValue(l.values) ? { ...l.values, values_read_at: new Date().toISOString() } : {}),
         parcel_id: isPP ? null : parcelId,
         match_source: matchSource,
         match_evidence: isPP || !parcelId ? null : l.mode === "create" ? "Parcel created from this statement" : l.evidence,

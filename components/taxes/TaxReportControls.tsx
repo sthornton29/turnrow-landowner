@@ -129,3 +129,91 @@ export function ParcelFlags({
     </span>
   );
 }
+
+// VALUATION NOTICE LOG (migration 0050): the date a county's valuation
+// notice arrived starts the 30-day Board of Equalization protest clock,
+// which the report counts down.
+export function NoticeLog({
+  orgId,
+  counties,
+  notices,
+}: {
+  orgId: string;
+  counties: string[];
+  notices: Array<{ id: string; county: string; notice_date: string; deadline: string; open: boolean }>;
+}) {
+  const router = useRouter();
+  const supabase = createClient();
+  const [county, setCounty] = useState(counties[0] ?? "");
+  const [date, setDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function add() {
+    if (!county || !date) return;
+    setBusy(true);
+    setError(null);
+    const { error: err } = await supabase.from("tax_valuation_notices").insert({
+      organization_id: orgId,
+      county,
+      tax_year: Number(date.slice(0, 4)),
+      notice_date: date,
+    });
+    setBusy(false);
+    if (err) {
+      setError(`Could not save: ${err.message}`);
+      return;
+    }
+    setDate("");
+    router.refresh();
+  }
+  async function remove(id: string) {
+    setBusy(true);
+    await supabase.from("tax_valuation_notices").delete().eq("id", id);
+    setBusy(false);
+    router.refresh();
+  }
+  const cls = "rounded-lg border border-gray-300 px-2 py-1 text-sm";
+  return (
+    <div className="space-y-2 text-sm">
+      {notices.length > 0 ? (
+        <ul className="space-y-1">
+          {notices.map((n) => (
+            <li key={n.id} className="flex flex-wrap items-center gap-2">
+              <span className="text-gray-900">
+                {n.county} County notice of {n.notice_date}:{" "}
+                {n.open ? (
+                  <span className="font-semibold text-red-700">protest by {n.deadline}</span>
+                ) : (
+                  <span className="text-gray-500">window closed {n.deadline}</span>
+                )}
+              </span>
+              <button onClick={() => remove(n.id)} disabled={busy} className="text-xs text-gray-500 hover:underline print:hidden">
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-gray-500">No valuation notices logged.</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2 print:hidden">
+        <select value={county} onChange={(e) => setCounty(e.target.value)} className={cls}>
+          {counties.map((c) => (
+            <option key={c} value={c}>
+              {c} County
+            </option>
+          ))}
+        </select>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls} aria-label="Date on the notice" />
+        <button
+          onClick={add}
+          disabled={busy || !county || !date}
+          className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50"
+        >
+          Log notice
+        </button>
+      </div>
+      {error ? <p className="text-red-600">{error}</p> : null}
+    </div>
+  );
+}

@@ -46,9 +46,20 @@ export interface ReportInput {
   state: string; // 'AL'
   propertyScope: Set<string> | null; // null = everything
   county: string | null;
-  lines: Array<{ id: string; tax_statement_id: string; tax_year: number; tax_due: number; parcel_id: string | null; line_type?: string }>;
+  lines: Array<{
+    id: string;
+    tax_statement_id: string;
+    tax_year: number;
+    tax_due: number;
+    parcel_id: string | null;
+    line_type?: string;
+    appraised_value?: number | null;
+    market_value?: number | null;
+    current_use_value?: number | null;
+  }>;
   statements: Array<{ id: string; tax_year: number; county: string | null; amount_due: number; delinquent_date: string | null; entity_id: string | null }>;
-  payments: Array<{ tax_statement_id: string; amount: number }>;
+  payments: Array<{ tax_statement_id: string; amount: number; paid_date?: string | null }>;
+  notices?: Array<{ county: string; tax_year: number; notice_date: string; parcel_id: string | null }>;
   parcels: ReportParcel[];
   properties: Array<{ id: string; name: string; entity_id: string | null }>;
   entityNames: Map<string, string[]>; // entity id -> name and aliases
@@ -79,6 +90,9 @@ export interface ParcelRow {
   tax: number; // selected year, from statements
   priorTax: number | null;
   nextTax: number | null; // from the county record for year + 1
+  history: Array<{ year: number; value: number | null; kind: ValueKind; tax: number }>;
+  latestMarket: { year: number; value: number } | null;
+  cuSaves: number | null; // a year, when on current use and a market value is known
 }
 
 export interface PropertyRow {
@@ -116,12 +130,31 @@ export interface TaxReport {
   nextYear: { total: number; covered: number; parcelsInScope: number; thisYear: number } | null;
   deadlines: Array<{ date: string; label: string; detail: string }>;
   coverage: { lines: number; matched: number; withRecord: number; parcels: number };
+  cuSavesTotal: number;
+  paidByYear: Array<{ year: number; entity: string; property: string; amount: number }>;
+  openNotices: Array<{ county: string; notice_date: string; deadline: string; parcelId: string | null }>;
   rates: { cuYear: number | null; millageNote: string };
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// What kind of value a bill printed: the value the tax was figured on
+// ("taxed"), or a market value printed beside a tax figured on a lower
+// current use value ("market"). Lawrence notices through 2024 printed
+// market value while taxing current use; from 2025 they print the taxed
+// value. Value x 10% x district mills (+ $0.10 per timber acre)
+// reproducing the tax means "taxed".
+export type ValueKind = "taxed" | "market" | "unknown";
+
+export function valueKind(value: number | null | undefined, tax: number, mills: number | null, timberAcres = 0): ValueKind {
+  if (!value || value <= 0 || !mills || tax <= 0) return "unknown";
+  const implied = ((tax - 0.1 * timberAcres) / (value * 0.1)) * 1000;
+  if (implied >= mills * 0.85 && implied <= mills * 1.2) return "taxed";
+  if (implied < mills * 0.6) return "market";
+  return "unknown";
+}
 
 // ADOR current use value for a land type and rating, the latest table at
 // or before the year.
@@ -278,6 +311,24 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
       savings = { mid: Math.round(at("average")), low: Math.round(at("good")), high: Math.round(at("poor")) };
     }
     const nextTax = rec && rec.year === year + 1 ? rec.taxDue : null;
+    // Value history from the bills: each printed value classified.
+    const history = Array.from(new Set(scopedLines.filter((l) => l.parcel_id === p.id).map((l) => l.tax_year)))
+      .sort((a, b) => a - b)
+      .map((y) => {
+        const ls = scopedLines.filter((l) => l.parcel_id === p.id && l.tax_year === y);
+        const t = r2(ls.reduce((s2, l) => s2 + Number(l.tax_due), 0));
+        const l0 = ls[0];
+        if (l0?.market_value) return { year: y, value: Number(l0.market_value), kind: "market" as ValueKind, tax: t };
+        const v = l0?.appraised_value != null ? Number(l0.appraised_value) : null;
+        return { year: y, value: v, kind: valueKind(v, t, m ? Number(m.total_mills) : null, rec?.timberAcres ?? 0), tax: t };
+      });
+    const mk = [...history].reverse().find((h) => h.kind === "market" && h.value);
+    const latestMarket = mk && mk.value ? { year: mk.year, value: mk.value } : null;
+    const onCU = status === "confirmed" || status === "county_yes" || status === "looks_cu";
+    const cuSaves =
+      onCU && latestMarket && rec?.taxableValue && m && latestMarket.value > rec.taxableValue
+        ? Math.round(((latestMarket.value - rec.taxableValue) * 0.1 * Number(m.total_mills)) / 1000)
+        : null;
     return {
       id: p.id,
       parcelNumber: p.parcel_number,
@@ -299,6 +350,9 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
       tax: taxIn(year, p.id),
       priorTax: hasYear(year - 1) ? taxIn(year - 1, p.id) : null,
       nextTax,
+      history,
+      latestMarket,
+      cuSaves,
     };
   });
 
@@ -436,8 +490,8 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
         kind: "line_mismatch",
         severity: "medium",
         title: `Bill line does not look like this parcel: ${r.parcelNumber}`,
-        detail: `The ${year} statement line matched to ${r.propertyName || "it"} is $${r.tax.toFixed(2)}, but the county figures $${r.nextTax.toFixed(2)} for ${year + 1}. A line matched to the wrong parcel, or one carrying a combined total, would do this.`,
-        action: "Open the statement on the Taxes page and check which parcel the line belongs to.",
+        detail: `The ${year} statement line matched to ${r.propertyName || "it"} is $${r.tax.toFixed(2)}, but the county figures $${r.nextTax.toFixed(2)} for ${year + 1}. Either the line belongs to another parcel (or carries a combined total), or the value basis changed between the years, for example current use granted or lost.`,
+        action: "Check the statement on the Taxes page. If the line is right, the change is real: confirm the parcel's current use status with the county.",
         dollars: null,
         parcelId: r.id,
         propertyId: r.propertyId,
@@ -564,6 +618,61 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
     .filter((d) => d.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  // Valuation notices: a protest is due within 30 days.
+  const openNotices = (inp.notices ?? [])
+    .filter((n) => (!inp.county || n.county === inp.county) && (!n.parcel_id || parcelIds.has(n.parcel_id)))
+    .map((n) => {
+      const d = new Date(n.notice_date + "T00:00:00");
+      d.setDate(d.getDate() + 30);
+      return { county: n.county, notice_date: n.notice_date, deadline: iso(d), parcelId: n.parcel_id };
+    })
+    .filter((n) => n.deadline >= today);
+  for (const n of openNotices) {
+    const jumps = findings.filter((f) => (f.kind === "tax_jump" || f.kind === "current_use") && (!n.parcelId || f.parcelId === n.parcelId));
+    findings.unshift({
+      id: `notice:${n.county}:${n.notice_date}:${n.parcelId ?? "all"}`,
+      kind: "protest_window",
+      severity: jumps.length ? "high" : "medium",
+      title: `Protest window open: ${n.county} County valuation notice`,
+      detail: `The notice dated ${n.notice_date} can be protested to the ${n.county} County Board of Equalization until ${n.deadline}.${jumps.length ? ` ${jumps.length} finding${jumps.length === 1 ? "" : "s"} above may be worth raising.` : ""}`,
+      action: "If a value looks too high, file a written protest with the Board of Equalization before the deadline (the parcel's appeal packet has the evidence). Class and current use questions go to the revenue commissioner.",
+      dollars: null,
+      deadline: n.deadline,
+      parcelId: n.parcelId,
+    });
+    deadlines.push({ date: n.deadline, label: `Protest deadline, ${n.county} County notice of ${n.notice_date}`, detail: "30 days from the valuation notice." });
+  }
+  deadlines.sort((a, b) => a.date.localeCompare(b.date));
+
+  // Tax PAID by calendar year (the year a cash-basis taxpayer deducts
+  // it), by entity and property, for the accountant.
+  const parcelProp = new Map(inp.parcels.map((p) => [p.id, p.property_id]));
+  const entName = new Map(Array.from(inp.entityNames.entries()).map(([k, v]) => [k, v[0]]));
+  const paidAgg = new Map<string, { year: number; entity: string; property: string; amount: number }>();
+  for (const pay of inp.payments) {
+    if (!pay.paid_date) continue;
+    const st = stmtById.get(pay.tax_statement_id);
+    if (!st || (inp.county && st.county !== inp.county)) continue;
+    const sl = inp.lines.filter((l) => l.tax_statement_id === pay.tax_statement_id);
+    const tot = sl.reduce((s2, l) => s2 + Number(l.tax_due), 0);
+    const parts = sl.length && tot > 0 ? sl.map((l) => ({ l, share: Number(l.tax_due) / tot })) : [{ l: null, share: 1 }];
+    for (const { l, share } of parts) {
+      const pid = l?.parcel_id ? (parcelProp.get(l.parcel_id) ?? null) : null;
+      if (inp.propertyScope && (!pid || !inp.propertyScope.has(pid))) continue;
+      const eid = (pid ? propEntity.get(pid) : null) ?? st.entity_id;
+      const entity = eid ? (entName.get(eid) ?? "Entity") : "No entity";
+      const property = pid ? (propName.get(pid) ?? "") : "Not tied to a parcel";
+      const y = Number(pay.paid_date.slice(0, 4));
+      const key = `${y}|${entity}|${property}`;
+      const cur = paidAgg.get(key) ?? { year: y, entity, property, amount: 0 };
+      cur.amount += Number(pay.amount) * share;
+      paidAgg.set(key, cur);
+    }
+  }
+  const paidByYear = Array.from(paidAgg.values())
+    .map((x) => ({ ...x, amount: r2(x.amount) }))
+    .sort((a, b) => b.year - a.year || a.entity.localeCompare(b.entity) || a.property.localeCompare(b.property));
+
   const acres = r2(rows.reduce((s, r) => s + (r.acres ?? 0), 0));
   const income = r2(props.reduce((s, p) => s + (p.income ?? 0), 0));
   const change = priorTax !== null ? r2(tax - priorTax) : null;
@@ -602,6 +711,9 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
     properties: props,
     nextYear,
     deadlines,
+    cuSavesTotal: rows.reduce((s2, r) => s2 + (r.cuSaves ?? 0), 0),
+    paidByYear,
+    openNotices,
     coverage: {
       lines: scopedLines.filter((l) => l.tax_year === year).length,
       matched: scopedLines.filter((l) => l.tax_year === year && l.parcel_id).length,

@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-10, version 0.1.0, build 7c13ba7. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-10, version 0.1.0, build 8709678. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -845,17 +845,32 @@ Each finding says what was found, about how many dollars a year it is worth, wha
 - **Acreage does not agree**: deed, county, and map acres differ by more than 10% and 2 acres. If the county has more acres than the deed, ask the assessor.
 - **County owner name differs** from the entity, so bills and current use may follow the wrong name or address.
 - **Tax up** more than 15% on a parcel: look at the valuation notice; a protest to the Board of Equalization is due within 30 days of it.
+- **Protest window open**: a valuation notice you logged is less than 30 days old. A written protest to the county Board of Equalization is due by the date shown.
 - **More timber than the county counts**, **tax is a large share of income**, **parcel entered twice**, and **bill lines not tied to a parcel** are tidy-ups.
 
 ## Current use and acreage
 
 One row per parcel: county, deed, and map acres; the county's timber acres; taxable land value per acre against the current use cap; the status (your answer, the county's answer where the county shows it, "looks like current use", "looks like market value", or "can't tell"); the year's tax; and whether the county's figure ties out. Use **Enrolled?** to record what you know; your answer overrides the estimate. **Homestead** marks a home you live in (up to 160 acres can get the homestead exemption).
 
+## Values on the bills
+
+The value each year's bill printed, by parcel, marked "market" when it is a market value printed beside a lower current use value. Where a market value is known for a parcel on current use, **Current use saves** shows about what current use saves a year.
+
+**Re-read bills** (link under the title, or /taxes/reread) reads each stored bill file again for everything it prints beyond the tax: market value, current use value, land and buildings, assessment ratio, tax district, millage, and timber acres. You see each file's values before **Save**; tax amounts and parcel matches are never changed. New uploads read these values automatically.
+
+## Valuation notices
+
+Under **Dates to know**, log the date printed on a county's valuation notice when it arrives. The report then shows the protest deadline (30 days later) at the top until it passes. **Remove** deletes a notice logged by mistake.
+
+## Tax paid by calendar year
+
+For the accountant: property tax paid, grouped by the calendar year it was paid (the year it is deducted), then by entity and property. A bill covering several parcels is split by each parcel's tax. Payments without a paid date are left out.
+
 ## Where the numbers come from
 
 - Tax amounts: your uploaded statements. Year-over-year change is measured on tax, because the values printed on older bills mix market and current use value.
 - Values, acres, timber acres, tax district: the county GIS records. A copy is saved each year when the records are refreshed, so value history builds over time.
-- Current use values: the Alabama Department of Revenue table. Millage: rural Lawrence and Colbert 30 mills and Lawrence town districts 37 mills, checked against the county records; Morgan 37.4 mills from the state's table.
+- Current use values: the Alabama Department of Revenue table. Millage: rural Lawrence and Colbert 30 mills and Lawrence town districts 37 mills, checked against the county records; Morgan 37.4 mills, checked against the 2025 Morgan bills. The 2027 current use table (ADOR Directive CU-2027) is loaded for bills collected from Oct 1, 2027.
 
 The report prepares; you or your accountant act. Nothing is sent to the county.
 

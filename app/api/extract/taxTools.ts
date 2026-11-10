@@ -104,8 +104,16 @@ export const TAX_STATEMENT_TOOL: Anthropic.Tool = {
             legal_description: nullable("string", "Legal description printed for the line, verbatim"),
             property_address: nullable("string", "Property or situs address if printed"),
             acres: nullable("number", "Acres if printed"),
+            market_value: nullable("number", "Fair market value (or total appraised MARKET value) if printed, dollars"),
+            current_use_value: nullable("number", "Current use value if printed (Alabama farm and timber land), dollars"),
+            land_value: nullable("number", "Land value if printed separately, dollars"),
+            improvement_value: nullable("number", "Improvements / buildings value if printed, dollars"),
+            assessment_ratio: nullable("number", "Assessment ratio or class percent if printed, as a percent (10, 20); Class III is 10, Class II 20"),
+            tax_district: nullable("string", "Tax district code or name if printed"),
+            millage: nullable("number", "Total millage / tax rate in mills if printed (e.g. 30.0)"),
+            timber_acres: nullable("number", "Timber or forest acres if printed"),
           },
-          required: ["line_type", "identifiers", "appraised_value", "assessed_value", "tax_due", "exemptions", "legal_description", "property_address", "acres"],
+          required: ["line_type", "identifiers", "appraised_value", "assessed_value", "tax_due", "exemptions", "legal_description", "property_address", "acres", "market_value", "current_use_value", "land_value", "improvement_value", "assessment_ratio", "tax_district", "millage", "timber_acres"],
           additionalProperties: false,
         },
       },
@@ -124,4 +132,4 @@ export const TAX_SEGMENT_PROMPT = (firstPage: number, count: number) =>
   `These are pages ${firstPage} to ${firstPage + count - 1} of a file of property tax statements. For EVERY page, record the statement header printed on it. The billing_key is the number the county bills on (an account number covering several parcels, else a receipt, bill, or key number, else the parcel number), exactly as printed. total_tax is the statement's total, which whole-account bills repeat on every page. ${HANDWRITING_RULE}`;
 
 export const TAX_STATEMENT_PROMPT =
-  `These pages are ONE property tax statement (it may be several pages, a photo, or a scan). Record the header and EVERY parcel line printed on it. For each line capture EVERY labeled number exactly as printed as an identifier pair (label as printed, best-guess kind, value). Unrecognized labels keep kind 'other' with the label. Mark business personal property lines as personal_property. Keep the taxpayer name exactly as printed, including any C/O. Dates as YYYY-MM-DD, dollars as plain numbers. ${HANDWRITING_RULE} List every field you are unsure about in unsure_fields.`;
+  `These pages are ONE property tax statement (it may be several pages, a photo, or a scan). Record the header and EVERY parcel line printed on it. For each line capture EVERY labeled number exactly as printed as an identifier pair (label as printed, best-guess kind, value). Many Alabama bills print BOTH a market value and a current use value: put each in its own field (market_value, current_use_value), and keep appraised_value as the total value the bill labels appraised. Fill land, improvement, assessment ratio, tax district, millage, and timber acres only when printed. Unrecognized labels keep kind 'other' with the label. Mark business personal property lines as personal_property. Keep the taxpayer name exactly as printed, including any C/O. Dates as YYYY-MM-DD, dollars as plain numbers. ${HANDWRITING_RULE} List every field you are unsure about in unsure_fields.`;

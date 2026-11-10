@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { landValuePerAcre, readCountyRecord } from "./countyRecord";
-import { billCheck, buildTaxReport, cuValue, mixValue, millsFor, ownerMatches, type ReportInput } from "./taxReport";
+import { billCheck, buildTaxReport, cuValue, mixValue, millsFor, ownerMatches, valueKind, type ReportInput } from "./taxReport";
 
 // Real county record shapes (Lawrence KCS, Colbert KCS, Morgan).
 const lawrenceCU = { TAV: 9700, TTV: 96928, CLandValue: 96928, CImpValue: 0, CALC_ACRE: 211.95, TimberAcres: 9, TaxDist: "01", TotalTaxDue: 291.9, TaxYearDue: 2026, Owner: "ALBEMARLE CORP" };
@@ -170,4 +170,42 @@ describe("buildTaxReport", () => {
     expect(f.severity).toBe("high");
     expect(f.dollars).toBe(300);
   });
+
+  it("counts down the 30-day protest window from a logged notice", () => {
+    const open = buildTaxReport(input({ notices: [{ county: "Lawrence", tax_year: 2026, notice_date: "2026-10-20", parcel_id: null }] }));
+    expect(open.openNotices).toEqual([{ county: "Lawrence", notice_date: "2026-10-20", deadline: "2026-11-19", parcelId: null }]);
+    expect(open.findings[0].kind).toBe("protest_window");
+    expect(open.deadlines.some((d) => d.date === "2026-11-19")).toBe(true);
+    const closed = buildTaxReport(input({ notices: [{ county: "Lawrence", tax_year: 2026, notice_date: "2026-09-01", parcel_id: null }] }));
+    expect(closed.openNotices).toHaveLength(0);
+    const other = buildTaxReport(input({ county: "Colbert", notices: [{ county: "Lawrence", tax_year: 2026, notice_date: "2026-10-20", parcel_id: null }] }));
+    expect(other.openNotices).toHaveLength(0);
+  });
+
+  it("sums tax paid by calendar year, splitting a bill by line", () => {
+    const r = buildTaxReport(
+      input({
+        payments: [
+          { tax_statement_id: "s1", amount: 556.5, paid_date: "2026-01-05" },
+          { tax_statement_id: "s0", amount: 541.3, paid_date: "2024-12-20" },
+        ],
+      })
+    );
+    expect(r.paidByYear.map((p) => [p.year, p.entity, p.property, p.amount])).toEqual([
+      [2026, "Albemarle Corporation", "Green", 556.5],
+      [2024, "Albemarle Corporation", "Green", 541.3],
+    ]);
+    // Payments without a date are left out rather than guessed.
+    expect(buildTaxReport(input()).paidByYear).toHaveLength(0);
+  });
 });
+
+describe("value kinds", () => {
+  it("tells a taxed value from a market value printed beside current use", () => {
+    // 97,000 x 10% x 30 mills = 291 + 9 timber ac x $0.10 = 291.90
+    expect(valueKind(97000, 291.9, 30, 9)).toBe("taxed");
+    expect(valueKind(900000, 291.9, 30, 9)).toBe("market");
+    expect(valueKind(null, 291.9, 30)).toBe("unknown");
+  });
+});
+
