@@ -42,7 +42,7 @@ Add each bill to the work it paid for (+ Add a cost): amount, date paid, who was
 - Something that lasts (a road, culvert, gate): **lasting improvement**.
 - Not sure: left for the accountant.
 
-The app suggests the category from the kind of work (a spray in the first three years after planting counts as replanting). The stand page totals recorded costs by category. These are for your accountant: confirm with them before filing.
+If a cost-share program helped pay a bill, pick the contract on the cost row (contracts are under Timber, then Cost-share). The app suggests the category from the kind of work (a spray in the first three years after planting counts as replanting). The stand page totals recorded costs by category. These are for your accountant: confirm with them before filing.
 
 ## Adding stands
 

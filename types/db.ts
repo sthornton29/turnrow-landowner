@@ -230,6 +230,37 @@ export interface TimberCostRow {
   description: string | null;
   tax_category: string;
   notes: string | null;
+  cost_share_award_id?: string | null; // migration 0047
+}
+
+// Migration 0047: cost-share contracts and payments received.
+export interface CostShareAwardRow {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  entity_id: string | null;
+  program: string;
+  agency: string | null;
+  contract_number: string | null;
+  title: string;
+  status: string;
+  signed_date: string | null;
+  end_date: string | null;
+  approved_amount: number | null;
+  acres: number | null;
+  practices: string | null;
+  obligations_until: string | null;
+  notes: string | null;
+}
+
+export interface CostSharePaymentRow {
+  id: string;
+  award_id: string;
+  received_date: string;
+  amount: number;
+  practice: string | null;
+  sec126_choice: string;
+  notes: string | null;
 }
 
 // Migration 0046: timber basis accounts and their ledger.
@@ -367,6 +398,7 @@ export type DocumentEntityType =
   | "tax_statement"
   | "stand_activity" // migration 0045
   | "timber_account" // migration 0046
+  | "cost_share_award" // migration 0047
   | "entity"
   | "organization"; // unfiled: entity_id = the organization id (migration 0024)
 

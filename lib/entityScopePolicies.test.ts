@@ -37,7 +37,12 @@ const sql46 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0046_timber_basis.sql"),
   "utf8"
 );
-const sql = sql34 + sql37 + sql43 + sql45 + sql46;
+// 0047 adds cost-share awards and payments.
+const sql47 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0047_cost_share.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
   sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
@@ -56,6 +61,14 @@ const policyBlocks =
   sql46.slice(
     sql46.indexOf("-- ---------------------------------------------------------------- timber_account_products"),
     sql46.indexOf("-- ---------------------------------------------------------------- documents")
+  ) +
+  sql47.slice(
+    sql47.indexOf("create policy cost_share_awards_all"),
+    sql47.indexOf("create or replace function private.user_accessible_cost_share_award_ids")
+  ) +
+  sql47.slice(
+    sql47.indexOf("-- ---------------------------------------------------------------- cost_share_payments"),
+    sql47.indexOf("-- ---------------------------------------------------------------- timber_costs link")
   );
 
 // The scoped-table list. Deliberately absent (documented in the
@@ -94,6 +107,8 @@ const SCOPED_TABLES = [
   "timber_accounts",
   "timber_account_products",
   "timber_account_entries",
+  "cost_share_awards",
+  "cost_share_payments",
   "tax_statements",
   "tax_statement_lines",
   "tax_payments",

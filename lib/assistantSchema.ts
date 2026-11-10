@@ -45,6 +45,8 @@ TIMBER SALES
 - timber_accounts(id, property_id, entity_id, name, acquisition_type 'purchase'|'inheritance'|'gift'|'transfer'|'unknown', acquired_date, total_value, land_value, timber_value, improvements_value, basis_source, acres_covered, notes)   -- timber basis per tract; timber_value is the OPENING timber basis
 - timber_account_products(account_id, product, unit 'ton'|'mbf', opening_volume, opening_basis)   -- product 'all_timber' = one pool
 - timber_account_entries(account_id, entry_date, entry_type 'depletion'|'capitalized_cost'|'volume_adjustment'|'casualty_loss'|'other', product, volume_change, basis_change, timber_sale_id, cost_id, memo)   -- basis left = sum(opening_basis) + sum(basis_change); depletion rows are negative
+- cost_share_awards(id, property_id, entity_id, program 'eqip'|'csp'|'crp'|'afc_spb'|'longleaf'|'other', agency, contract_number, title, status 'applied'|'active'|'completed'|'cancelled', signed_date, end_date, approved_amount, acres, practices, obligations_until, notes)
+- cost_share_payments(award_id, received_date, amount, practice, sec126_choice 'exclude'|'include'|'undecided')   -- excluded = Sec 126, nets out of the replanting deduction; timber_costs.cost_share_award_id links a cost to the award that helped pay it
 
 PROPERTY TAXES
 - tax_statements(id, tax_year, county, state, authority_name, account_number, account_kind, taxpayer_name_printed, care_of_printed, entity_id nullable, entity_evidence, source_document_id, amount_due (the statement total), line_total, reconciled bool, due_date, delinquent_date, notes)   -- the HEADER: how the county billed; one statement can cover many parcels
@@ -56,7 +58,7 @@ PROPERTY TAXES
   NOTE: tax status (paid, partial, unpaid, delinquent) is computed from payments vs amount_due; prefer taxes_status.
 
 DOCUMENTS
-- documents(id, entity_type ('property','parcel','field','pasture','wetland','pollinator_habitat','easement','timber_stand','stand_activity','timber_account','road','asset','entity','tenant','lease','timber_sale','tax_statement'), entity_id, file_name, storage_path, content_type, size_bytes, doc_type (deed_warranty, deed_quitclaim, deed_timber, deed_mineral, title_insurance, title_opinion, closing_statement, probate_estate, survey_plat, legal_description, easement_deed, mortgage_dot, lien_release, fsa_156ez, fsa_map, crp_contract, nrcs_conservation_plan, wetland_determination, hel_determination, appraisal, timber_cruise, management_plan, soil_survey, insurance_policy, hunting_agreement, current_use_application, other), title, extracted jsonb, extracted_at, extraction_reviewed, created_at)
+- documents(id, entity_type ('property','parcel','field','pasture','wetland','pollinator_habitat','easement','timber_stand','stand_activity','timber_account','cost_share_award','road','asset','entity','tenant','lease','timber_sale','tax_statement'), entity_id, file_name, storage_path, content_type, size_bytes, doc_type (deed_warranty, deed_quitclaim, deed_timber, deed_mineral, title_insurance, title_opinion, closing_statement, probate_estate, survey_plat, legal_description, easement_deed, mortgage_dot, lien_release, fsa_156ez, fsa_map, crp_contract, nrcs_conservation_plan, wetland_determination, hel_determination, appraisal, timber_cruise, management_plan, soil_survey, insurance_policy, hunting_agreement, current_use_application, other), title, extracted jsonb, extracted_at, extraction_reviewed, created_at)
 
 GOVERNMENT PAYMENTS (FSA)
 - fsa_farms(id, farm_number, state, county, farmland_acres, cropland_acres, dcp_cropland_acres, notes)

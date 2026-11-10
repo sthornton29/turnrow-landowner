@@ -85,6 +85,14 @@ export default async function TimberStandSummaryPage({
     id
   );
   const nowYear = new Date().getFullYear();
+  // Cost-share contracts on this property (migration 0047), for linking
+  // a cost to the program that helped pay it. Empty if the table is
+  // missing.
+  const { data: awards } = await supabase
+    .from("cost_share_awards")
+    .select("id, title")
+    .eq("property_id", stand.property_id)
+    .order("title");
   const recs = planForStand(stand, activities, nowYear);
   const lastThin = lastYearOf(activities, ["thinning"], stand.last_thinning_year);
   const lastBurn = lastYearOf(activities, ["prescribed_burn"], stand.last_burn_year);
@@ -219,6 +227,7 @@ export default async function TimberStandSummaryPage({
         propertyId={stand.property_id}
         stands={propertyStands ?? []}
         sales={(propertySales ?? []).filter((s) => propertySaleIds.has(s.id))}
+        awards={awards ?? []}
         activities={activities}
         recs={recs}
       />

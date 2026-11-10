@@ -71,6 +71,7 @@ async function primaryAttachment(
     lease: { table: "leases", prefix: "Lease", href: "/leases" },
     timber_sale: { table: "timber_sales", prefix: "Timber sale", href: "/timber-sales", col: "sale_name" },
     timber_account: { table: "timber_accounts", prefix: "Timber basis:", href: "/timber/basis" },
+    cost_share_award: { table: "cost_share_awards", prefix: "Cost-share:", href: "/timber/cost-share", col: "title" },
     entity: { table: "entities", prefix: "Entity", href: "/entities" },
     tenant: { table: "tenants", prefix: "Tenant", href: "/tenants" },
   };

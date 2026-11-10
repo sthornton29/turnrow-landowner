@@ -37,6 +37,7 @@ export interface FormCost {
   vendor: string;
   description: string;
   tax_category: TaxCategory;
+  cost_share_award_id?: string;
 }
 
 export interface ActivityDraft {
@@ -86,12 +87,14 @@ export default function ActivityForm({
   propertyId,
   stands,
   sales,
+  awards = [],
   initial,
   onClose,
 }: {
   propertyId: string;
   stands: FormStand[];
   sales: Array<{ id: string; sale_name: string }>;
+  awards?: Array<{ id: string; title: string }>;
   initial: ActivityDraft | { standIds: string[] }; // a draft, or just "start here"
   onClose: () => void;
 }) {
@@ -173,7 +176,11 @@ export default function ActivityForm({
         setError("Each cost needs the date it was paid.");
         return;
       }
-      costs.push({ ...c, amount: Math.round(amount * 100) / 100 });
+      costs.push({
+        ...c,
+        amount: Math.round(amount * 100) / 100,
+        cost_share_award_id: c.cost_share_award_id || null,
+      });
     }
     const details = cleanDetails(draft.activity_type, draft.details);
     const acres = draft.acres_treated.trim() === "" ? null : Number(draft.acres_treated.replace(/,/g, ""));
@@ -484,6 +491,21 @@ export default function ActivityForm({
                       </option>
                     ))}
                   </select>
+                  {awards.length > 0 ? (
+                    <select
+                      value={c.cost_share_award_id ?? ""}
+                      onChange={(e) => setCost(i, { cost_share_award_id: e.target.value })}
+                      className="rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                      title="Cost-share that helped pay this"
+                    >
+                      <option value="">No cost-share</option>
+                      {awards.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          Cost-share: {a.title}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
                   <button
                     onClick={() => set("costs", draft.costs.filter((_, j) => j !== i))}
                     className="text-xs text-red-600 hover:underline"

@@ -131,10 +131,11 @@ export default function EntityDocuments({
       timber_stand: "timber_stands", timber_account: "timber_accounts", road: "roads", easement: "easements", asset: "assets",
       cemetery: "cemeteries", maintenance_issue: "maintenance_issues",
     };
-    if (entityType === "stand_activity") {
-      // Migration 0045: activities carry a title, not a name.
+    if (entityType === "stand_activity" || entityType === "cost_share_award") {
+      // Migrations 0045/0047: activities and cost-share awards carry a
+      // title, not a name.
       supabase
-        .from("stand_activities")
+        .from(entityType === "stand_activity" ? "stand_activities" : "cost_share_awards")
         .select("property_id, title")
         .eq("id", entityId)
         .maybeSingle()

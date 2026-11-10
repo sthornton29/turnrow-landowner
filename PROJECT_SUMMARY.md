@@ -1,5 +1,31 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (TIMBER RECORDS stage 3: COST-SHARE, REPLANTING DEDUCTION, TIMBER
+TAX SUMMARY, migration 0047, LIVE). cost_share_awards (property, entity,
+program eqip|csp|crp|afc_spb|longleaf|other, contract number, status, dates,
+approved_amount, acres, practices, obligations_until) and cost_share_payments
+(received_date, amount, practice, sec126_choice exclude|include|undecided),
+entity-scoped through private.user_accessible_cost_share_award_ids();
+timber_costs.cost_share_award_id (save_stand_activity carries it; the cost
+row in ActivityForm picks the property's contract); documents attach as
+cost_share_award. lib/reforestation.ts: Sec 194 per property per year
+($10,000 expensed, none for entity_type trust; the rest amortized over 84
+months, 1/14 + 6 x 1/7 + 1/14), excluded Sec 126 cost-share netted against
+the linked costs earliest first, deductionForYear, recapture dates (194: 10
+years, 126: 20). lib/timberTaxSummary.ts builds one entity-year: sales
+(proceeds dated in the year x the property's share, selling expenses,
+depletion, gain, holding period from the timber account, form hint 8949/D for
+lump sum, 4797 Part I for pay-as-cut), replanting deduction per property,
+cost-share received with choices, other costs, totals, Form T flag, and a
+checklist (no basis, no depletion, undecided cost-share, not-sure costs,
+unknown holding period, trust). Pages: /timber/cost-share (+ [id] with
+payments, linked costs, contract documents) and /timber/tax-summary?year=&entity=
+(print to PDF, CSV). Timber page header: Timber basis, Cost-share, Tax
+summary, Timber sales. Help topics cost-share.md and timber-tax-summary.md.
+Note: "Martin Trusts" is entity_type llc, so it gets the $10,000 expensing;
+flagged to Stuart. Migrations are now pushed by Claude through the linked
+CLI (allow rule in the gitignored .claude/settings.local.json).
+
 2026-11-09 (TIMBER RECORDS stage 2: TIMBER BASIS, migration 0046, LIVE).
 timber_accounts (one per tract, held by an entity: acquisition_type
 purchase|inheritance|gift|transfer|unknown, acquired_date, total/land/

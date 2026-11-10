@@ -89,6 +89,18 @@ export default async function TimberPage() {
             Timber basis
           </Link>
           <Link
+            href="/timber/cost-share"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Cost-share
+          </Link>
+          <Link
+            href="/timber/tax-summary"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Tax summary
+          </Link>
+          <Link
             href="/timber-sales"
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
           >

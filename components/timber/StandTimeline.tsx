@@ -66,6 +66,7 @@ function toDraft(a: TimelineActivity): ActivityDraft | null {
       vendor: c.vendor ?? "",
       description: c.description ?? "",
       tax_category: (c.tax_category as TaxCategory) ?? "not_sure",
+      cost_share_award_id: c.cost_share_award_id ?? "",
     })),
   };
 }
@@ -76,6 +77,7 @@ export default function StandTimeline({
   propertyId,
   stands,
   sales,
+  awards = [],
   activities,
   recs,
 }: {
@@ -84,6 +86,7 @@ export default function StandTimeline({
   propertyId: string;
   stands: FormStand[];
   sales: Array<{ id: string; sale_name: string }>;
+  awards?: Array<{ id: string; title: string }>;
   activities: TimelineActivity[];
   recs: Recommendation[];
 }) {
@@ -334,6 +337,7 @@ export default function StandTimeline({
             propertyId={propertyId}
             stands={stands}
             sales={sales}
+            awards={awards}
             initial={form}
             onClose={() => setForm(null)}
           />

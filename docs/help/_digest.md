@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-10, version 0.1.0, build 2d263a4. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-10, version 0.1.0, build 00192a0. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -865,7 +865,7 @@ Add each bill to the work it paid for (+ Add a cost): amount, date paid, who was
 - Something that lasts (a road, culvert, gate): **lasting improvement**.
 - Not sure: left for the accountant.
 
-The app suggests the category from the kind of work (a spray in the first three years after planting counts as replanting). The stand page totals recorded costs by category. These are for your accountant: confirm with them before filing.
+If a cost-share program helped pay a bill, pick the contract on the cost row (contracts are under Timber, then Cost-share). The app suggests the category from the kind of work (a spray in the first three years after planting counts as replanting). The stand page totals recorded costs by category. These are for your accountant: confirm with them before filing.
 
 ## Adding stands
 
@@ -974,3 +974,44 @@ Attach the closing statement, estate appraisal, or cruise to the tract under **E
 - **Do I need Form T?** Usually when you claim depletion, though occasional sellers (a sale or two every few years) may not. Ask your accountant.
 - **The per-ton number looks wrong.** It is the basis left divided by the volume on record. A new cruise posted as a volume adjustment corrects it.
 - **Two entities own parts of one property.** Set up one account per owner and split the acres and values between them.
+
+# Cost-share contracts  (page: /timber/cost-share)
+
+## What this page is for
+
+Timber, then **Cost-share**, keeps every program contract that helps pay for work on the land: NRCS EQIP or CSP, FSA CRP pines, the Alabama Forestry Commission's Southern Pine Beetle Prevention program, Longleaf Alliance, or others. Each contract records the property, the contract holder (the taxpayer), program, agency, contract number, status, signed and end dates, approved dollars, acres, the practices it pays for, and the date the practices must be kept up until.
+
+## Payments and the tax choice (Section 126)
+
+On a contract's page, **Record a payment received** with its date, amount, and practice, and pick how it is taxed:
+
+- **Exclude from income (Sec 126)**: not taxed now, but the costs it paid for cannot be deducted, and it is recaptured as income if the land is sold within 20 years (the page shows that date).
+- **Report as income**: taxed now, and the costs it paid for can be deducted or count toward the replanting deduction.
+- **Not decided yet**: your accountant chooses when the return is prepared; the tax summary flags it.
+
+The amount that can be excluded has its own formula; your accountant works it out.
+
+## Linking bills to a contract
+
+When you record work on a stand (Record work, then + Add a cost), each cost row has a **Cost-share** picker for that property's contracts. A contract's page lists the costs it helped pay. Excluded cost-share is netted out of the replanting deduction so the same dollars are never counted twice.
+
+## Paperwork
+
+Attach the contract, practice approvals, and payment letters under **Contract and approvals**.
+
+# Timber tax summary  (page: /timber/tax-summary)
+
+## What it is
+
+Timber, then **Tax summary**, gathers one taxpayer's timber numbers for one year into a page to hand the accountant. Pick the year and the entity at the top; **Print or save PDF** prints it, **Download CSV** gives a spreadsheet. It is built from the timber records (stand costs, timber basis, sales and settlements, cost-share) and is for your accountant: confirm with them before filing.
+
+## What is on it
+
+- **Bottom line**: timber received, the approximate taxable timber gain, the replanting deduction, and other timber costs.
+- **Before you send this**: what is missing, such as a sale with no timber basis set up, proceeds with no depletion recorded, cost-share with the tax choice undecided, costs marked "not sure", or an unknown holding period. When depletion is claimed it reminds you that Form T is likely needed.
+- **Timber sales**: each sale on this entity's land with the dollars received this year (its share when a sale covers several properties), selling costs, depletion, the gain, whether it was held over a year (inherited timber always is), and the form it usually goes on (lump sum: Form 8949 and Schedule D for an investment; pay-as-cut: Form 4797 Part I under Section 631(b)).
+- **Replanting deduction (Section 194)**: per property, replanting costs paid this year, cost-share excluded from income netted out, the part deducted now (up to $10,000 per property per year; a trust gets none), and this year's share of amortization from earlier years (84 months: 1/14 the first year, 1/7 the next six, 1/14 the eighth).
+- **Cost-share received** with each payment's tax choice.
+- **Other timber costs**: upkeep, lasting improvements, and "not sure" items. Whether upkeep is deducted now or added to basis depends on investment versus business treatment; the accountant decides.
+
+Property taxes on timber land are on the Property Taxes page.
