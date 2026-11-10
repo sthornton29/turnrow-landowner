@@ -1,5 +1,48 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (HISTORICAL INCOME, migration 0051, LIVE, commit 22778c3).
+income_records: income received outside a lease payment or timber
+settlement (year, received_date, period text, payer, payee_name,
+entity_id, property_id, income_type farmland_cash_rent | share_rent |
+hunting | timber | solar | tower | commercial_rent | government | other,
+amount, basis received | accrued | calculated, confidence, needs_review,
+source, notes, import_key unique per org); RLS follows the property, else
+the entity (user_entity_ids), else admin only. lib/income.ts: IncomeType
+gains "other" (solar, tower, buildings); records count as RECEIVED in their
+year (recordIncomeType maps cash/share rent to agricultural); a record with
+an entity and no property allocates to entityUnassignedKey(entity) so entity
+filters still count it (the Income page adds those keys to the scope and
+shows "Not tied to a property"); timber sales on stands with no acres
+(undrawn) now split equally across their stands instead of falling to
+Unassigned. /income/records (filter by year, entity, type, needs a check;
+inline entity/property/type fixes; add; delete), linked from the Income
+page; property pages show "Earlier years" and a ten-year average. The
+assistant's income summary no longer double counts government payments.
+LOADED 2026-11-09 by scripts/backfill/income_backfill.mjs (gitignored;
+dry/load/remove; import_key prefix hist-income-2026-11-09:) from
+docs/research/2026-11-09/historical-income.csv: 308 records 2006-2026,
+$11,571,113, 27 marked Check. Skipped: timber already in timber sales
+(2006 Woodall, 2020-21 Tidwell, 2024 and 2025), negative TIMBER SALES rows
+(forestry costs), a 2006 internal transfer; 2007 Albemarle ledger timber
+loads as one remainder row (217,386.02 less the 33,206.68 Hwy 33 sale).
+F. Gilchrist (FSA 7296) rows filed under Shop Area; Norfolk Southern rent
+typed tower; Redd trust rows before VLM keep no entity. Equipment rent
+stays out (Stuart's ruling).
+
+2026-11-09 (PROPERTY TAX REPORT finished, migration 0050, LIVE, commits
+43b65b2 and 79bd499). 0050: ADOR CU-2027 table, Morgan millage verified
+(37.4), tax_valuation_notices (30-day Board of Equalization protest clock
+on the report), tax_statement_lines value columns (market, current use,
+land, improvement, ratio, district, millage, timber acres, values_read_at)
+filled by new uploads and /taxes/reread (re-read stored bill files, review,
+save values only). Report adds values on the bills with what current use
+saves, tax paid by calendar year for the accountant, and a per-parcel
+protest packet PDF (lib/protestPacket.ts, components/taxes/
+protestPacketPdf.ts: grounds, county record, bill history, comparables, CU
+table, checklist, draft letter). Re-read run 2026-11-09: Lawrence 2022-2025
+and Colbert notices print one value only; Lawrence 2021 and Morgan print
+market value (61 lines filled).
+
 2026-11-09 (PROPERTY TAX REPORT, migration 0049, LIVE). /taxes/report, linked
 as "Tax report" from the Taxes page (research: docs/research/2026-11-09/
 research-property-tax.md). 0049: tax_current_use_values and tax_millage_rates
