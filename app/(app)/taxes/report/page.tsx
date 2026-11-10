@@ -3,13 +3,14 @@ import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import { CU_STATUS_LABELS, buildTaxReport, type Finding, type ReportParcel } from "@/lib/taxReport";
-import { NoticeLog, ParcelFlags, TaxReportControls } from "@/components/taxes/TaxReportControls";
+import { NoticeLog, ParcelFlags, ProtestPacketButton, TaxReportControls } from "@/components/taxes/TaxReportControls";
+import { buildProtestPacket } from "@/lib/protestPacket";
 
 export const metadata = { title: "Property tax report" };
 
 // PROPERTY TAX REPORT: answer first (bottom line), then what to look at
 // (findings with dollars and deadlines), then the evidence (current use
-// and acreage by parcel, benchmarks by property), then next year and the
+// and acreage by parcel, with a protest packet PDF per parcel, benchmarks by property), then next year and the
 // calendar. All figures come from lib/taxReport.ts.
 
 const SEV: Record<Finding["severity"], { chip: string; label: string }> = {
@@ -153,6 +154,17 @@ export default async function TaxReportPage({
     });
   const paidYears = Array.from(new Set(r.paidByYear.map((p) => p.year))).slice(0, 4);
   const historyRows = r.parcels.filter((p) => p.history.some((h) => h.value));
+  const entityOfProperty = new Map(props.map((p) => [p.id, p.entity_id]));
+  const entityName = new Map((entities ?? []).map((e) => [e.id, e.name]));
+  const packetFor = (parcelId: string, propertyId: string | null) => {
+    const eid = propertyId ? entityOfProperty.get(propertyId) : null;
+    return buildProtestPacket(r, parcelId, {
+      entityName: eid ? (entityName.get(eid) ?? null) : null,
+      today: new Date(),
+      cuValues: cuValues ?? [],
+      state: "AL",
+    });
+  };
 
   const counties = Array.from(new Set((parcels ?? []).map((p) => p.county).filter(Boolean))).sort() as string[];
   const scopeName = [
@@ -329,7 +341,13 @@ export default async function TaxReportPage({
                       homestead={!!(parcels ?? []).find((x) => x.id === p.id)?.is_homestead}
                     />
                   </td>
-                  <td className="px-3 py-2 text-right text-gray-900">{p.tax ? formatDollars(p.tax) : "-"}</td>
+                  <td className="px-3 py-2 text-right text-gray-900">
+                    {p.tax ? formatDollars(p.tax) : "-"}
+                    {(() => {
+                      const pk = packetFor(p.id, p.propertyId);
+                      return pk ? <ProtestPacketButton packet={pk} /> : null;
+                    })()}
+                  </td>
                   <td className="px-3 py-2 text-right text-xs">
                     {p.billCheck ? (
                       Math.abs(p.billCheck.diff) <= 1 ? (

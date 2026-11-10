@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildProtestPacket } from "./protestPacket";
 import { landValuePerAcre, readCountyRecord } from "./countyRecord";
 import { billCheck, buildTaxReport, cuValue, mixValue, millsFor, ownerMatches, valueKind, type ReportInput } from "./taxReport";
 
@@ -209,3 +210,31 @@ describe("value kinds", () => {
   });
 });
 
+
+describe("protest packet", () => {
+  const ctx = { entityName: "Albemarle Corporation", today: new Date("2026-11-09T12:00:00"), cuValues: CU, state: "AL" };
+
+  it("gathers the county record, grounds, comparables, and the deadline for one parcel", () => {
+    const r = buildTaxReport(input({ notices: [{ county: "Lawrence", tax_year: 2026, notice_date: "2026-10-20", parcel_id: null }] }));
+    const pk = buildProtestPacket(r, "p2", ctx)!;
+    expect(pk.parcelNumber).toBe("07 03 08");
+    expect(pk.valuationYear).toBe(2026);
+    expect(pk.deadline).toEqual({ date: "2026-11-19", noticeDate: "2026-10-20" });
+    expect(pk.grounds.some((g) => g.heading === "Current use classification" && g.forWhom === "assessor")).toBe(true);
+    expect(pk.facts.find(([k]) => k === "Assessed value")?.[1]).toBe("$8,820");
+    expect(pk.comparables.map((c) => c.parcelNumber)).toEqual(["06 05 22"]);
+    expect(pk.cuTable?.year).toBe(2025);
+    expect(pk.letter[0]).toBe("To the Lawrence County Board of Equalization");
+    expect(pk.letter[1]).toContain("notice dated 2026-10-20");
+    expect(pk.checklist[0]).toContain("by 2026-11-19");
+    expect(pk.checklist.some((c) => c.includes("cuapp"))).toBe(true);
+  });
+
+  it("still makes a packet with blanks when nothing was found, and none for an unknown parcel", () => {
+    const r = buildTaxReport(input());
+    const pk = buildProtestPacket(r, "p1", ctx)!;
+    expect(pk.deadline).toBeNull();
+    expect(pk.letter.some((l) => l.startsWith("Reasons: ___"))).toBe(true);
+    expect(buildProtestPacket(r, "nope", ctx)).toBeNull();
+  });
+});

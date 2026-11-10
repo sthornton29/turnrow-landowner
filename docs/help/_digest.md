@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-10, version 0.1.0, build 8709678. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-10, version 0.1.0, build 43b65b2. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -851,6 +851,10 @@ Each finding says what was found, about how many dollars a year it is worth, wha
 ## Current use and acreage
 
 One row per parcel: county, deed, and map acres; the county's timber acres; taxable land value per acre against the current use cap; the status (your answer, the county's answer where the county shows it, "looks like current use", "looks like market value", or "can't tell"); the year's tax; and whether the county's figure ties out. Use **Enrolled?** to record what you know; your answer overrides the estimate. **Homestead** marks a home you live in (up to 160 acres can get the homestead exemption).
+
+## Protest packet
+
+**Protest packet**, under each parcel's tax in the Current use and acreage table, makes a PDF for that one parcel to take to the county: the grounds the report found (each marked for the Board of Equalization or for the revenue commissioner), the county's record for the parcel, the values and taxes on your bills by year, your other parcels in the same county for comparison, the state current use table, a filing checklist with the deadline if you logged the notice, and a draft protest letter with blanks to fill in and sign. Nothing is sent to the county.
 
 ## Values on the bills
 

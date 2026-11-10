@@ -217,3 +217,27 @@ export function NoticeLog({
     </div>
   );
 }
+
+// One parcel's protest packet PDF (lib/protestPacket.ts, drawn by
+// protestPacketPdf.ts, loaded only when clicked).
+export function ProtestPacketButton({ packet }: { packet: import("@/lib/protestPacket").ProtestPacket }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const { generateProtestPacketPdf } = await import("./protestPacketPdf");
+          await generateProtestPacketPdf(packet);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      disabled={busy}
+      className="block text-xs font-medium text-kelly-700 hover:underline disabled:opacity-50 print:hidden"
+      title="A PDF with the county record, bill history, comparables, a checklist, and a draft protest letter"
+    >
+      {busy ? "Making packet..." : "Protest packet"}
+    </button>
+  );
+}
