@@ -110,7 +110,7 @@ describe("assessment ratio flags (Alabama classes)", () => {
       line({ parcel_id: "p1", tax_year: 2025, appraised_value: 100000, assessed_value: 20000, tax_due: 900 }),
     ]);
     const flag = r.movers[0].flags.find((f) => f.kind === "ratio_shift");
-    expect(flag?.message).toContain("current use (Class III) was probably LOST");
+    expect(flag?.message).toContain("usually means current use was lost");
     expect(flag?.message).toContain("revenue commissioner");
   });
 
@@ -120,7 +120,7 @@ describe("assessment ratio flags (Alabama classes)", () => {
       line({ parcel_id: "p1", tax_year: 2025, appraised_value: 100000, assessed_value: 10000, tax_due: 450 }),
     ]);
     const flag = r.movers[0].flags.find((f) => f.kind === "ratio_shift");
-    expect(flag?.message).toContain("gained current use");
+    expect(flag?.message).toContain("moved into Class III");
   });
 
   it("stays quiet for a stable ratio", () => {

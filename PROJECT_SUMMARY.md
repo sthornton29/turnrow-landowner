@@ -1,5 +1,28 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (PROPERTY TAX REPORT, migration 0049, LIVE). /taxes/report, linked
+as "Tax report" from the Taxes page (research: docs/research/2026-11-09/
+research-property-tax.md). 0049: tax_current_use_values and tax_millage_rates
+(platform reference, read all / write platform admin; seeded ADOR CU 2023-2025
+and millage Lawrence 01 = 30, 04 and 06 = 37, Colbert 01 = 30, all verified to
+the penny against the county records, plus Morgan * = 37.4 unverified);
+parcel_valuations (yearly copy of parcels.attributes keyed by the record's own
+year, written by trigger parcels_snapshot_valuation on every attributes change;
+seeded from current records); parcels.current_use_status and is_homestead.
+lib/countyRecord.ts reads Lawrence/Colbert KCS and Morgan layers into one shape
+(KCS CLandValue is the taxable land value; Morgan uses AssdValue/ratio; first
+POSITIVE acreage). lib/taxReport.ts: bottom line (tax, change measured on TAX
+because statement appraised values mix market and CU across years, paid,
+per acre, share of income in Turnrow), findings ranked act/ask/tidy with
+dollars and deadlines (not on current use with savings range, missing bill,
+unpaid/delinquent, line far from the county figure, bill does not tie out,
+acreage mismatch, owner name differs, tax up >15%, timber acres gap, tax vs
+income, duplicate parcel, unmatched lines), per-parcel CU and acreage table
+with owner overrides, per-property benchmarks with a 6-year tax trend, next
+year's bills from the county records, deadlines, and sources. The old Tax
+change report's "10% = current use" wording was corrected (Class III is farm,
+forest, or home at CU or market). Help topic tax-report.md.
+
 2026-11-09 (TIMBER RECORDS stage 4: SALE STEPS, migration 0048, LIVE).
 timber_sales gains stage (planning, cruise, marketing, contract, harvesting,
 closeout, complete; null = effectiveStage() reads it from status, contract

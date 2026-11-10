@@ -47,7 +47,12 @@ const sql48 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0048_timber_sale_workflow.sql"),
   "utf8"
 );
-const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47 + sql48;
+// 0049 adds the yearly county-record snapshots.
+const sql49 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0049_tax_report_data.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47 + sql48 + sql49;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
   sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
@@ -75,7 +80,11 @@ const policyBlocks =
     sql47.indexOf("-- ---------------------------------------------------------------- cost_share_payments"),
     sql47.indexOf("-- ---------------------------------------------------------------- timber_costs link")
   ) +
-  sql48.slice(sql48.indexOf("create policy timber_sale_bids_all"));
+  sql48.slice(sql48.indexOf("create policy timber_sale_bids_all")) +
+  sql49.slice(
+    sql49.indexOf("create policy parcel_valuations_all"),
+    sql49.indexOf("create index parcel_valuations_org_idx")
+  );
 
 // The scoped-table list. Deliberately absent (documented in the
 // migration header): tenants, farm_connections (reads), county_tax_defaults,
@@ -116,6 +125,7 @@ const SCOPED_TABLES = [
   "cost_share_awards",
   "cost_share_payments",
   "timber_sale_bids",
+  "parcel_valuations",
   "tax_statements",
   "tax_statement_lines",
   "tax_payments",

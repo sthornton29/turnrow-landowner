@@ -560,6 +560,12 @@ export default function TaxStatusClient({
           </p>
         </div>
         <span className="ml-auto flex items-center gap-2">
+          <Link
+            href={`/taxes/report?year=${year}${entityFilter ? `&entity=${entityFilter}` : ""}`}
+            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+          >
+            Tax report
+          </Link>
           {entities.length > 0 ? (
             <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className={inputClass}>
               <option value="">All entities</option>

@@ -82,7 +82,9 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
 // ratio-shift flag actionable.
 function ratioLabel(ratio: number): string {
   const pct = ratio * 100;
-  if (Math.abs(pct - 10) <= 1.5) return "10% (Class III, current use)";
+  // Class III is farm, forest, and owner-occupied homes, valued at
+  // current use OR market: 10% alone does not prove current use.
+  if (Math.abs(pct - 10) <= 1.5) return "10% (Class III)";
   if (Math.abs(pct - 20) <= 1.5) return "20% (Class II)";
   return `${pct.toFixed(1)}%`;
 }
@@ -275,9 +277,9 @@ export function buildTaxChangeReport(
           change.flags.push({
             kind: "ratio_shift",
             message: lostCurrentUse
-              ? `Assessment ratio moved ${from} to ${to}: current use (Class III) was probably LOST and the parcel now assesses as Class II. Ask the revenue commissioner about its current-use status; reapplying usually fixes it going forward.`
+              ? `Assessment ratio moved ${from} to ${to}: the parcel left Class III (farm, forest, home) and now assesses as Class II, which usually means current use was lost. Ask the revenue commissioner about its current-use status; reapplying (Oct 1 to Jan 1) usually fixes it going forward.`
               : gainedCurrentUse
-                ? `Assessment ratio moved ${from} to ${to}: the parcel gained current use (Class III) assessment.`
+                ? `Assessment ratio moved ${from} to ${to}: the parcel moved into Class III (farm, forest, home).`
                 : `Assessment ratio moved ${from} to ${to}: a probable classification or exemption change. Worth confirming with the revenue commissioner.`,
           });
         }

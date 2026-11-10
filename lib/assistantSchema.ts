@@ -48,6 +48,9 @@ TIMBER SALES
 - cost_share_awards(id, property_id, entity_id, program 'eqip'|'csp'|'crp'|'afc_spb'|'longleaf'|'other', agency, contract_number, title, status 'applied'|'active'|'completed'|'cancelled', signed_date, end_date, approved_amount, acres, practices, obligations_until, notes)
 - cost_share_payments(award_id, received_date, amount, practice, sec126_choice 'exclude'|'include'|'undecided')   -- excluded = Sec 126, nets out of the replanting deduction; timber_costs.cost_share_award_id links a cost to the award that helped pay it
 - timber_sale_bids(timber_sale_id, bidder, amount, received_date, is_winner)   -- sealed bids; timber_sales also has stage ('planning'|'cruise'|'marketing'|'contract'|'harvesting'|'closeout'|'complete'), forester_name, forester_fee_pct, min_bid, bid_date, harvest_start, harvest_end, closeout_date, deposit_returned_date, reforestation_due, form_1099s_received, form_1099s_amount, checklist jsonb
+- parcel_valuations(parcel_id, record_year, attributes jsonb, source, fetched_at)   -- yearly copy of each parcel's county GIS record (saved by trigger on every refresh); parcels also has current_use_status 'enrolled'|'not_enrolled'|'unknown' and is_homestead
+- tax_current_use_values(state, tax_year, land_type 'crop_pasture'|'timber', rating 'good'|'average'|'poor'|'nonproductive', value_per_acre)   -- ADOR current use table (reference)
+- tax_millage_rates(state, county, district, tax_year, total_mills, components jsonb, timber_per_acre, dwelling_fee, verified)   -- district millage (reference); district '*' = county rural default
 
 PROPERTY TAXES
 - tax_statements(id, tax_year, county, state, authority_name, account_number, account_kind, taxpayer_name_printed, care_of_printed, entity_id nullable, entity_evidence, source_document_id, amount_due (the statement total), line_total, reconciled bool, due_date, delinquent_date, notes)   -- the HEADER: how the county billed; one statement can cover many parcels
