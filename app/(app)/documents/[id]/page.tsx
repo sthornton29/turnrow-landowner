@@ -74,6 +74,29 @@ async function primaryAttachment(
     tenant: { table: "tenants", prefix: "Tenant", href: "/tenants" },
   };
   if (entityType === "property" || entityType === "organization") return null;
+  if (entityType === "stand_activity") {
+    // Migration 0045: an activity has no page of its own; link to the
+    // first stand it covers (its history lists the activity).
+    const [{ data: act }, { data: link }] = await Promise.all([
+      supabase
+        .from("stand_activities")
+        .select("title, activity_type, activity_year")
+        .eq("id", entityId)
+        .maybeSingle(),
+      supabase
+        .from("stand_activity_stands")
+        .select("timber_stand_id")
+        .eq("activity_id", entityId)
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    return {
+      label: act
+        ? `Timber work: ${act.title ?? act.activity_type.replace(/_/g, " ")} (${act.activity_year})`
+        : "Timber work",
+      href: link ? `/timber/${link.timber_stand_id}` : "/timber",
+    };
+  }
   if (entityType === "tax_statement") {
     const { data } = await supabase
       .from("tax_statements")

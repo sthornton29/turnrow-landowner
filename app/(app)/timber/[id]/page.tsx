@@ -2,7 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars } from "@/lib/format";
-import { STAND_TYPE_LABELS } from "@/lib/assetTypes";
+import {
+  MANAGEMENT_GOAL_LABELS,
+  STAND_TYPE_LABELS,
+} from "@/lib/assetTypes";
+import { lastYearOf } from "@/lib/standActivities";
+import { planForStand } from "@/lib/timberPlan";
+import { activitiesForStand, loadStandActivities } from "@/lib/timberRecords";
+import StandTimeline from "@/components/timber/StandTimeline";
 import {
   allocateAmount,
   allocationShares,
@@ -45,6 +52,8 @@ export default async function TimberStandSummaryPage({
     { data: allStands },
     { data: settlements },
     { data: payments },
+    { data: propertyStands },
+    { data: propertySales },
   ] = await Promise.all([
     supabase
       .from("properties")
@@ -62,7 +71,32 @@ export default async function TimberStandSummaryPage({
       .from("timber_settlements")
       .select("timber_sale_id, total_amount, allocation"),
     supabase.from("payments").select("timber_sale_id, amount"),
+    supabase
+      .from("timber_stands")
+      .select("id, name, acres, year_established")
+      .eq("property_id", stand.property_id)
+      .order("name"),
+    supabase.from("timber_sales").select("id, sale_name").order("sale_name"),
   ]);
+  // Stage 1 timber records (migration 0045): this stand's history and
+  // the schedule generated from it.
+  const activities = activitiesForStand(
+    await loadStandActivities(supabase, [id]),
+    id
+  );
+  const nowYear = new Date().getFullYear();
+  const recs = planForStand(stand, activities, nowYear);
+  const lastThin = lastYearOf(activities, ["thinning"], stand.last_thinning_year);
+  const lastBurn = lastYearOf(activities, ["prescribed_burn"], stand.last_burn_year);
+  const plantYear = lastYearOf(activities, ["planting"], stand.year_established);
+  // Sales this property's stands are part of (timber_sales has no
+  // property column; it reaches land through timber_sale_stands).
+  const propertyStandIds = new Set((propertyStands ?? []).map((s) => s.id));
+  const propertySaleIds = new Set(
+    (saleLinks ?? [])
+      .filter((l) => propertyStandIds.has(l.timber_stand_id))
+      .map((l) => l.timber_sale_id)
+  );
   // The linked sales' documents (contracts, settlements) surface here
   // too: a stand's paperwork is findable from the stand.
   const { data: saleDocs } = await supabase
@@ -155,14 +189,39 @@ export default async function TimberStandSummaryPage({
             stand.stand_type ? STAND_TYPE_LABELS[stand.stand_type] : null,
           ],
           ["Species", stand.species],
-          ["Year established", stand.year_established?.toString() ?? null],
-          ["Site index", stand.site_index?.toString() ?? null],
-          ["Last thinning", stand.last_thinning_year?.toString() ?? null],
-          ["Last prescribed burn", stand.last_burn_year?.toString() ?? null],
+          [
+            "Planted or established",
+            plantYear != null
+              ? `${plantYear} (age ${Math.max(0, nowYear - plantYear)})`
+              : null,
+          ],
+          ["Trees per acre planted", stand.tpa_planted?.toLocaleString("en-US") ?? null],
+          [
+            "Site index",
+            stand.site_index != null
+              ? `${stand.site_index}${stand.site_index_base_age ? ` (base ${stand.site_index_base_age})` : ""}`
+              : null,
+          ],
+          [
+            "Main goal",
+            stand.management_goal ? (MANAGEMENT_GOAL_LABELS[stand.management_goal] ?? null) : null,
+          ],
+          ["Last thinning", lastThin?.toString() ?? null],
+          ["Last prescribed burn", lastBurn?.toString() ?? null],
           ["Notes", stand.notes],
         ]}
       />
       <RowEditor entityType="timber_stand" row={stand} />
+
+      <StandTimeline
+        orgId={profile.organization_id!}
+        standId={id}
+        propertyId={stand.property_id}
+        stands={propertyStands ?? []}
+        sales={(propertySales ?? []).filter((s) => propertySaleIds.has(s.id))}
+        activities={activities}
+        recs={recs}
+      />
 
       {linkedSales.length > 0 ? (
         <RelatedSection title="Timber sales and allocated income">

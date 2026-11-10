@@ -1,5 +1,39 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (TIMBER RECORDS stage 1, migration 0045, LIVE). First of five
+timber stages (research and S drive findings in docs/research/2026-11-09/;
+next: basis ledger, Sec 194 + cost-share + annual timber tax summary, sale
+workflow, cruises/prices/forest events, then the S drive history backfill).
+0045: timber_stands gains tpa_planted, site_index_base_age (25|50),
+management_goal (timber, wildlife, mixed, aesthetics, conservation; view
+timber_stands_geo appends them); stand_activities (activity_type site_prep,
+planting, herbicide, precommercial_thin, thinning, harvest, prescribed_burn,
+fertilization, firebreak, road_work, boundary_marking, inspection, damage,
+cruise, other; status done|planned|skipped; activity_year required,
+activity_date optional; plan_key answers a schedule suggestion; details
+jsonb validated by lib/standActivities.ts); stand_activity_stands (one
+activity across several stands of a property); timber_costs (paid_date,
+amount, vendor, tax_category reforestation|operating_expense|
+selling_expense|capital_improvement|not_sure, chosen by one plain question;
+the app suggests it, a spray within 3 years of planting is reforestation);
+save_stand_activity(jsonb) writes activity + stands + costs atomically
+(SECURITY INVOKER); documents entity_type stand_activity. All three tables
+carry org RLS plus restrictive entity-scope policies (entityScopePolicies
+test covers them). lib/timberPlan.ts generates each stand's schedule from
+type, planting year (a recorded planting restarts the clock), site index,
+and the log: planted pine release spray, first thinning by site class (MSU
+ages), burns every 3 to 5 years after thinning (2 to 3 for wildlife),
+second thinning, final harvest, replant after a clearcut; natural pine,
+hardwood, mixed get a forester walk-through every 10 years; every stand a
+yearly walk. Stand page: details show age, TPA, goal, computed last
+thin/burn (log beats the legacy columns), then StandTimeline (Coming up
+with Already done / Schedule it / Not needed, Record work picker and
+ActivityForm with costs, History with per-activity paperwork). /timber:
+"Upcoming on your land" card (field work one line each, routine items and
+missing planting years grouped) and each stand's next step. Assistant schema
+and help topic updated. Migrations now go through the linked Supabase CLI:
+npx supabase db push --linked (0001-0044 marked applied by migration repair).
+
 2026-11-09 (OPS ACTIONS, migration 0044, not yet pushed). The write half of the
 ops API (turnrow-farm docs/OPS_ACTIONS.md; the read half, /api/ops/brief and
 /api/ops/data, came 2026-11-08). An Assignment in Turnrow Farm previews a fix

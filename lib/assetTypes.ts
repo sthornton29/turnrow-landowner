@@ -365,6 +365,20 @@ export const STAND_TYPE_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+// Stand facts added in migration 0045 (timber records).
+export const MANAGEMENT_GOAL_LABELS: Record<string, string> = {
+  timber: "Timber income",
+  wildlife: "Wildlife and hunting",
+  mixed: "Timber and wildlife",
+  aesthetics: "Looks and recreation",
+  conservation: "Conservation, leave it be",
+};
+
+export const SITE_INDEX_BASE_LABELS: Record<string, string> = {
+  "25": "Base age 25 (most pine plantations)",
+  "50": "Base age 50 (soil survey, hardwoods)",
+};
+
 // Saved timber stand map colors, one per stand_type. Chosen to read over
 // satellite and stay distinct from kelly (fields), the crop palette
 // (corn #facc15, cotton white, soybeans kelly, wheat #d97706, canola

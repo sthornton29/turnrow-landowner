@@ -192,6 +192,44 @@ export interface TimberStandGeo {
   boundary_geojson: MultiPolygon | null;
   created_at: string;
   updated_at: string;
+  // migration 0045
+  tpa_planted: number | null;
+  site_index_base_age: number | null;
+  management_goal: string | null;
+}
+
+// Migration 0045: a stand's dated history and its costs.
+export interface StandActivityRow {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  activity_type: string;
+  status: "planned" | "done" | "skipped";
+  activity_year: number;
+  activity_date: string | null;
+  title: string | null;
+  notes: string | null;
+  performed_by: string | null;
+  acres_treated: number | null;
+  timber_sale_id: string | null;
+  plan_key: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimberCostRow {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  activity_id: string | null;
+  timber_sale_id: string | null;
+  paid_date: string;
+  amount: number;
+  vendor: string | null;
+  description: string | null;
+  tax_category: string;
+  notes: string | null;
 }
 
 export interface RoadGeo {
@@ -284,6 +322,7 @@ export type DocumentEntityType =
   | "lease"
   | "timber_sale"
   | "tax_statement"
+  | "stand_activity" // migration 0045
   | "entity"
   | "organization"; // unfiled: entity_id = the organization id (migration 0024)
 

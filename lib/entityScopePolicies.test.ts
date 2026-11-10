@@ -27,13 +27,22 @@ const sql43 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0043_pollinator_habitats.sql"),
   "utf8"
 );
-const sql = sql34 + sql37 + sql43;
+// 0045 adds the timber record tables (activities, their stands, costs).
+const sql45 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0045_timber_records.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43 + sql45;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
   sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
   sql43.slice(
     sql43.indexOf("create policy pollinator_habitats_entity_scope"),
     sql43.indexOf("create trigger set_updated_at before update on public.pollinator_habitats")
+  ) +
+  sql45.slice(
+    sql45.indexOf("create policy stand_activities_all"),
+    sql45.indexOf("-- ---------------------------------------------------------------- save_stand_activity")
   );
 
 // The scoped-table list. Deliberately absent (documented in the
@@ -66,6 +75,9 @@ const SCOPED_TABLES = [
   "timber_sales",
   "timber_sale_stands",
   "timber_settlements",
+  "stand_activities",
+  "stand_activity_stands",
+  "timber_costs",
   "tax_statements",
   "tax_statement_lines",
   "tax_payments",

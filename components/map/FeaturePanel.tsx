@@ -8,7 +8,9 @@ import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   ASSET_TYPES,
   CONDITION_LABELS,
+  MANAGEMENT_GOAL_LABELS,
   ROAD_TYPE_LABELS,
+  SITE_INDEX_BASE_LABELS,
   STAND_TYPE_LABELS,
 } from "@/lib/assetTypes";
 import {
@@ -112,10 +114,13 @@ export const EDIT_FIELDS: Record<EntityType, EditField[]> = {
     { key: "name", label: "Stand name or number", input: "text", required: true },
     { key: "stand_type", label: "Stand type", input: "select", options: STAND_TYPE_LABELS },
     { key: "species", label: "Primary species", input: "text" },
-    { key: "year_established", label: "Year established", input: "number" },
+    { key: "year_established", label: "Year planted or established", input: "number" },
+    { key: "tpa_planted", label: "Trees per acre planted", input: "number" },
     { key: "site_index", label: "Site index", input: "number" },
-    { key: "last_thinning_year", label: "Last thinning year", input: "number" },
-    { key: "last_burn_year", label: "Last prescribed burn", input: "number" },
+    { key: "site_index_base_age", label: "Site index base age", input: "select", options: SITE_INDEX_BASE_LABELS },
+    { key: "management_goal", label: "Main goal", input: "select", options: MANAGEMENT_GOAL_LABELS },
+    { key: "last_thinning_year", label: "Last thinning year (before the history)", input: "number" },
+    { key: "last_burn_year", label: "Last burn year (before the history)", input: "number" },
     { key: "notes", label: "Notes", input: "textarea" },
   ],
   road: [
@@ -236,6 +241,7 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     push("Species", r.species);
     push("Established", r.year_established);
     push("Site index", r.site_index);
+    push("Main goal", r.management_goal, MANAGEMENT_GOAL_LABELS);
     push("Last thinned", r.last_thinning_year);
     push("Last burn", r.last_burn_year);
   } else if (entityType === "road") {

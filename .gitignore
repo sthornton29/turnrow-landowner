@@ -26,3 +26,8 @@ npm-debug.log*
 
 # typescript
 *.tsbuildinfo
+
+# Family financial data and S drive paths from research digs: kept local, not in git
+docs/research/**/historical-income.*
+docs/research/**/timber-findings.md
+docs/research/**/timber-documents.csv

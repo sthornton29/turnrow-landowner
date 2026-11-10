@@ -131,6 +131,19 @@ export default function EntityDocuments({
       timber_stand: "timber_stands", road: "roads", easement: "easements", asset: "assets",
       cemetery: "cemeteries", maintenance_issue: "maintenance_issues",
     };
+    if (entityType === "stand_activity") {
+      // Migration 0045: activities carry a title, not a name.
+      supabase
+        .from("stand_activities")
+        .select("property_id, title")
+        .eq("id", entityId)
+        .maybeSingle()
+        .then(({ data }) => {
+          setContextPropertyId((data?.property_id as string | null) ?? null);
+          if (!label && data?.title) setContextLabel(data.title as string);
+        });
+      return;
+    }
     const t = table[entityType];
     if (!t) return;
     supabase
