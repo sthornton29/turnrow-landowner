@@ -161,7 +161,7 @@ export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
         propertyName: propName.get(pid) ?? "",
         proceeds: r2(proceeds),
         sellingExpenses: r2(sellingExpenses),
-        depletion: r2(depletion),
+        depletion: r2(depletion) || 0, // no -0 when nothing is depleted
         gain: r2(proceeds - sellingExpenses - depletion),
         holding,
         formHint:
