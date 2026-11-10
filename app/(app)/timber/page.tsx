@@ -74,11 +74,27 @@ export default async function TimberPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Timber</h1>
-        <p className="mt-0.5 text-sm text-gray-600">
-          {formatNumber((stands ?? []).length)} stands, {formatAcres(totalAcres)} total acres
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Timber</h1>
+          <p className="mt-0.5 text-sm text-gray-600">
+            {formatNumber((stands ?? []).length)} stands, {formatAcres(totalAcres)} total acres
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/timber/basis"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Timber basis
+          </Link>
+          <Link
+            href="/timber-sales"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Timber sales
+          </Link>
+        </div>
       </div>
 
       {(stands ?? []).length > 0 && (attention.length > 0 || routine.size > 0 || needsYear.length > 0) ? (

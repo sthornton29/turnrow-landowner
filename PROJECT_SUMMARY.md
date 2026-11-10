@@ -1,5 +1,30 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (TIMBER RECORDS stage 2: TIMBER BASIS, migration 0046, LIVE).
+timber_accounts (one per tract, held by an entity: acquisition_type
+purchase|inheritance|gift|transfer|unknown, acquired_date, total/land/
+timber/improvements value, basis_source, acres_covered),
+timber_account_products (opening volume and basis per product, or one
+'all_timber' pool; volume may be unknown), timber_account_entries (the
+ledger: depletion, capitalized_cost, volume_adjustment, casualty_loss,
+other; timber_sale_id, cost_id). Balances are never stored:
+lib/timberBasis.ts sums them (accountBalance), proposes depletion from
+settlement quantities (proposeDepletion: same product and unit, else the
+all_timber pool, capped at basis and volume) or from a share
+(proposeDepletionByShare, for lump sums and unmeasured accounts), splits a
+price by appraised values (allocateByValue), and gives a tract's share of a
+multi-property sale (propertyShareOfSale; sale-level sales fall back to
+acres). Tests reproduce the USDA FS-1275 examples ($8,000 depletion, $22,000
+allocated basis, $10,500 gain). Children are entity-scoped through
+private.user_accessible_timber_account_ids(); documents attach as
+timber_account (evidence). Pages: /timber/basis (one card per property with
+timber, setup interview in place) and /timber/basis/[id] (basis left by
+product with $ per unit, each sale on the tract with proceeds share, selling
+costs from timber_costs, proposed or recorded depletion and approximate
+taxable gain, Use this / Remove and redo, the ledger with manual
+adjustments, Evidence). Timber page header links Timber basis and Timber
+sales. Help topic timber-basis.md. Inserts pass organization_id explicitly.
+
 2026-11-09 (TIMBER RECORDS stage 1, migration 0045, LIVE). First of five
 timber stages (research and S drive findings in docs/research/2026-11-09/;
 next: basis ledger, Sec 194 + cost-share + annual timber tax summary, sale

@@ -232,6 +232,49 @@ export interface TimberCostRow {
   notes: string | null;
 }
 
+// Migration 0046: timber basis accounts and their ledger.
+export interface TimberAccountRow {
+  id: string;
+  organization_id: string;
+  property_id: string;
+  entity_id: string | null;
+  name: string;
+  acquisition_type: string;
+  acquired_date: string | null;
+  total_value: number | null;
+  land_value: number | null;
+  timber_value: number | null;
+  improvements_value: number | null;
+  basis_source: string;
+  acres_covered: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimberAccountProductRow {
+  id: string;
+  account_id: string;
+  product: string;
+  unit: "ton" | "mbf";
+  opening_volume: number | null;
+  opening_basis: number;
+}
+
+export interface TimberAccountEntryRow {
+  id: string;
+  account_id: string;
+  entry_date: string;
+  entry_type: string;
+  product: string | null;
+  volume_change: number;
+  basis_change: number;
+  timber_sale_id: string | null;
+  cost_id: string | null;
+  memo: string | null;
+  created_at: string;
+}
+
 export interface RoadGeo {
   id: string;
   organization_id: string;
@@ -323,6 +366,7 @@ export type DocumentEntityType =
   | "timber_sale"
   | "tax_statement"
   | "stand_activity" // migration 0045
+  | "timber_account" // migration 0046
   | "entity"
   | "organization"; // unfiled: entity_id = the organization id (migration 0024)
 

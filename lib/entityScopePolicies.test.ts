@@ -32,7 +32,12 @@ const sql45 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0045_timber_records.sql"),
   "utf8"
 );
-const sql = sql34 + sql37 + sql43 + sql45;
+// 0046 adds timber basis accounts, their products, and the ledger.
+const sql46 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0046_timber_basis.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43 + sql45 + sql46;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
   sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
@@ -43,6 +48,14 @@ const policyBlocks =
   sql45.slice(
     sql45.indexOf("create policy stand_activities_all"),
     sql45.indexOf("-- ---------------------------------------------------------------- save_stand_activity")
+  ) +
+  sql46.slice(
+    sql46.indexOf("create policy timber_accounts_all"),
+    sql46.indexOf("create or replace function private.user_accessible_timber_account_ids")
+  ) +
+  sql46.slice(
+    sql46.indexOf("-- ---------------------------------------------------------------- timber_account_products"),
+    sql46.indexOf("-- ---------------------------------------------------------------- documents")
   );
 
 // The scoped-table list. Deliberately absent (documented in the
@@ -78,6 +91,9 @@ const SCOPED_TABLES = [
   "stand_activities",
   "stand_activity_stands",
   "timber_costs",
+  "timber_accounts",
+  "timber_account_products",
+  "timber_account_entries",
   "tax_statements",
   "tax_statement_lines",
   "tax_payments",
