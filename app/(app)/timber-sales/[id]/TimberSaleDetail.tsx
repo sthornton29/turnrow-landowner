@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -68,8 +68,10 @@ export default function TimberSaleDetail({
   sale,
   tenants,
   allStands,
+  workflow,
 }: {
   orgId: string;
+  workflow?: ReactNode; // the sale steps panel (stage 4), rendered under the header
   sale: SaleRow;
   tenants: Array<{ id: string; name: string }>;
   allStands: Array<{
@@ -382,6 +384,8 @@ export default function TimberSaleDetail({
           </p>
         ) : null}
       </div>
+
+      {workflow}
 
       {showThinningOffer ? (
         <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">

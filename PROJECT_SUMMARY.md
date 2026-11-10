@@ -1,5 +1,25 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-09 (TIMBER RECORDS stage 4: SALE STEPS, migration 0048, LIVE).
+timber_sales gains stage (planning, cruise, marketing, contract, harvesting,
+closeout, complete; null = effectiveStage() reads it from status, contract
+date, settlements, closeout), forester_name, forester_fee_pct, min_bid,
+bid_date, harvest_start/end, closeout_date, deposit_returned_date,
+reforestation_due, form_1099s_received/amount, and checklist jsonb (item key
+-> yes|no|na). timber_sale_bids (bidder, amount, received_date, is_winner),
+entity-scoped through user_accessible_timber_sale_ids(). lib/timberSaleSteps.ts
+holds the stages with plain goals, 28 checklist items by stage (incl. the
+contract clauses from ACES FOR-2101 and AFC), stageProgress, analyzeBids
+(high, low, spread, meets minimum, winner), foresterFee, and
+afterHarvestSuggestion (replant after clearcut/salvage, burn after a
+thinning). components/timber/SaleSteps.tsx renders on the sale page under the
+header (TimberSaleDetail gained a workflow slot): stage bar with progress,
+move-to-stage, each step's checklist and fields, sealed bids, selling costs
+(timber_costs selling_expense with timber_sale_id and no activity; feed the
+basis page and tax summary), and on Done links to record depletion per
+property plus Schedule replanting / Schedule the burn (planned
+stand_activities via save_stand_activity). Help: timber-sales.md "Sale steps".
+
 2026-11-09 (TIMBER RECORDS stage 3: COST-SHARE, REPLANTING DEDUCTION, TIMBER
 TAX SUMMARY, migration 0047, LIVE). cost_share_awards (property, entity,
 program eqip|csp|crp|afc_spb|longleaf|other, contract number, status, dates,
