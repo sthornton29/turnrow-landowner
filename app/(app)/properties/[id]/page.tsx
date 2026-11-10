@@ -126,23 +126,27 @@ export default async function PropertyDetailPage({
   // Annual income allocated to this property from all leases and timber sales
   const incomeInputs = await loadIncomeInputs(supabase);
   const currentYear = new Date().getFullYear();
-  const incomeYears = [currentYear - 1, currentYear, currentYear + 1]
-    .map((year) => ({
-      year,
-      totals: allocateToProperties(incomeInputs, year).get(id) ?? {
-        expected: 0,
-        received: 0,
-        taxesDue: 0,
-        taxesPaid: 0,
-      },
-    }))
-    .filter(
-      (r) =>
-        r.totals.expected > 0 ||
-        r.totals.received > 0 ||
-        r.totals.taxesDue > 0 ||
-        r.totals.taxesPaid > 0
-    );
+  // Recent years up front; earlier years with any income (history from
+  // income records, migration 0051) behind "Earlier years".
+  const zero = { expected: 0, received: 0, taxesDue: 0, taxesPaid: 0 };
+  const activeYear = (r: { totals: typeof zero }) =>
+    r.totals.expected > 0 || r.totals.received > 0 || r.totals.taxesDue > 0 || r.totals.taxesPaid > 0;
+  const historyStart = Math.min(
+    currentYear - 1,
+    ...(incomeInputs.records ?? []).map((r) => r.year),
+    ...incomeInputs.settlements.map((s) => Number(s.settlement_date.slice(0, 4))),
+    ...incomeInputs.taxPayments.map((p) => Number(p.paid_date.slice(0, 4)))
+  );
+  const yearRow = (year: number) => ({ year, totals: allocateToProperties(incomeInputs, year).get(id) ?? zero });
+  const incomeYears = [currentYear - 1, currentYear, currentYear + 1].map(yearRow).filter(activeYear);
+  const earlierYears: Array<ReturnType<typeof yearRow>> = [];
+  for (let y = currentYear - 2; y >= historyStart; y--) {
+    const r = yearRow(y);
+    if (activeYear(r)) earlierYears.push(r);
+  }
+  // Ten full years before this one: the average a year this land brought in.
+  const tenYear = [...incomeYears, ...earlierYears].filter((r) => r.year < currentYear && r.year >= currentYear - 10);
+  const tenYearAvg = tenYear.length ? tenYear.reduce((s, r) => s + r.totals.received, 0) / tenYear.length : null;
 
   const parcelAcres = (parcels ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const fieldAcres = (fields ?? []).reduce((s, f) => s + (f.acres ?? 0), 0);
@@ -715,11 +719,17 @@ export default async function PropertyDetailPage({
         </div>
       </section>
 
-      {incomeYears.length > 0 ? (
+      {incomeYears.length > 0 || earlierYears.length > 0 ? (
         <section>
           <h2 className="mb-2 text-lg font-semibold text-gray-900">
             Income allocated to this property
           </h2>
+          {tenYearAvg !== null && tenYear.length >= 3 ? (
+            <p className="mb-2 text-sm text-gray-600">
+              Received about {formatDollars(tenYearAvg)} a year over {tenYear.length} year{tenYear.length === 1 ? "" : "s"} since{" "}
+              {Math.min(...tenYear.map((r) => r.year))}.
+            </p>
+          ) : null}
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
             <table className="w-full text-sm">
               <thead>
@@ -759,6 +769,42 @@ export default async function PropertyDetailPage({
               </tbody>
             </table>
           </div>
+          {earlierYears.length > 0 ? (
+            <details className="mt-2 rounded-xl border border-gray-200 bg-white">
+              <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-gray-700">
+                Earlier years ({earlierYears.length}, back to {earlierYears[earlierYears.length - 1].year})
+              </summary>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {earlierYears.map((r) => (
+                      <tr key={r.year} className="border-t border-gray-100">
+                        <td className="px-4 py-1.5">
+                          <Link href={`/income?year=${r.year}`} className="font-medium text-kelly-700 hover:underline">
+                            {r.year}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-1.5 text-right tabular-nums">{formatDollars(r.totals.received)}</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums">
+                          {r.totals.taxesPaid ? `(${formatDollars(r.totals.taxesPaid)})` : ""}
+                        </td>
+                        <td className="px-4 py-1.5 text-right font-medium tabular-nums text-pine-900">
+                          {formatDollars(r.totals.received - r.totals.taxesPaid)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="px-4 pb-2 text-xs text-gray-500">
+                Received, taxes paid, and net. Older rent comes from the{" "}
+                <Link href="/income/records" className="text-kelly-700 hover:underline">
+                  income records
+                </Link>
+                ; before 2020 the books often recorded one check for several farms, which shows under the entity instead.
+              </p>
+            </details>
+          ) : null}
         </section>
       ) : null}
 

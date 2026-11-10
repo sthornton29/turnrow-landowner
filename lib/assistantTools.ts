@@ -18,6 +18,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
   allocateToProperties,
+  entityOfUnassignedKey,
   loadIncomeInputs,
   summarizeByYear,
   UNASSIGNED,
@@ -233,6 +234,7 @@ const TYPE_LABELS: Record<IncomeType, string> = {
   hunting: "Hunting leases",
   timber: "Timber sales",
   government: "Government payments (landowner share)",
+  other: "Solar, tower, building, and other land income",
 };
 
 const incomeSummary: ToolImpl = async (supabase, input) => {
@@ -249,9 +251,10 @@ const incomeSummary: ToolImpl = async (supabase, input) => {
   const propName = new Map(props.map((p) => [p.id, p]));
   const propertyRows = Array.from(perProperty.entries()).map(([pid, t]) => {
     const p = propName.get(pid);
+    const unassignedEntity = entityOfUnassignedKey(pid);
     return {
-      property: pid === UNASSIGNED ? "Unassigned" : (p?.name ?? pid),
-      entity: p?.entity_id ? (entityName.get(p.entity_id) ?? null) : null,
+      property: pid === UNASSIGNED ? "Unassigned" : unassignedEntity ? "Not tied to a property" : (p?.name ?? pid),
+      entity: unassignedEntity ? (entityName.get(unassignedEntity) ?? null) : p?.entity_id ? (entityName.get(p.entity_id) ?? null) : null,
       expected_income: r2(t.expected),
       received_income: r2(t.received),
       taxes_due: r2(t.taxesDue),
@@ -265,19 +268,11 @@ const incomeSummary: ToolImpl = async (supabase, input) => {
     expected: r2(totals?.expected[t] ?? 0),
     received: r2(totals?.received[t] ?? 0),
   }));
-  const gov = (totals?.expected as Record<string, number> | undefined)?.government;
-  if (gov !== undefined) {
-    lineItems.push({
-      type: "Government payments (landowner share)",
-      expected: r2(gov),
-      received: r2((totals?.received as Record<string, number>).government ?? 0),
-    });
-  }
   const grossExpected = lineItems.reduce((a, l) => a + l.expected, 0);
   const grossReceived = lineItems.reduce((a, l) => a + l.received, 0);
   return {
     sources: [
-      `${inputs.leases.length} lease${inputs.leases.length === 1 ? "" : "s"}, ${inputs.settlements.length} timber settlement${inputs.settlements.length === 1 ? "" : "s"}, and tax statements for ${year}`,
+      `${inputs.leases.length} lease${inputs.leases.length === 1 ? "" : "s"}, ${inputs.settlements.length} timber settlement${inputs.settlements.length === 1 ? "" : "s"}, ${(inputs.records ?? []).filter((r) => r.year === year).length} income records, and tax statements for ${year}`,
       describeProperties(props),
     ],
     year,

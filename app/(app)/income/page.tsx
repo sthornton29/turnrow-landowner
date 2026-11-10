@@ -5,6 +5,8 @@ import { NO_ENTITY, parseEntityParam } from "@/lib/entities";
 import {
   UNASSIGNED,
   allocateToProperties,
+  entityOfUnassignedKey,
+  entityUnassignedKey,
   emptyTotals,
   informationalGovPayments,
   loadIncomeInputs,
@@ -27,6 +29,7 @@ const TYPE_LABELS: Record<IncomeType, string> = {
   hunting: "Hunting leases",
   timber: "Timber",
   government: "Government payments (your share)",
+  other: "Solar, tower, buildings, and other",
 };
 
 export default async function IncomePage({
@@ -83,11 +86,13 @@ export default async function IncomePage({
   // The property scope the selection resolves to (null = everything,
   // which includes Unassigned; a concrete selection never does).
   const scope = filtering
-    ? new Set(
-        (properties ?? [])
+    ? new Set([
+        ...(properties ?? [])
           .filter((p) => selectedSet.has(p.entity_id ?? NO_ENTITY))
-          .map((p) => p.id)
-      )
+          .map((p) => p.id),
+        // Income records naming only the entity (no property).
+        ...selectedKeys.filter((k) => k !== NO_ENTITY).map(entityUnassignedKey),
+      ])
     : null;
 
   const byProperty = allocateToProperties(inputs, selectedYear);
@@ -95,7 +100,7 @@ export default async function IncomePage({
     ? sumPropertyScope(byProperty, scope)
     : (byYear.get(selectedYear) ?? emptyTotals());
   const sumTypes = (r: Record<IncomeType, number>) =>
-    r.agricultural + r.hunting + r.timber + r.government;
+    r.agricultural + r.hunting + r.timber + r.government + r.other;
   const totalExpected = sumTypes(totals.expected);
   const totalReceived = sumTypes(totals.received);
 
@@ -158,12 +163,14 @@ export default async function IncomePage({
     for (const key of orderedKeys) {
       if (filtering && !selectedSet.has(key)) continue;
       const rows = Array.from(byProperty.entries())
-        .filter(([propertyId]) =>
-          key === UNASSIGNED
+        .filter(([propertyId]) => {
+          const recordEntity = entityOfUnassignedKey(propertyId);
+          if (recordEntity) return recordEntity === key;
+          return key === UNASSIGNED
             ? propertyId === UNASSIGNED
             : propertyId !== UNASSIGNED &&
-              (entityOfProperty.get(propertyId) ?? NO_ENTITY) === key
-        )
+                (entityOfProperty.get(propertyId) ?? NO_ENTITY) === key;
+        })
         .sort((a, b) => b[1].expected - a[1].expected);
       if (rows.length === 0) continue;
       entityGroups.push({
@@ -192,7 +199,8 @@ export default async function IncomePage({
   // Chart data: expected vs received vs taxes paid per year, computed
   // within the entity selection (per-year allocation; the years list is
   // small).
-  const chartYears = years.map((y) => {
+  // The latest 10 years: history back to 2006 stays in the year picker.
+  const chartYears = years.slice(-10).map((y) => {
     const t = filtering
       ? sumPropertyScope(
           y === selectedYear ? byProperty : allocateToProperties(inputs, y),
@@ -216,7 +224,13 @@ export default async function IncomePage({
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold text-gray-900">Income</h1>
         <RentUpload orgId={profile.organization_id!} />
-        <div className="ml-auto flex gap-1">
+        <Link
+          href={`/income/records?year=${selectedYear}`}
+          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+        >
+          Income records
+        </Link>
+        <div className="ml-auto flex flex-wrap justify-end gap-1">
           {years.map((y) => (
             <Link
               key={y}
@@ -578,6 +592,10 @@ export default async function IncomePage({
                             <span className="text-gray-500">
                               Unassigned (no land linked)
                             </span>
+                          ) : entityOfUnassignedKey(propertyId) ? (
+                            <Link href={`/income/records?year=${selectedYear}`} className="text-gray-500 hover:underline">
+                              Not tied to a property (income records)
+                            </Link>
                           ) : (
                             <Link
                               href={`/properties/${propertyId}`}

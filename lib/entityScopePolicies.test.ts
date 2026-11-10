@@ -57,7 +57,12 @@ const sql50 = readFileSync(
   join(__dirname, "..", "supabase", "migrations", "0050_tax_report_finish.sql"),
   "utf8"
 );
-const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47 + sql48 + sql49 + sql50;
+// 0051 adds income records.
+const sql51 = readFileSync(
+  join(__dirname, "..", "supabase", "migrations", "0051_income_records.sql"),
+  "utf8"
+);
+const sql = sql34 + sql37 + sql43 + sql45 + sql46 + sql47 + sql48 + sql49 + sql50 + sql51;
 const policyBlocks =
   sql34.slice(sql34.indexOf("-- ---- properties: the root")) +
   sql37.slice(sql37.indexOf("drop policy if exists documents_entity_scope")) +
@@ -93,6 +98,10 @@ const policyBlocks =
   sql50.slice(
     sql50.indexOf("create policy tax_valuation_notices_all"),
     sql50.indexOf("create index tax_valuation_notices_org_idx")
+  ) +
+  sql51.slice(
+    sql51.indexOf("create policy income_records_all"),
+    sql51.indexOf("create trigger set_updated_at before update on public.income_records")
   );
 
 // The scoped-table list. Deliberately absent (documented in the
@@ -136,6 +145,7 @@ const SCOPED_TABLES = [
   "timber_sale_bids",
   "parcel_valuations",
   "tax_valuation_notices",
+  "income_records",
   "tax_statements",
   "tax_statement_lines",
   "tax_payments",

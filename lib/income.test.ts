@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   UNASSIGNED,
   allocateToProperties,
+  entityOfUnassignedKey,
+  entityUnassignedKey,
+  recordIncomeType,
   projectedLeaseYears,
   summarizeByYear,
   sumPropertyScope,
@@ -326,3 +329,62 @@ describe("government payment share", () => {
     expect(allocateToProperties(inputs, year).get("p1")?.expected).toBe(964.92);
   });
 });
+
+describe("income records (history and income outside a lease)", () => {
+  const inputs = (): IncomeInputs => ({
+    ...emptyInputs(),
+    records: [
+      { year: 2015, income_type: "farmland_cash_rent", amount: 439117.2, property_id: null, entity_id: "alb" },
+      { year: 2015, income_type: "share_rent", amount: 28393, property_id: "jm", entity_id: "jmllc" },
+      { year: 2021, income_type: "solar", amount: 14348.01, property_id: "betts", entity_id: "trusts" },
+      { year: 2021, income_type: "tower", amount: 15000, property_id: null, entity_id: "trusts" },
+      { year: 2021, income_type: "other", amount: 4085.4, property_id: null, entity_id: null },
+    ],
+  });
+
+  it("maps record types to income buckets", () => {
+    expect(["farmland_cash_rent", "share_rent", "timber", "hunting", "solar", "tower", "commercial_rent", "other"].map(recordIncomeType)).toEqual([
+      "agricultural", "agricultural", "timber", "hunting", "other", "other", "other", "other",
+    ]);
+  });
+
+  it("counts records as received income in their year", () => {
+    const y = summarizeByYear(inputs());
+    expect(y.get(2015)!.received.agricultural).toBeCloseTo(467510.2, 2);
+    expect(y.get(2021)!.received.other).toBeCloseTo(33433.41, 2);
+    expect(y.get(2021)!.expected.other).toBe(0);
+  });
+
+  it("routes a record to its property, else to its entity's own bucket, else to Unassigned", () => {
+    const by = allocateToProperties(inputs(), 2021);
+    expect(by.get("betts")!.receivedByType.other).toBeCloseTo(14348.01, 2);
+    expect(by.get(entityUnassignedKey("trusts"))!.received).toBe(15000);
+    expect(by.get(UNASSIGNED)!.received).toBeCloseTo(4085.4, 2);
+    expect(entityOfUnassignedKey(entityUnassignedKey("trusts"))).toBe("trusts");
+    expect(entityOfUnassignedKey(UNASSIGNED)).toBeNull();
+    expect(entityOfUnassignedKey("betts")).toBeNull();
+  });
+
+  it("keeps an entity's property-less records inside that entity's scope", () => {
+    const by = allocateToProperties(inputs(), 2015);
+    const alb = sumPropertyScope(by, new Set([entityUnassignedKey("alb")]));
+    expect(alb.received.agricultural).toBeCloseTo(439117.2, 2);
+    const all = sumPropertyScope(by, null);
+    expect(all.received.agricultural).toBeCloseTo(summarizeByYear(inputs()).get(2015)!.received.agricultural, 2);
+  });
+});
+
+describe("timber sales on stands without boundaries", () => {
+  it("routes a sale on an undrawn stand (no acres) to the stand's property", () => {
+    const inputs: IncomeInputs = {
+      ...emptyInputs(),
+      settlements: [{ timber_sale_id: "s", settlement_date: "2021-03-01", total_amount: 29345.3 }],
+      saleStands: [{ timber_sale_id: "s", timber_stand_id: "st" }],
+      stands: [{ id: "st", property_id: "trinity", acres: null }],
+    };
+    const by = allocateToProperties(inputs, 2021);
+    expect(by.get("trinity")!.received).toBeCloseTo(29345.3, 2);
+    expect(by.get(UNASSIGNED)).toBeUndefined();
+  });
+});
+

@@ -26,7 +26,28 @@ import { allocateByLines } from "@/lib/tax";
 // of projected ARC/PLC payments on leased base acres, attributed to the
 // PAYMENT year (program year Y pays October Y+1). At a 0% share nothing
 // enters the totals; informationalGovPayments() still reports the figure.
-export type IncomeType = "agricultural" | "hunting" | "timber" | "government";
+// "other" = land income with no lease in Turnrow: solar, tower, and
+// building rent from income records (migration 0051).
+export type IncomeType = "agricultural" | "hunting" | "timber" | "government" | "other";
+
+// An income record (migration 0051): income received outside a lease
+// payment or timber settlement, mostly history from the old books.
+export interface IncomeRecordInput {
+  year: number;
+  income_type: string;
+  amount: number;
+  property_id: string | null;
+  entity_id: string | null;
+}
+
+// Which income bucket an income record's type falls in.
+export function recordIncomeType(t: string): IncomeType {
+  if (t === "farmland_cash_rent" || t === "share_rent") return "agricultural";
+  if (t === "hunting") return "hunting";
+  if (t === "timber") return "timber";
+  if (t === "government") return "government";
+  return "other";
+}
 
 export interface IncomeLease extends LeaseLike {
   id: string;
@@ -79,6 +100,8 @@ export interface IncomeInputs {
   }>;
   taxPayments: Array<{ tax_statement_id: string; paid_date: string; amount: number }>;
   parcels: Array<{ id: string; property_id: string }>;
+  // Income records (migration 0051). Absent means none.
+  records?: IncomeRecordInput[];
   // Optional: FSA farms, base acres, elections, and global program data.
   // Absent (older callers / tests) means no government payments.
   gov?: GovInputs | null;
@@ -99,8 +122,8 @@ export interface YearTotals {
 
 export function emptyTotals(): YearTotals {
   return {
-    expected: { agricultural: 0, hunting: 0, timber: 0, government: 0 },
-    received: { agricultural: 0, hunting: 0, timber: 0, government: 0 },
+    expected: { agricultural: 0, hunting: 0, timber: 0, government: 0, other: 0 },
+    received: { agricultural: 0, hunting: 0, timber: 0, government: 0, other: 0 },
     taxesDue: 0,
     taxesPaid: 0,
     hasProjection: false,
@@ -447,6 +470,9 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
     const year = Number(s.settlement_date.slice(0, 4));
     get(year).received.timber += s.total_amount;
   }
+  for (const r of inputs.records ?? []) {
+    get(r.year).received[recordIncomeType(r.income_type)] += Number(r.amount);
+  }
   for (const t of inputs.taxStatements) {
     get(t.tax_year).taxesDue += t.amount_due;
   }
@@ -484,15 +510,14 @@ function sharesFor(
       (s, l) => s + (standById.get(l.timber_stand_id)?.acres ?? 0),
       0
     );
-    if (total <= 0) return null;
+    const linked = links.map((l) => standById.get(l.timber_stand_id)).filter((x): x is NonNullable<typeof x> => !!x);
+    if (linked.length === 0) return null;
     const map = new Map<string, number>();
-    for (const l of links) {
-      const stand = standById.get(l.timber_stand_id);
-      if (!stand) continue;
-      map.set(
-        stand.property_id,
-        (map.get(stand.property_id) ?? 0) + (stand.acres ?? 0) / total
-      );
+    for (const stand of linked) {
+      // By stand acres; stands with no boundary yet (no acres) share
+      // equally, so a sale on one undrawn stand still reaches its property.
+      const share = total > 0 ? (stand.acres ?? 0) / total : 1 / linked.length;
+      map.set(stand.property_id, (map.get(stand.property_id) ?? 0) + share);
     }
     return map;
   }
@@ -500,6 +525,18 @@ function sharesFor(
 }
 
 export const UNASSIGNED = "__unassigned__";
+
+// Income with an entity but no property (an income record naming only
+// the entity, like a lump rent check from before the books coded farms)
+// collects under a per-entity key, so an entity filter still counts it.
+const ENTITY_UNASSIGNED_PREFIX = "__unassigned__:";
+export function entityUnassignedKey(entityId: string): string {
+  return ENTITY_UNASSIGNED_PREFIX + entityId;
+}
+// The entity behind a per-entity key, else null.
+export function entityOfUnassignedKey(key: string): string | null {
+  return key.startsWith(ENTITY_UNASSIGNED_PREFIX) ? key.slice(ENTITY_UNASSIGNED_PREFIX.length) : null;
+}
 
 export interface PropertyTotals {
   expected: number;
@@ -520,6 +557,7 @@ const zeroByType = (): Record<IncomeType, number> => ({
   hunting: 0,
   timber: 0,
   government: 0,
+  other: 0,
 });
 
 // Per-property income and tax expense for one year. Taxes route through
@@ -602,6 +640,11 @@ export function allocateToProperties(
   for (const s of inputs.settlements) {
     if (Number(s.settlement_date.slice(0, 4)) !== year) continue;
     spread(null, s.timber_sale_id, "received", s.total_amount, "timber");
+  }
+  for (const r of inputs.records ?? []) {
+    if (r.year !== year) continue;
+    const key = r.property_id ?? (r.entity_id ? entityUnassignedKey(r.entity_id) : UNASSIGNED);
+    add(key, "received", Number(r.amount), recordIncomeType(r.income_type));
   }
 
   // Taxes route LINE by LINE: a line's tax goes to its parcel's property;
@@ -688,6 +731,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     parcels,
     propertyAcres,
     gov,
+    records,
   ] = await Promise.all([
     supabase
       .from("leases")
@@ -715,6 +759,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     supabase.from("parcels").select("id, property_id"),
     supabase.from("properties").select("id, acres"),
     loadGovInputs(supabase),
+    supabase.from("income_records").select("year, income_type, amount, property_id, entity_id"),
   ]);
   return {
     leases: leases.data ?? [],
@@ -731,5 +776,6 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     parcels: parcels.data ?? [],
     propertyAcres: propertyAcres.data ?? [],
     gov,
+    records: records.data ?? [],
   };
 }
