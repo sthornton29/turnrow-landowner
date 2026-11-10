@@ -150,9 +150,11 @@ export function planForStand(
     }
   }
 
-  // A final harvest after establishment: the only thing that matters
-  // next is getting trees back.
-  const lastFinal = doneActs
+  // A final harvest after establishment of a PLANTED pine stand: the
+  // only thing that matters next is getting trees back. Hardwood and
+  // natural stands usually regrow on their own, so they keep their
+  // normal template.
+  const lastFinal = type !== "planted_pine" ? null : doneActs
     .filter(isFinalHarvest)
     .reduce<number | null>((m, a) => (m === null || a.activity_year > m ? a.activity_year : m), null);
   if (lastFinal !== null && (est === null || lastFinal > est)) {

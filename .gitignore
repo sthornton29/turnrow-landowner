@@ -34,3 +34,6 @@ docs/research/**/timber-documents.csv
 
 # Personal Claude Code settings (local permissions)
 .claude/settings.local.json
+
+# One-off data loads with family records (kept local)
+scripts/backfill/

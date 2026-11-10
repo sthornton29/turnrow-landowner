@@ -105,6 +105,14 @@ describe("planted pine template", () => {
     expect(recs[0].status).toBe("due");
   });
 
+  it("does not ask a hardwood stand to be replanted after a harvest", () => {
+    const hw: PlanStand = { id: "h", name: "Betts Hardwoods", stand_type: "hardwood", year_established: null, site_index: null };
+    const acts: PlanActivity[] = [
+      { activity_type: "harvest", status: "done", activity_year: 2006, details: { harvest_type: "clearcut" } },
+    ];
+    expect(planForStand(hw, acts, 2026).some((r) => r.key.startsWith("replant"))).toBe(false);
+  });
+
   it("restarts the clock when the stand is replanted", () => {
     const acts: PlanActivity[] = [
       { activity_type: "harvest", status: "done", activity_year: 2021, details: { harvest_type: "clearcut" } },
