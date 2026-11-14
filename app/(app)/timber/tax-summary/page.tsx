@@ -42,6 +42,7 @@ export default async function TimberTaxSummaryPage({
     { data: entries },
     { data: awards },
     { data: csPayments },
+    { data: activities },
   ] = await Promise.all([
     supabase.from("properties").select("id, name, entity_id").order("name"),
     supabase.from("entities").select("id, name, entity_type").order("name"),
@@ -52,11 +53,13 @@ export default async function TimberTaxSummaryPage({
     supabase.from("payments").select("timber_sale_id, amount, received_date").not("timber_sale_id", "is", null),
     supabase
       .from("timber_costs")
-      .select("id, property_id, paid_date, amount, tax_category, timber_sale_id, cost_share_award_id, vendor, description"),
+      .select("id, property_id, paid_date, amount, tax_category, timber_sale_id, cost_share_award_id, vendor, description, activity_id"),
     supabase.from("timber_accounts").select("id, property_id, acquisition_type, acquired_date"),
     supabase.from("timber_account_entries").select("account_id, entry_date, entry_type, basis_change, timber_sale_id"),
     supabase.from("cost_share_awards").select("id, property_id, entity_id, program, title"),
     supabase.from("cost_share_payments").select("award_id, received_date, amount, sec126_choice"),
+    // Costs on work that is only planned are not counted as paid.
+    supabase.from("stand_activities").select("id, status"),
   ]);
 
   // Taxpayers that hold timber: entities of properties with stands.
@@ -80,6 +83,7 @@ export default async function TimberTaxSummaryPage({
     settlements: settlements ?? [],
     payments: (payments ?? []) as Array<{ timber_sale_id: string | null; amount: number; received_date: string }>,
     costs: costs ?? [],
+    activities: activities ?? [],
     accounts: accounts ?? [],
     entries: entries ?? [],
     awards: awards ?? [],
@@ -97,7 +101,7 @@ export default async function TimberTaxSummaryPage({
       ["Timber sale", `${x.saleName}: depletion`, x.propertyName, "", -x.depletion, ""],
       ["Timber sale", `${x.saleName}: gain`, x.propertyName, "", x.gain, `${x.holding === "long" ? "Held over a year" : x.holding === "short" ? "Held a year or less" : "Holding period unknown"}. ${x.formHint}`],
     ]),
-    ...s.reforestation.map((r) => ["Replanting (Sec 194)", "Deduction this year", r.propertyName, "", r.deduction, `Expensed ${r.expensed}; amortization ${r.amortization}; paid this year ${r.paidThisYear}; cost-share excluded ${r.costShareExcluded}`]),
+    ...s.reforestation.map((r) => ["Replanting (Sec 194)", "Deduction this year", r.propertyName, "", r.deduction, `Expensed ${formatDollars(r.expensed)}; amortization ${formatDollars(r.amortization)}; paid this year ${formatDollars(r.paidThisYear)}; cost-share excluded ${formatDollars(r.costShareExcluded)}`]),
     ...s.costShare.map((c) => ["Cost-share received", c.title, PROGRAM_LABELS[c.program] ?? c.program, c.received_date, c.amount, SEC126_LABELS[c.choice]?.label ?? c.choice]),
     ...s.expenses.map((e) => [TAX_CATEGORIES[e.tax_category as TaxCategory]?.label ?? e.tax_category, e.what, e.propertyName, e.paid_date, e.amount, ""]),
   ];

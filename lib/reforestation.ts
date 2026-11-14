@@ -128,7 +128,7 @@ export const COST_SHARE_STATUS_LABELS: Record<string, string> = {
 export const SEC126_LABELS: Record<string, { label: string; help: string }> = {
   exclude: {
     label: "Exclude from income (Sec 126)",
-    help: "Not taxed now, but the costs it paid for cannot be deducted, and it is recaptured if the land is sold within 20 years.",
+    help: "Not taxed now, but the costs it paid for cannot be deducted, and it is recaptured if the land is sold within 20 years. The amount that can be excluded has a cap and not every program qualifies, so have your accountant confirm the figure.",
   },
   include: {
     label: "Report as income",

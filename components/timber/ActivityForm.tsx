@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatAcres, formatDollars } from "@/lib/format";
 import {
   ACTIVITY_BUTTON_ORDER,
@@ -208,7 +209,7 @@ export default function ActivityForm({
     const { error: err } = await supabase.rpc("save_stand_activity", { p: payload });
     setBusy(false);
     if (err) {
-      setError(`Could not save: ${err.message}`);
+      setError(friendlyDbError(err, "Could not save this work. Please try again."));
       return;
     }
     onClose();
@@ -518,6 +519,12 @@ export default function ActivityForm({
             <p className="text-xs text-gray-500">{TAX_NOTE}</p>
           </div>
         )}
+        {draft.status === "planned" && draft.costs.length > 0 ? (
+          <p className="mt-2 text-xs text-amber-800">
+            This work is marked as planned, so these costs are not counted as paid: they stay out of the
+            stand&apos;s cost total and the timber tax summary until the work is marked Already done.
+          </p>
+        ) : null}
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}

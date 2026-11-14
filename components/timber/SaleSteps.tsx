@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatDollars } from "@/lib/format";
 import {
   STAGES,
@@ -87,8 +88,21 @@ export default function SaleSteps({
   const supabase = createClient();
   const [view, setView] = useState<SaleStage>(sale.stage);
   const [showAll, setShowAll] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Shown beside the part it is about: the steps, the bids, or the costs.
+  const [error, setErrorAt] = useState<{ at: "steps" | "bids" | "costs"; text: string } | null>(null);
+  const setError = (text: string | null, at: "steps" | "bids" | "costs" = "steps") =>
+    setErrorAt(text === null ? null : { at, text });
   const [notice, setNotice] = useState<string | null>(null);
+  // An Add is in flight: the Add buttons stay off until the refreshed
+  // list has arrived, so a second tap cannot add the same row twice.
+  const [busy, setBusy] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
+  const locked = busy || refreshing;
+  // The checklist as ticked on this screen. Each tick writes the whole
+  // merged list, one write after another, so two quick ticks both stick.
+  const [checklist, setChecklist] = useState<Record<string, string>>(sale.checklist);
+  const savedChecklist = useRef<Record<string, string>>(sale.checklist);
+  const checklistWrites = useRef<Promise<unknown>>(Promise.resolve());
   const [f, setF] = useState({
     forester_name: sale.forester_name ?? "",
     forester_fee_pct: sale.forester_fee_pct != null ? String(sale.forester_fee_pct) : "",
@@ -110,42 +124,82 @@ export default function SaleSteps({
     property_id: properties[0]?.id ?? "",
   });
 
-  async function patch(values: Record<string, unknown>) {
+  // True when the write went through.
+  async function patch(values: Record<string, unknown>): Promise<boolean> {
     setError(null);
+    setNotice(null);
     const { error: err } = await supabase.from("timber_sales").update(values).eq("id", sale.id);
-    if (err) setError(`Could not save: ${err.message}`);
-    else router.refresh();
+    if (err) {
+      setError(friendlyDbError(err, "Could not save. Please try again."));
+      return false;
+    }
+    router.refresh();
+    return true;
   }
 
-  const num = (s: string) => (s.trim() === "" ? null : Number(s.replace(/[$,%]/g, "")));
+  // "8", "8%", "8 pct", "$45,000": the number at the front. Blank is
+  // allowed (null); text with no number at the front is refused
+  // (undefined) instead of being saved as blank.
+  const num = (s: string): number | null | undefined => {
+    if (s.trim() === "") return null;
+    const m = s.replace(/[$,\s]/g, "").match(/^(\d+(\.\d+)?|\.\d+)/);
+    return m ? Number(m[0]) : undefined;
+  };
 
   async function saveFields() {
-    await patch({
+    const fee = num(f.forester_fee_pct);
+    const minBid = num(f.min_bid);
+    const amount1099 = num(f.form_1099s_amount);
+    setNotice(null);
+    if (fee === undefined) return setError("Enter the forester's fee as a number, like 8 or 8.5.");
+    if (minBid === undefined) return setError("Enter the minimum bid as a dollar amount, like 45,000.");
+    if (amount1099 === undefined) return setError("Enter the 1099-S amount as a dollar amount.");
+    const ok = await patch({
       forester_name: f.forester_name.trim() || null,
-      forester_fee_pct: num(f.forester_fee_pct),
-      min_bid: num(f.min_bid),
+      forester_fee_pct: fee,
+      min_bid: minBid,
       bid_date: f.bid_date || null,
       harvest_start: f.harvest_start || null,
       harvest_end: f.harvest_end || null,
       closeout_date: f.closeout_date || null,
       deposit_returned_date: f.deposit_returned_date || null,
       reforestation_due: f.reforestation_due || null,
-      form_1099s_amount: num(f.form_1099s_amount),
+      form_1099s_amount: amount1099,
     });
-    setNotice("Saved.");
+    if (ok) setNotice("Saved.");
   }
 
-  async function setCheck(key: string, value: CheckValue) {
-    const next = { ...sale.checklist };
+  function setCheck(key: string, value: CheckValue): Promise<boolean> {
+    const next = { ...checklist };
     if (next[key] === value) delete next[key];
     else next[key] = value;
-    await patch({ checklist: next });
+    setChecklist(next);
+    setError(null);
+    setNotice(null);
+    const write: Promise<boolean> = checklistWrites.current.then(async () => {
+      const { error: err } = await supabase.from("timber_sales").update({ checklist: next }).eq("id", sale.id);
+      if (!err) {
+        savedChecklist.current = next;
+        return true;
+      }
+      // A later tick carries this one with it, so only the newest write
+      // decides what the screen shows: back to what is really saved.
+      if (checklistWrites.current === write) {
+        setChecklist(savedChecklist.current);
+        setError(friendlyDbError(err, "That tick did not save. Please try again."));
+      }
+      return false;
+    });
+    checklistWrites.current = write;
+    return write;
   }
 
   async function addBid() {
+    if (locked) return;
     setError(null);
     const amount = Number(bid.amount.replace(/[$,]/g, ""));
-    if (!bid.bidder.trim() || !(amount > 0)) return setError("Enter the bidder and the amount.");
+    if (!bid.bidder.trim() || !(amount > 0)) return setError("Enter the bidder and the amount.", "bids");
+    setBusy(true);
     const { error: err } = await supabase.from("timber_sale_bids").insert({
       organization_id: orgId,
       timber_sale_id: sale.id,
@@ -153,9 +207,10 @@ export default function SaleSteps({
       amount: Math.round(amount * 100) / 100,
       received_date: bid.date || null,
     });
-    if (err) return setError(`Could not save: ${err.message}`);
+    setBusy(false);
+    if (err) return setError(friendlyDbError(err, "Could not save the bid. Please try again."), "bids");
     setBid({ bidder: "", amount: "", date: bid.date });
-    router.refresh();
+    startRefresh(() => router.refresh());
   }
 
   async function markWinner(id: string) {
@@ -163,20 +218,24 @@ export default function SaleSteps({
     const r1 = await supabase.from("timber_sale_bids").update({ is_winner: false }).eq("timber_sale_id", sale.id);
     const r2 = await supabase.from("timber_sale_bids").update({ is_winner: true }).eq("id", id);
     const err = r1.error ?? r2.error;
-    if (err) setError(`Could not save: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not mark the winner. Please try again."), "bids");
     else router.refresh();
   }
 
   async function removeBid(id: string) {
+    setError(null);
     const { error: err } = await supabase.from("timber_sale_bids").delete().eq("id", id);
-    if (err) setError(`Could not remove: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not remove the bid. Please try again."), "bids");
     else router.refresh();
   }
 
   async function addCost() {
+    if (locked) return;
     setError(null);
     const amount = Number(cost.amount.replace(/[$,]/g, ""));
-    if (!(amount > 0) || !cost.property_id) return setError("Enter the amount (and the property).");
+    if (!(amount > 0) || !cost.property_id) return setError("Enter the amount (and the property).", "costs");
+    if (!cost.date) return setError("Enter the date the cost was paid.", "costs");
+    setBusy(true);
     const { error: err } = await supabase.from("timber_costs").insert({
       organization_id: orgId,
       property_id: cost.property_id,
@@ -187,14 +246,16 @@ export default function SaleSteps({
       description: cost.description.trim() || null,
       tax_category: "selling_expense",
     });
-    if (err) return setError(`Could not save: ${err.message}`);
+    setBusy(false);
+    if (err) return setError(friendlyDbError(err, "Could not save the cost. Please try again."), "costs");
     setCost({ ...cost, amount: "", vendor: "", description: "" });
-    router.refresh();
+    startRefresh(() => router.refresh());
   }
 
   async function removeCost(id: string) {
+    setError(null);
     const { error: err } = await supabase.from("timber_costs").delete().eq("id", id);
-    if (err) setError(`Could not remove: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not remove the cost. Please try again."), "costs");
     else router.refresh();
   }
 
@@ -220,9 +281,11 @@ export default function SaleSteps({
           costs: [],
         },
       });
-      if (err) return setError(`Could not schedule: ${err.message}`);
+      if (err) return setError(friendlyDbError(err, "Could not schedule it. Please try again."));
     }
-    await setCheck("d_next", "yes");
+    // Tick "next step scheduled" unless it is ticked already (a second
+    // press would untick it).
+    if (checklist.d_next !== "yes") await setCheck("d_next", "yes");
     setNotice(`Scheduled for ${year} on the stand pages.`);
   }
 
@@ -245,7 +308,7 @@ export default function SaleSteps({
         {STAGE_ORDER.map((s, i) => {
           const current = s === sale.stage;
           const past = STAGE_ORDER.indexOf(sale.stage) > i;
-          const prog = stageProgress(s, sale.checklist);
+          const prog = stageProgress(s, checklist);
           return (
             <li key={s}>
               <button
@@ -278,7 +341,7 @@ export default function SaleSteps({
           </p>
           <ul className="space-y-1">
             {stageItems(s).map((item) => {
-              const v = sale.checklist[item.key];
+              const v = checklist[item.key];
               return (
                 <li key={item.key} className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="flex gap-1">
@@ -375,10 +438,11 @@ export default function SaleSteps({
                   <input value={bid.bidder} onChange={(e) => setBid({ ...bid, bidder: e.target.value })} placeholder="Bidder" className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2 py-1 text-sm" />
                   <input value={bid.amount} onChange={(e) => setBid({ ...bid, amount: e.target.value })} placeholder="Amount $" inputMode="decimal" className="w-32 rounded-lg border border-gray-300 px-2 py-1 text-sm" />
                   <input type="date" value={bid.date} onChange={(e) => setBid({ ...bid, date: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-1 text-sm" />
-                  <button onClick={addBid} className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600">
+                  <button onClick={addBid} disabled={locked} className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50">
                     Add bid
                   </button>
                 </div>
+                {error?.at === "bids" ? <p className="mt-2 text-sm text-red-600">{error.text}</p> : null}
               </div>
             </div>
           ) : null}
@@ -467,6 +531,9 @@ export default function SaleSteps({
         </div>
       ))}
 
+      {notice ? <p className="text-xs text-pine-900">{notice}</p> : null}
+      {error?.at === "steps" ? <p className="text-sm text-red-600">{error.text}</p> : null}
+
       {/* Selling costs */}
       <div className="rounded-lg border border-gray-200 p-3">
         <p className="text-sm font-medium text-gray-900">
@@ -507,14 +574,12 @@ export default function SaleSteps({
               ))}
             </select>
           ) : null}
-          <button onClick={addCost} className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600">
+          <button onClick={addCost} disabled={locked} className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50">
             Add
           </button>
         </div>
+        {error?.at === "costs" ? <p className="mt-2 text-sm text-red-600">{error.text}</p> : null}
       </div>
-
-      {notice ? <p className="text-xs text-pine-900">{notice}</p> : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </section>
   );
 }

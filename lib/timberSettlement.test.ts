@@ -5,6 +5,7 @@ import {
   cellToIsoDate,
   collapseLoads,
   csvToRows,
+  findDuplicateSettlement,
   rateMismatch,
   workbookToRows,
   type SettlementColumnMap,
@@ -210,5 +211,108 @@ describe("rateMismatch", () => {
       contract
     );
     expect(m?.unitMismatch).toBe(true);
+  });
+});
+
+describe("total rows and corrections in a load sheet", () => {
+  // Tickets of 28 and 27 tons, a -27 correction voiding the second
+  // ticket, then a product subtotal and a grand total that both repeat
+  // the 28 tons. The truth is 28 tons of pulpwood.
+  const header = ["Ticket", "Product", "Net Tons", "Rate"];
+  const map: SettlementColumnMap = {
+    header_row: 0,
+    ticket: 0,
+    product: 1,
+    quantity: 2,
+    rate: 3,
+    unit: "ton",
+    products: [
+      { raw: "Pine Pulpwood", product: "pine_pulpwood", label: "Pine pulpwood" },
+      // The AI may map the subtotal's spelling to the product as well.
+      { raw: "Pine Pulpwood Total", product: "pine_pulpwood", label: "Pine pulpwood" },
+    ],
+  };
+
+  it("counts 28 tons, not 83 plus a product called total", () => {
+    const lines = collapseLoads(
+      [
+        header,
+        [5001, "Pine Pulpwood", 28, 9.5],
+        [5002, "Pine Pulpwood", 27, 9.5],
+        [5002, "Pine Pulpwood", -27, 9.5],
+        [null, "Pine Pulpwood Total", 28, null],
+        [null, "TOTAL", 28, null],
+      ],
+      map
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ product: "pine_pulpwood", quantity: 28, amount: 266, rate: 9.5 });
+    // The correction is not a load of its own.
+    expect(lines[0].load_count).toBe(2);
+  });
+
+  it("skips a total row marked in the ticket column", () => {
+    const lines = collapseLoads(
+      [
+        header,
+        [5001, "Pine Pulpwood", 28, 9.5],
+        ["Subtotal", "Pine Pulpwood", 28, 9.5],
+        ["Grand Total:", "Pine Pulpwood", 28, 9.5],
+      ],
+      map
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].quantity).toBe(28);
+  });
+
+  it("drops a product whose loads were all reversed", () => {
+    const lines = collapseLoads(
+      [
+        header,
+        [5001, "Pine Pulpwood", 27, 9.5],
+        [5001, "Pine Pulpwood", -27, 9.5],
+      ],
+      map
+    );
+    expect(lines).toEqual([]);
+  });
+
+  it("does not mistake an ordinary product name for a total", () => {
+    const lines = collapseLoads(
+      [
+        ["Product", "Tons", "Amount"],
+        ["Hardwood pulpwood (totem grade)", 10, 80],
+      ],
+      { header_row: 0, product: 0, quantity: 1, amount: 2, unit: "ton", products: [] }
+    );
+    expect(lines).toHaveLength(1);
+  });
+});
+
+describe("a settlement that looks like one already saved", () => {
+  const existing = [
+    { id: "s1", settlement_date: "2026-03-06", total_amount: 2844.9, check_number: "10412" },
+    { id: "s2", settlement_date: "2026-03-13", total_amount: 1900, check_number: null },
+  ];
+
+  it("matches the same date and total", () => {
+    expect(
+      findDuplicateSettlement(existing, { settlement_date: "2026-03-13", total_amount: 1900, check_number: "777" })?.id
+    ).toBe("s2");
+  });
+
+  it("matches the same check number, whatever the date", () => {
+    expect(
+      findDuplicateSettlement(existing, { settlement_date: "2026-04-01", total_amount: 5, check_number: " 10412 " })?.id
+    ).toBe("s1");
+  });
+
+  it("does not match a different statement, or two blank check numbers", () => {
+    expect(
+      findDuplicateSettlement(existing, { settlement_date: "2026-03-20", total_amount: 1900, check_number: null })
+    ).toBeNull();
+    expect(
+      findDuplicateSettlement(existing, { settlement_date: "2026-03-13", total_amount: 1900.5, check_number: "" })
+    ).toBeNull();
   });
 });

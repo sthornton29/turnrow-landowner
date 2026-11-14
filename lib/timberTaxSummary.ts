@@ -3,6 +3,7 @@
 // Pure; the page loads rows and renders this. Nothing here is advice:
 // it organizes the numbers and flags what is missing.
 
+import { formatDate, formatDollars, plural } from "./format";
 import type { AllocationMethod, SettlementAllocation } from "./timberAllocation";
 import { propertyShareOfSale } from "./timberBasis";
 import { deductionForYear, reforestationByYear } from "./reforestation";
@@ -29,7 +30,11 @@ export interface SummaryInput {
     cost_share_award_id: string | null;
     vendor: string | null;
     description: string | null;
+    activity_id?: string | null; // the stand work the cost was entered on
   }>;
+  // Stand work (stand_activities) the costs hang on. A cost on work that
+  // is only planned, or was skipped, is not counted as paid.
+  activities?: Array<{ id: string; status: string }>;
   accounts: Array<{ id: string; property_id: string; acquisition_type: string; acquired_date: string | null }>;
   entries: Array<{ account_id: string; entry_date: string; entry_type: string; basis_change: number; timber_sale_id: string | null }>;
   awards: Array<{ id: string; property_id: string; entity_id: string | null; program: string; title: string }>;
@@ -92,6 +97,22 @@ export interface TimberTaxSummary {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const inYear = (d: string | null | undefined, y: number) => !!d && d.slice(0, 4) === String(y);
 
+// One amount split by shares, to the cent. When the shares cover the
+// whole amount, the last share that gets anything takes the rounding
+// remainder, so the parts add back to the whole ($100,000.01 split
+// 50/50 is $50,000.01 and $50,000.00, not two of $50,000.01).
+function splitToCents(amount: number, shares: number[]): number[] {
+  const parts = shares.map((sh) => r2(amount * sh));
+  const last = shares.reduce((at, sh, i) => (sh > 0 ? i : at), -1);
+  if (last >= 0 && Math.abs(shares.reduce((s, sh) => s + sh, 0) - 1) < 0.00001) {
+    parts[last] = r2(parts[last] + (amount - parts.reduce((s, x) => s + x, 0)));
+  }
+  return parts;
+}
+
+const costLabel = (c: { description: string | null; vendor: string | null; amount: number; paid_date: string }) =>
+  `${[c.description, c.vendor].filter(Boolean).join(", ") || "Cost"} ${formatDollars(Number(c.amount))} (${formatDate(c.paid_date)})`;
+
 export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
   const { year } = inp;
   const matchesEntity = (entityId: string | null) =>
@@ -107,10 +128,40 @@ export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
   for (const a of inp.accounts) accountsByProp.set(a.property_id, [...(accountsByProp.get(a.property_id) ?? []), a.id]);
   const checklist: string[] = [];
 
+  // Costs entered on work that is not done yet (planned or skipped) have
+  // not been paid as far as this summary goes; the stand page leaves
+  // them out of its total the same way.
+  const activityStatus = new Map((inp.activities ?? []).map((a) => [a.id, a.status]));
+  const notDone = (c: { activity_id?: string | null }) => {
+    const status = c.activity_id ? activityStatus.get(c.activity_id) : undefined;
+    return status !== undefined && status !== "done";
+  };
+  const costs = inp.costs.filter((c) => !notDone(c));
+  const waiting = inp.costs.filter((c) => notDone(c) && propIds.has(c.property_id) && inYear(c.paid_date, year));
+
   // ---------------------------------------------------------------- sales
   const sales: SaleLine[] = [];
+  const countedSellingCosts = new Set<string>();
   for (const sale of inp.sales) {
     const links = inp.saleStands.filter((l) => l.timber_sale_id === sale.id);
+    // A sale's money counts whichever way it was recorded: settlements
+    // and payments both, whatever the sale type says today (the Income
+    // page counts them the same way).
+    const saleSettlements = inp.settlements.filter((x) => x.timber_sale_id === sale.id);
+    const salePayments = inp.payments.filter((x) => x.timber_sale_id === sale.id);
+    if (links.length === 0) {
+      // No stand, so no property and no taxpayer: the sale cannot be put
+      // in anyone's summary. Say so in every summary rather than drop it.
+      const received =
+        saleSettlements.filter((s) => inYear(s.settlement_date, year)).reduce((s, x) => s + (Number(x.total_amount) || 0), 0) +
+        salePayments.filter((p) => inYear(p.received_date, year)).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      if (received > 0) {
+        checklist.push(
+          `${sale.sale_name}: ${formatDollars(r2(received))} came in during ${year}, but the sale is not linked to any timber stand, so it is left out of this summary. Link its stands on the sale page.`
+        );
+      }
+      continue;
+    }
     const saleStands = links.map((l) => ({
       id: l.timber_stand_id,
       acres: standAcres.get(l.timber_stand_id) ?? null,
@@ -118,33 +169,39 @@ export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
       property_id: standProp.get(l.timber_stand_id) ?? "",
     }));
     const method = (sale.allocation_method ?? "by_acres") as AllocationMethod;
-    const touched = Array.from(new Set(saleStands.map((s) => s.property_id))).filter((p) => propIds.has(p));
+    // Every property the sale touches, in a fixed order, so one amount
+    // splits the same way in every taxpayer's summary.
+    const saleProps = Array.from(new Set(saleStands.map((s) => s.property_id))).sort();
+    const touched = saleProps.filter((p) => propIds.has(p));
+    if (touched.length === 0) continue;
+    const moneyDates = [
+      ...saleSettlements.map((s) => s.settlement_date),
+      ...salePayments.map((p) => p.received_date),
+    ]
+      .filter(Boolean)
+      .sort();
+    const firstDate: string | null = moneyDates[0] ?? null;
+    const proceedsYears = new Set(moneyDates.map((d) => d.slice(0, 4)));
+    const proceedsByProp = new Map<string, number>();
+    const addMoney = (date: string, amount: number, allocation: SettlementAllocation | null) => {
+      if (!inYear(date, year)) return;
+      const parts = splitToCents(
+        Number(amount) || 0,
+        saleProps.map((pid) => propertyShareOfSale(method, saleStands, pid, allocation))
+      );
+      saleProps.forEach((pid, i) => proceedsByProp.set(pid, (proceedsByProp.get(pid) ?? 0) + parts[i]));
+    };
+    for (const s of saleSettlements) addMoney(s.settlement_date, s.total_amount, s.allocation as SettlementAllocation | null);
+    for (const p of salePayments) addMoney(p.received_date, p.amount, null);
     for (const pid of touched) {
-      let proceeds = 0;
-      let firstDate: string | null = null;
-      if (sale.sale_type === "pay_as_cut") {
-        for (const s of inp.settlements.filter((x) => x.timber_sale_id === sale.id)) {
-          if (!firstDate || s.settlement_date < firstDate) firstDate = s.settlement_date;
-          if (!inYear(s.settlement_date, year)) continue;
-          proceeds +=
-            (Number(s.total_amount) || 0) *
-            propertyShareOfSale(method, saleStands, pid, s.allocation as SettlementAllocation | null);
-        }
-      } else {
-        const share = propertyShareOfSale(method, saleStands, pid);
-        for (const p of inp.payments.filter((x) => x.timber_sale_id === sale.id)) {
-          if (!firstDate || p.received_date < firstDate) firstDate = p.received_date;
-          if (!inYear(p.received_date, year)) continue;
-          proceeds += (Number(p.amount) || 0) * share;
-        }
-      }
+      const proceeds = proceedsByProp.get(pid) ?? 0;
       const acctIds = new Set(accountsByProp.get(pid) ?? []);
       const depletion = -inp.entries
         .filter((e) => acctIds.has(e.account_id) && e.timber_sale_id === sale.id && e.entry_type === "depletion" && inYear(e.entry_date, year))
         .reduce((s, e) => s + Number(e.basis_change), 0);
-      const sellingExpenses = inp.costs
-        .filter((c) => c.property_id === pid && c.timber_sale_id === sale.id && c.tax_category === "selling_expense" && inYear(c.paid_date, year))
-        .reduce((s, c) => s + Number(c.amount), 0);
+      const saleCosts = costs.filter((c) => c.property_id === pid && c.timber_sale_id === sale.id && c.tax_category === "selling_expense");
+      for (const c of saleCosts) countedSellingCosts.add(c.id);
+      const sellingExpenses = saleCosts.filter((c) => inYear(c.paid_date, year)).reduce((s, c) => s + Number(c.amount), 0);
       if (proceeds === 0 && depletion === 0 && sellingExpenses === 0) continue;
       const acct = inp.accounts.find((a) => a.property_id === pid);
       let holding: SaleLine["holding"] = "unknown";
@@ -174,7 +231,43 @@ export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
       if (!line.basisSetUp) checklist.push(`${line.propertyName}: no timber basis set up, so ${line.saleName} shows no depletion.`);
       else if (line.proceeds > 0 && line.depletion === 0)
         checklist.push(`${line.saleName} (${line.propertyName}): proceeds this year but no depletion recorded.`);
+      // Selling costs count in the year they were paid. When that is a
+      // year the sale brought in no money, the accountant should see it.
+      const offYear = saleCosts.filter((c) => !proceedsYears.has(c.paid_date.slice(0, 4)));
+      if (offYear.some((c) => inYear(c.paid_date, year)) || (line.proceeds > 0 && offYear.length > 0)) {
+        const years = Array.from(new Set(offYear.map((c) => c.paid_date.slice(0, 4)))).sort();
+        checklist.push(
+          `${line.saleName} (${line.propertyName}): ${formatDollars(r2(offYear.reduce((s, c) => s + Number(c.amount), 0)))} of selling costs paid in ${years.join(" and ")}, a year with no money in from this sale. This summary counts selling costs in the year paid. Ask your accountant which year they belong in.`
+        );
+      }
     }
+  }
+
+  // Selling costs that landed on no sale line above are in no number on
+  // this page: list them so they are not lost.
+  const straySelling = costs.filter(
+    (c) =>
+      propIds.has(c.property_id) &&
+      c.tax_category === "selling_expense" &&
+      inYear(c.paid_date, year) &&
+      !countedSellingCosts.has(c.id)
+  );
+  const noSale = straySelling.filter((c) => !c.timber_sale_id);
+  if (noSale.length > 0) {
+    checklist.push(
+      `${plural(noSale.length, "selling cost")} not linked to a timber sale, so not counted in this summary: ${noSale.map(costLabel).join("; ")}. Pick the sale on the work each one was entered with, or enter it under Selling costs on the sale page instead.`
+    );
+  }
+  const wrongSale = straySelling.filter((c) => c.timber_sale_id);
+  if (wrongSale.length > 0) {
+    checklist.push(
+      `${plural(wrongSale.length, "selling cost")} linked to a sale that has no stand on the cost's property, so not counted in this summary: ${wrongSale.map(costLabel).join("; ")}. Check the stands linked on the sale page.`
+    );
+  }
+  if (waiting.length > 0) {
+    checklist.push(
+      `${plural(waiting.length, "cost")} totaling ${formatDollars(r2(waiting.reduce((s, c) => s + Number(c.amount), 0)))} left out because the work they were entered on is not marked as done. If the work is finished and paid, mark it done on the stand page.`
+    );
   }
 
   // ---------------------------------------------------------------- cost-share
@@ -197,7 +290,7 @@ export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
   // ---------------------------------------------------------------- reforestation
   const reforestation: ReforestationLine[] = [];
   for (const p of props) {
-    const refCosts = inp.costs.filter((c) => c.property_id === p.id && c.tax_category === "reforestation");
+    const refCosts = costs.filter((c) => c.property_id === p.id && c.tax_category === "reforestation");
     if (refCosts.length === 0) continue;
     const results = reforestationByYear(
       refCosts.map((c) => ({ paid_date: c.paid_date, amount: Number(c.amount), cost_share_award_id: c.cost_share_award_id })),
@@ -218,7 +311,7 @@ export function buildTimberTaxSummary(inp: SummaryInput): TimberTaxSummary {
   }
 
   // ---------------------------------------------------------------- other costs
-  const expenses: ExpenseLine[] = inp.costs
+  const expenses: ExpenseLine[] = costs
     .filter(
       (c) =>
         propIds.has(c.property_id) &&

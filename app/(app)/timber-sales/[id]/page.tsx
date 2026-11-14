@@ -12,7 +12,7 @@ export default async function TimberSaleDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   const [{ data: sale }, { data: tenants }, { data: stands }] = await Promise.all([
     supabase.from("timber_sales").select("*").eq("id", id).single(),
@@ -94,6 +94,7 @@ export default async function TimberSaleDetailPage({
   return (
     <TimberSaleDetail
       orgId={profile.organization_id!}
+      isAdmin={isAdmin}
       sale={sale}
       tenants={tenants ?? []}
       allStands={stands ?? []}

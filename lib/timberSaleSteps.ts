@@ -94,7 +94,7 @@ export const CHECKLIST: ChecklistItem[] = [
   { key: "x_deposit", stage: "closeout", label: "Performance deposit returned" },
   { key: "x_final", stage: "closeout", label: "Final settlement reconciled" },
 
-  { key: "d_1099s", stage: "complete", label: "1099-S received from the buyer (due by January 31)" },
+  { key: "d_1099s", stage: "complete", label: "1099-S received from the buyer (it usually arrives in February)" },
   { key: "d_depletion", stage: "complete", label: "Depletion recorded on the timber basis page" },
   { key: "d_next", stage: "complete", label: "Next step scheduled (replant, burn, or inspection)" },
 ];

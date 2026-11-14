@@ -30,11 +30,15 @@ export default function SettlementUpload({
   sales,
   fixedSaleId = null,
   buttonClass,
+  onSaved,
 }: {
   orgId: string;
   sales: SaleOption[];
   fixedSaleId?: string | null;
   buttonClass?: string;
+  // A sale page keeps its settlement list in client state: it passes
+  // its reload here so a saved settlement shows without leaving the page.
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -159,7 +163,10 @@ export default function SettlementUpload({
                   initialSaleId={item.suggestedSaleId}
                   saleSuggested={item.suggested}
                   saleLocked={Boolean(fixedSaleId)}
-                  onSaved={() => router.refresh()}
+                  onSaved={() => {
+                    router.refresh();
+                    onSaved?.();
+                  }}
                   onDiscard={() =>
                     setItems((prev) =>
                       prev.filter((x) => x.localId !== item.localId)

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { takeHandoffFile } from "@/lib/fileHandoff";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { extractFile } from "@/components/documents/classify";
 import { suggestStandIds } from "@/lib/timberMatch";
 import TimberSaleForm, {
   type StandOption,
@@ -19,6 +21,7 @@ export default function NewTimberClient({
   tenants: Array<{ id: string; name: string }>;
   stands: StandOption[];
 }) {
+  const supabase = useMemo(() => createClient(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"choose" | "extracting" | "form">("choose");
   const [prefill, setPrefill] = useState<TimberPrefill | null>(null);
@@ -41,15 +44,17 @@ export default function NewTimberClient({
     setExtractError(null);
     setSourceFile(file);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("kind", "timber");
-      const res = await fetch("/api/extract", { method: "POST", body: formData });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Extraction failed.");
-      const x = body.extraction as TimberPrefill;
+      // By storage path (never through the request body, which the
+      // platform caps at 4.5 MB): a large scan uploads straight to
+      // storage and the reader pulls it from there.
+      const res = await extractFile(supabase, { orgId, file, kind: "timber" });
+      if ("error" in res) throw new Error(res.error);
+      // The form attaches the contract itself when the sale is saved, so
+      // the copy uploaded for reading is not kept.
+      supabase.storage.from("documents").remove([res.storagePath]).then(() => undefined, () => undefined);
+      const x = res.extraction as TimberPrefill & { unsure_fields?: unknown };
       setPrefill(x);
-      setUnsure((body.extraction.unsure_fields as string[]) ?? []);
+      setUnsure(Array.isArray(x.unsure_fields) ? x.unsure_fields.map(String) : []);
       // Suggest stand links from the contract's tract description
       // (name/acres similarity); the user confirms every link.
       setSuggested(

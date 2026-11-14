@@ -1,10 +1,12 @@
-import { requireOrg } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import NewTimberClient from "./NewTimberClient";
 
 export const metadata = { title: "New timber sale" };
 
 export default async function NewTimberSalePage() {
-  const { supabase, profile } = await requireOrg();
+  // Creating a sale is admin work (row level security refuses it for
+  // anyone else), so others go back to the list.
+  const { supabase, profile } = await requireAdmin("/timber-sales");
   const [{ data: tenants }, { data: stands }, { data: properties }] =
     await Promise.all([
       supabase.from("tenants").select("id, name").order("name"),

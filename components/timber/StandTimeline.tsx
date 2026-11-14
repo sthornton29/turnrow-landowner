@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatAcres, formatDollars } from "@/lib/format";
 import {
   ACTIVITY_TYPES,
@@ -143,7 +144,7 @@ export default function StandTimeline({
         costs: [],
       },
     });
-    if (err) setError(`Could not save: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not save that answer. Please try again."));
     else router.refresh();
   }
 
@@ -165,7 +166,7 @@ export default function StandTimeline({
         : `Delete "${a.title ?? "this activity"}" and its costs?`;
     if (!window.confirm(msg)) return;
     const { error: err } = await supabase.from("stand_activities").delete().eq("id", a.id);
-    if (err) setError(`Could not delete: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not delete this work. Please try again."));
     else router.refresh();
   }
 

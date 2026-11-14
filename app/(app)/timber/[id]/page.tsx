@@ -131,25 +131,26 @@ export default async function TimberStandSummaryPage({
     const method = (sale.allocation_method ?? "by_acres") as AllocationMethod;
     let allocated = 0;
     let anyShares = false;
-    if (sale.sale_type === "pay_as_cut") {
-      for (const s of (settlements ?? []).filter(
-        (x) => x.timber_sale_id === sale.id
-      )) {
-        const shares = resolveSettlementShares(
-          method,
-          saleStands,
-          s.allocation as SettlementAllocation | null
-        );
-        if (shares.length > 0) anyShares = true;
-        allocated +=
-          allocateAmount(s.total_amount ?? 0, shares).find(
-            (a) => a.standId === id
-          )?.amount ?? 0;
-      }
-    } else {
-      const received = (payments ?? [])
-        .filter((p) => p.timber_sale_id === sale.id)
-        .reduce((sum, p) => sum + (p.amount ?? 0), 0);
+    // A sale's money counts whichever way it was recorded (settlements
+    // and payments both), whatever the sale type says today.
+    for (const s of (settlements ?? []).filter(
+      (x) => x.timber_sale_id === sale.id
+    )) {
+      const shares = resolveSettlementShares(
+        method,
+        saleStands,
+        s.allocation as SettlementAllocation | null
+      );
+      if (shares.length > 0) anyShares = true;
+      allocated +=
+        allocateAmount(s.total_amount ?? 0, shares).find(
+          (a) => a.standId === id
+        )?.amount ?? 0;
+    }
+    const received = (payments ?? [])
+      .filter((p) => p.timber_sale_id === sale.id)
+      .reduce((sum, p) => sum + (p.amount ?? 0), 0);
+    if (received > 0 || sale.sale_type !== "pay_as_cut") {
       const shares = allocationShares(method, saleStands);
       if (shares.length > 0) anyShares = true;
       allocated +=

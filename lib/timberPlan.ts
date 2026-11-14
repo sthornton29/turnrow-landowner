@@ -111,6 +111,12 @@ function isThinning(a: PlanActivity): boolean {
   return a.activity_type === "harvest" && a.details?.harvest_type === "select_cut";
 }
 
+// A harvest marked clearcut or salvage takes the whole stand, and so
+// does one with no kind chosen: thinning has its own activity type, so
+// "Harvested" with the kind left blank most often means the stand was
+// cut. Missing a replanting reminder after a real clearcut costs more
+// than an extra one, and "Not needed" answers an extra one without
+// emptying the plan (see below).
 function isFinalHarvest(a: PlanActivity): boolean {
   return (
     a.activity_type === "harvest" &&
@@ -150,6 +156,7 @@ export function planForStand(
     }
   }
 
+  let awaitingTrees = false;
   // A final harvest after establishment of a PLANTED pine stand: the
   // only thing that matters next is getting trees back. Hardwood and
   // natural stands usually regrow on their own, so they keep their
@@ -168,7 +175,13 @@ export function planForStand(
       windowEnd: lastFinal + 2,
       priority: "high",
     });
-    return applyAnswers(recs, activities);
+    // "Not needed" on the replant (the stand is left to seed in on its
+    // own, say) must not leave the plan empty for good: the yearly walk
+    // goes on. The planted pine timings wait for a new planting year.
+    awaitingTrees = true;
+    if (!activities.some((a) => a.plan_key === `replant:${lastFinal}` && a.status === "skipped")) {
+      return applyAnswers(recs, activities);
+    }
   }
 
   // Every stand: walk it once a year.
@@ -190,6 +203,7 @@ export function planForStand(
       priority: "low",
     });
   }
+  if (awaitingTrees) return applyAnswers(recs, activities);
 
   if (type === "planted_pine") {
     if (est === null) {

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatDate, formatDollars, formatNumber, todayISO } from "@/lib/format";
 import {
   HARVEST_TYPE_LABELS,
   RATE_UNIT_LABELS,
@@ -17,9 +18,13 @@ import {
 } from "@/lib/leaseLogic";
 import {
   allocationShares,
+  manualPercentTotal,
+  manualPercentsValid,
+  standsWithoutAcres,
   type AllocationMethod,
   type SettlementAllocation,
 } from "@/lib/timberAllocation";
+import { findDuplicateSettlement } from "@/lib/timberSettlement";
 import TimberSaleForm from "@/components/timber/TimberSaleForm";
 import SettlementUpload from "@/components/timber/SettlementUpload";
 import PaymentsSection from "@/components/payments/PaymentsSection";
@@ -65,12 +70,16 @@ interface Settlement {
 
 export default function TimberSaleDetail({
   orgId,
+  isAdmin,
   sale,
   tenants,
   allStands,
   workflow,
 }: {
   orgId: string;
+  // Deleting the sale or a settlement is admin work (row level security
+  // refuses it for anyone else), so those controls are hidden otherwise.
+  isAdmin: boolean;
   workflow?: ReactNode; // the sale steps panel (stage 4), rendered under the header
   sale: SaleRow;
   tenants: Array<{ id: string; name: string }>;
@@ -88,11 +97,19 @@ export default function TimberSaleDetail({
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [addStandId, setAddStandId] = useState("");
   const [entering, setEntering] = useState(false);
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
+  const [entryDate, setEntryDate] = useState(todayISO());
   const [entryQty, setEntryQty] = useState<Record<string, string>>({});
   const [entryCheck, setEntryCheck] = useState("");
   const [entryMemo, setEntryMemo] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A message shown beside the part of the page it is about.
+  const [notice, setNotice] = useState<{
+    at: "stands" | "settlements" | "thinning" | "delete";
+    text: string;
+  } | null>(null);
+  // A write is in flight: its buttons stay off until the fresh rows are
+  // back, so a second tap cannot save the same thing twice.
+  const [working, setWorking] = useState(false);
   const [thinningDismissed, setThinningDismissed] = useState(false);
   const [thinningYear, setThinningYear] = useState("");
   const [thinningStands, setThinningStands] = useState<Set<string>>(new Set());
@@ -132,15 +149,22 @@ export default function TimberSaleDetail({
   const linkedIds = new Set(standLinks.map((l) => l.timber_stand_id));
   const unlinkedStands = allStands.filter((s) => !linkedIds.has(s.id));
 
-  const shares = allocationShares(
-    sale.allocation_method,
-    linkedStands.map((x) => ({
-      id: x.link.timber_stand_id,
-      acres: x.stand?.acres ?? null,
-      allocation_pct: x.link.allocation_pct,
-    }))
-  );
+  const allocStands = linkedStands.map((x) => ({
+    id: x.link.timber_stand_id,
+    acres: x.stand?.acres ?? null,
+    allocation_pct: x.link.allocation_pct,
+  }));
+  const shares = allocationShares(sale.allocation_method, allocStands);
   const pctByStand = new Map(shares.map((s) => [s.standId, s.pct]));
+  // Manual percentages only count once they add to 100; until then the
+  // dollars are split by acres, and the page says so.
+  const manualOff =
+    sale.allocation_method === "manual" && allocStands.length > 0 && !manualPercentsValid(allocStands);
+  // Stands with no drawn boundary get nothing in a split by acres.
+  const undrawn =
+    sale.allocation_method === "by_acres" || manualOff
+      ? standsWithoutAcres(allocStands).map((id) => standById.get(id)?.name ?? "a linked stand")
+      : [];
 
   // Running totals by product across all settlements (quantity in the
   // product's unit; a mixed-unit product totals dollars only).
@@ -194,39 +218,89 @@ export default function TimberSaleDetail({
   }, [sale]);
 
   async function addStand() {
-    if (!addStandId) return;
-    await supabase.from("timber_sale_stands").insert({
+    if (!addStandId || working) return;
+    setNotice(null);
+    setWorking(true);
+    const { error: err } = await supabase.from("timber_sale_stands").insert({
       organization_id: orgId,
       timber_sale_id: sale.id,
       timber_stand_id: addStandId,
     });
+    if (err) {
+      setWorking(false);
+      setNotice({ at: "stands", text: friendlyDbError(err, "Could not link the stand. Please try again.") });
+      return;
+    }
     setAddStandId("");
-    load();
+    await load();
+    setWorking(false);
   }
 
-  async function removeStand(id: string) {
-    await supabase.from("timber_sale_stands").delete().eq("id", id);
-    load();
+  async function removeStand(link: StandLink) {
+    if (working) return;
+    const name = standById.get(link.timber_stand_id)?.name ?? "this stand";
+    const last = standLinks.length === 1;
+    if (
+      !window.confirm(
+        last
+          ? `${name} is the only stand linked to this sale. With no stand, the sale is left out of the timber tax summary and the timber basis page, and its income is no longer tied to a property. Remove it anyway?`
+          : `Remove ${name} from this sale? Its share of the sale's dollars and depletion moves to the stands that stay linked.`
+      )
+    )
+      return;
+    setNotice(null);
+    setWorking(true);
+    const { error: err } = await supabase.from("timber_sale_stands").delete().eq("id", link.id);
+    if (err) {
+      setWorking(false);
+      setNotice({ at: "stands", text: friendlyDbError(err, "Could not remove the stand. Please try again.") });
+      return;
+    }
+    await load();
+    setWorking(false);
   }
 
   async function setAllocationMethod(method: AllocationMethod) {
-    await supabase
+    if (working) return;
+    setNotice(null);
+    setWorking(true);
+    const { error: err } = await supabase
       .from("timber_sales")
       .update({ allocation_method: method })
       .eq("id", sale.id);
+    setWorking(false);
+    if (err) {
+      setNotice({ at: "stands", text: friendlyDbError(err, "Could not change how dollars are split. Please try again.") });
+      return;
+    }
     router.refresh();
   }
 
   async function saveManualPct(linkId: string, pct: string) {
-    await supabase
+    const value = pct.trim() === "" ? null : Number(pct);
+    if (value !== null && (!Number.isFinite(value) || value < 0 || value > 100)) {
+      setNotice({ at: "stands", text: "Enter a percentage from 0 to 100." });
+      return;
+    }
+    setNotice(null);
+    const { error: err } = await supabase
       .from("timber_sale_stands")
-      .update({ allocation_pct: pct.trim() === "" ? null : Number(pct) })
+      .update({ allocation_pct: value })
       .eq("id", linkId);
+    if (err) {
+      setNotice({ at: "stands", text: friendlyDbError(err, "Could not save the percentage. Please try again.") });
+      return;
+    }
     load();
   }
 
   async function saveSettlement() {
+    if (working) return;
     setError(null);
+    if (!entryDate) {
+      setError("Enter the settlement date. It decides which tax year this income counts in.");
+      return;
+    }
     const lines: SettlementLine[] = [];
     for (const rate of rates) {
       const quantity = Number(entryQty[rate.product] ?? 0);
@@ -245,6 +319,21 @@ export default function TimberSaleDetail({
       return;
     }
     const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+    const twin = findDuplicateSettlement(settlements, {
+      settlement_date: entryDate,
+      total_amount: total,
+      check_number: entryCheck.trim() || null,
+    });
+    if (
+      twin &&
+      !window.confirm(
+        `This looks like a settlement already on this sale: ${formatDate(twin.settlement_date)}, ${formatDollars(twin.total_amount)}${
+          twin.check_number ? `, check ${twin.check_number}` : ""
+        }. Saving it again would count the income twice. Save it anyway?`
+      )
+    )
+      return;
+    setWorking(true);
     const { error: err } = await supabase.from("timber_settlements").insert({
       organization_id: orgId,
       timber_sale_id: sale.id,
@@ -255,25 +344,64 @@ export default function TimberSaleDetail({
       memo: entryMemo.trim() || null,
     });
     if (err) {
-      setError("Could not save: " + err.message);
+      setWorking(false);
+      setError(friendlyDbError(err, "Could not save the settlement. Please try again."));
       return;
     }
+    await load();
     setEntering(false);
     setEntryQty({});
     setEntryCheck("");
     setEntryMemo("");
-    load();
+    setWorking(false);
   }
 
-  async function deleteSettlement(id: string) {
-    if (!window.confirm("Delete this settlement?")) return;
-    await supabase.from("timber_settlements").delete().eq("id", id);
-    load();
+  async function deleteSettlement(s: Settlement) {
+    if (working) return;
+    if (
+      !window.confirm(
+        `Delete the settlement dated ${formatDate(s.settlement_date)} for ${formatDollars(s.total_amount)}? Its income comes off this sale. Depletion already recorded for it on the timber basis page is not changed.`
+      )
+    )
+      return;
+    setNotice(null);
+    setWorking(true);
+    const { data, error: err } = await supabase.from("timber_settlements").delete().eq("id", s.id).select("id");
+    if (err || (data ?? []).length === 0) {
+      setWorking(false);
+      setNotice({
+        at: "settlements",
+        text: friendlyDbError(err, "The settlement was not deleted. You may not have access to delete it."),
+      });
+      return;
+    }
+    await load();
+    setWorking(false);
   }
 
+  // What the database does on delete (migrations 0003, 0045, 0046,
+  // 0048): settlements, payments, expected payments, bids, and stand
+  // links go with the sale; depletion entries, costs, and stand work
+  // tied to it stay and are only unlinked.
   async function deleteSale() {
-    if (!window.confirm("Delete this timber sale and all of its settlements and payments?")) return;
-    await supabase.from("timber_sales").delete().eq("id", sale.id);
+    if (working) return;
+    if (
+      !window.confirm(
+        "Delete this timber sale? Its settlements, payments received, expected payments, bids, and stand links are deleted with it. Depletion already recorded for it on the timber basis page stays, and so do costs and stand work entered for it: they are only unlinked from the sale. Remove that depletion first if it should not count. Documents attached to the sale are not deleted either. This cannot be undone."
+      )
+    )
+      return;
+    setNotice(null);
+    setWorking(true);
+    const { data, error: err } = await supabase.from("timber_sales").delete().eq("id", sale.id).select("id");
+    if (err || (data ?? []).length === 0) {
+      setWorking(false);
+      setNotice({
+        at: "delete",
+        text: friendlyDbError(err, "The sale was not deleted. You may not have access to delete it."),
+      });
+      return;
+    }
     router.push("/timber-sales");
   }
 
@@ -314,15 +442,27 @@ export default function TimberSaleDetail({
 
   async function applyThinningYear() {
     const year = Number(thinningYear);
-    if (!Number.isFinite(year) || thinningStands.size === 0) return;
+    if (!Number.isFinite(year) || thinningStands.size === 0 || working) return;
+    setNotice(null);
+    setWorking(true);
+    const failed: string[] = [];
     for (const standId of thinningStands) {
-      await supabase
+      const { error: err } = await supabase
         .from("timber_stands")
         .update({ last_thinning_year: year })
         .eq("id", standId);
+      if (err) failed.push(standById.get(standId)?.name ?? "a stand");
+    }
+    setWorking(false);
+    router.refresh();
+    if (failed.length > 0) {
+      setNotice({
+        at: "thinning",
+        text: `The thinning year did not save on ${failed.join(", ")}. You may not have access to change ${failed.length === 1 ? "that stand" : "those stands"}. Please try again.`,
+      });
+      return;
     }
     setThinningDismissed(true);
-    router.refresh();
   }
 
   const entryTotal = rates.reduce(
@@ -431,7 +571,8 @@ export default function TimberSaleDetail({
           <div className="flex gap-2">
             <button
               onClick={applyThinningYear}
-              className="rounded-lg bg-kelly-500 px-3 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+              disabled={working}
+              className="rounded-lg bg-kelly-500 px-3 py-1 text-xs font-semibold text-white hover:bg-kelly-600 disabled:opacity-50"
             >
               Set on checked stands
             </button>
@@ -442,6 +583,7 @@ export default function TimberSaleDetail({
               Not now
             </button>
           </div>
+          {notice?.at === "thinning" ? <p className="text-sm text-red-600">{notice.text}</p> : null}
         </div>
       ) : null}
 
@@ -507,16 +649,36 @@ export default function TimberSaleDetail({
                     % of dollars
                   </span>
                 ) : null}
-                <button
-                  onClick={() => removeStand(link.id)}
-                  className="ml-auto text-xs font-medium text-red-600 hover:underline"
-                >
-                  Remove
-                </button>
+                {/* Someone who is not an admin sees only the stands they
+                    were given: the last one they can see is not theirs
+                    to unlink. */}
+                {isAdmin || standLinks.length > 1 ? (
+                  <button
+                    onClick={() => removeStand(link)}
+                    disabled={working}
+                    className="ml-auto text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
         )}
+        {manualOff ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            These percentages add to {formatNumber(manualPercentTotal(allocStands))}%, not 100%. Until they add
+            to 100%, this sale&apos;s dollars are split by stand acres instead.
+          </p>
+        ) : null}
+        {undrawn.length > 0 ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {undrawn.join(", ")} {undrawn.length === 1 ? "has" : "have"} no drawn boundary, so{" "}
+            {undrawn.length === 1 ? "it gets" : "they get"} no share of this sale&apos;s dollars in a split by
+            acres. Draw the boundary on the map, or use manual percentages.
+          </p>
+        ) : null}
+        {notice?.at === "stands" ? <p className="text-sm text-red-600">{notice.text}</p> : null}
         {standLinks.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
             <span className="font-medium">Allocate dollars to stands:</span>
@@ -530,8 +692,9 @@ export default function TimberSaleDetail({
               <button
                 key={value}
                 onClick={() => setAllocationMethod(value)}
+                disabled={working}
                 className={
-                  "rounded-lg border px-2 py-1 font-medium " +
+                  "rounded-lg border px-2 py-1 font-medium disabled:opacity-50 " +
                   (sale.allocation_method === value
                     ? "border-kelly-500 bg-kelly-50 text-pine-900"
                     : "border-gray-300 bg-white text-gray-600")
@@ -561,7 +724,7 @@ export default function TimberSaleDetail({
             </select>
             <button
               onClick={addStand}
-              disabled={!addStandId}
+              disabled={!addStandId || working}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               + Link stand
@@ -583,6 +746,7 @@ export default function TimberSaleDetail({
                 orgId={orgId}
                 sales={[saleOption]}
                 fixedSaleId={sale.id}
+                onSaved={load}
               />
               <button
                 onClick={() => setEntering((e) => !e)}
@@ -646,9 +810,10 @@ export default function TimberSaleDetail({
                 </span>
                 <button
                   onClick={saveSettlement}
-                  className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600"
+                  disabled={working}
+                  className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600 disabled:opacity-50"
                 >
-                  Save settlement
+                  {working ? "Saving..." : "Save settlement"}
                 </button>
                 <button
                   onClick={() => setEntering(false)}
@@ -703,6 +868,7 @@ export default function TimberSaleDetail({
             </div>
           ) : null}
 
+          {notice?.at === "settlements" ? <p className="text-sm text-red-600">{notice.text}</p> : null}
           {settlements.length > 0 ? (
             <details className="rounded-lg border border-gray-200 bg-white">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-700">
@@ -733,12 +899,15 @@ export default function TimberSaleDetail({
                           custom allocation
                         </span>
                       ) : null}
-                      <button
-                        onClick={() => deleteSettlement(s.id)}
-                        className="ml-auto text-xs font-medium text-red-600 hover:underline"
-                      >
-                        Delete
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => deleteSettlement(s)}
+                          disabled={working}
+                          className="ml-auto text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                     <p className="text-xs text-gray-500">
                       {(s.lines ?? [])
@@ -775,14 +944,18 @@ export default function TimberSaleDetail({
         <EntityDocuments orgId={orgId} entityType="timber_sale" entityId={sale.id} />
       </section>
 
-      <section className="border-t border-gray-200 pt-4">
-        <button
-          onClick={deleteSale}
-          className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-        >
-          Delete timber sale
-        </button>
-      </section>
+      {isAdmin ? (
+        <section className="space-y-2 border-t border-gray-200 pt-4">
+          <button
+            onClick={deleteSale}
+            disabled={working}
+            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            Delete timber sale
+          </button>
+          {notice?.at === "delete" ? <p className="text-sm text-red-600">{notice.text}</p> : null}
+        </section>
+      ) : null}
     </div>
   );
 }

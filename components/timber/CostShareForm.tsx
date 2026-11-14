@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { COST_SHARE_STATUS_LABELS as STATUS_LABELS, PROGRAM_LABELS } from "@/lib/reforestation";
 import type { CostShareAwardRow } from "@/types/db";
 
@@ -72,7 +73,9 @@ export default function CostShareForm({
       ? await supabase.from("cost_share_awards").update(record).eq("id", award.id).select("id").single()
       : await supabase.from("cost_share_awards").insert(record).select("id").single();
     setBusy(false);
-    if (res.error || !res.data) return setError(`Could not save: ${res.error?.message ?? "no row"}`);
+    if (res.error || !res.data) {
+      return setError(friendlyDbError(res.error, "Could not save the cost-share contract. Please try again."));
+    }
     onClose();
     router.push(`/timber/cost-share/${res.data.id}`);
     router.refresh();

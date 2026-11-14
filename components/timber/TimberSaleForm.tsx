@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatDollars, plural } from "@/lib/format";
 import {
   HARVEST_TYPE_LABELS,
   LOG_SCALE_LABELS,
@@ -13,7 +15,7 @@ import {
   type StumpageRate,
   type TimberSchedulePayment,
 } from "@/lib/leaseLogic";
-import type { AllocationMethod } from "@/lib/timberAllocation";
+import { manualPercentsValid, type AllocationMethod } from "@/lib/timberAllocation";
 import { safeStorageName } from "@/lib/batchIntake";
 
 export interface TimberPrefill {
@@ -110,6 +112,16 @@ export default function TimberSaleForm({
   const [manualPcts, setManualPcts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A new sale that saved but could not finish (its stand links failed):
+  // Save is replaced by a link to it, so a second press cannot create
+  // the sale twice.
+  const [savedId, setSavedId] = useState<string | null>(null);
+  // The type as stored, to notice a change on an existing sale.
+  const storedType = sale
+    ? sale.sale_type === "pay_as_cut" || sale.sale_type === "delivered_net"
+      ? "pay_as_cut"
+      : "lump_sum"
+    : null;
 
   const ring = (key: string) =>
     unsure.includes(key) ? " border-amber-400 ring-2 ring-amber-100" : "";
@@ -142,8 +154,53 @@ export default function TimberSaleForm({
   }
 
   async function save() {
-    setBusy(true);
     setError(null);
+    if (!sale && standOptions && checkedStands.size > 0 && allocationMethod === "manual" && !manualValid) {
+      setError(
+        `The stand percentages add to ${Math.round(manualTotal * 10) / 10}%. They need to add to 100% before the sale is saved, or choose By stand acres.`
+      );
+      return;
+    }
+    setBusy(true);
+    // Changing the type hides one kind of money on the sale page
+    // (settlements show for pay as cut, payments for lump sum). Say what
+    // will stop showing before it happens.
+    if (sale && storedType !== saleType) {
+      const [setts, pays] = await Promise.all([
+        supabase.from("timber_settlements").select("total_amount").eq("timber_sale_id", sale.id),
+        supabase.from("payments").select("amount").eq("timber_sale_id", sale.id),
+      ]);
+      if (setts.error || pays.error) {
+        setBusy(false);
+        return setError(
+          "Could not check this sale's settlements and payments, so the sale type was not changed. Please try again."
+        );
+      }
+      const hidden =
+        saleType === "lump_sum"
+          ? (setts.data ?? []).map((s) => Number(s.total_amount) || 0)
+          : (pays.data ?? []).map((p) => Number(p.amount) || 0);
+      if (hidden.length > 0) {
+        const what =
+          saleType === "lump_sum"
+            ? plural(hidden.length, "settlement")
+            : plural(hidden.length, "payment received", "payments received");
+        const total = formatDollars(hidden.reduce((s, x) => s + x, 0));
+        const ok = window.confirm(
+          `This sale has ${what} totaling ${total}. ${
+            saleType === "lump_sum"
+              ? "A lump sum sale's page does not show settlements"
+              : "A pay as cut sale's page does not show payments received"
+          }, so ${hidden.length === 1 ? "it" : "they"} will stop showing on the sale page. Nothing is deleted: ${
+            hidden.length === 1 ? "it stays" : "they stay"
+          } on record and still count as income and in the timber tax summary. Change the sale type anyway?`
+        );
+        if (!ok) {
+          setBusy(false);
+          return;
+        }
+      }
+    }
     const row = {
       organization_id: orgId,
       sale_name: saleName.trim() || "Untitled sale",
@@ -157,8 +214,11 @@ export default function TimberSaleForm({
       harvest_deadline: deadline || null,
       performance_deposit: num(deposit),
       sale_acres: num(saleAcres),
-      lump_sum_price: saleType === "lump_sum" ? num(lumpPrice) : null,
-      stumpage_rates: saleType === "pay_as_cut" ? rates : [],
+      // An existing sale keeps both kinds of terms whichever type is
+      // chosen, so switching the type (and back) never erases the price
+      // or the rates. A new sale stores only its own type's terms.
+      lump_sum_price: saleType === "lump_sum" || sale ? num(lumpPrice) : null,
+      stumpage_rates: saleType === "pay_as_cut" || sale ? rates : [],
       payment_schedule: schedule,
       notes: notes.trim() || null,
     };
@@ -166,7 +226,7 @@ export default function TimberSaleForm({
     if (sale) {
       const { error: err } = await supabase.from("timber_sales").update(row).eq("id", sale.id);
       setBusy(false);
-      if (err) return setError("Could not save: " + err.message);
+      if (err) return setError(friendlyDbError(err, "Could not save the sale. Please try again."));
       router.refresh();
       return;
     }
@@ -182,7 +242,7 @@ export default function TimberSaleForm({
       .single();
     if (err || !data) {
       setBusy(false);
-      return setError("Could not save: " + (err?.message ?? ""));
+      return setError(friendlyDbError(err, "Could not save the sale. Please try again."));
     }
     // Confirmed stand links, with manual percentages when chosen.
     if (standOptions && checkedStands.size > 0) {
@@ -200,8 +260,9 @@ export default function TimberSaleForm({
         .insert(links);
       if (linkErr) {
         setBusy(false);
+        setSavedId(data.id);
         return setError(
-          "Sale saved, but linking stands failed: " + linkErr.message
+          "The sale was saved, but its stands could not be linked. Open the sale and link them there."
         );
       }
     }
@@ -228,6 +289,13 @@ export default function TimberSaleForm({
   const manualTotal = Array.from(checkedStands).reduce(
     (s, id) => s + (Number(manualPcts[id]) || 0),
     0
+  );
+  const manualValid = manualPercentsValid(
+    Array.from(checkedStands).map((id) => ({
+      id,
+      acres: null,
+      allocation_pct: Number(manualPcts[id]) || 0,
+    }))
   );
 
   return (
@@ -643,7 +711,7 @@ export default function TimberSaleForm({
               {allocationMethod === "manual" ? (
                 <p className="text-xs text-gray-500">
                   Percentages total {Math.round(manualTotal * 10) / 10}%
-                  {manualTotal < 100 ? "; the rest stays unallocated." : "."}
+                  {manualValid ? "." : ". They need to total 100% before you can save."}
                 </p>
               ) : null}
             </div>
@@ -663,13 +731,22 @@ export default function TimberSaleForm({
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-      <button
-        onClick={save}
-        disabled={busy}
-        className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
-      >
-        {busy ? "Saving..." : sale ? "Save changes" : "Save timber sale"}
-      </button>
+      {savedId ? (
+        <Link
+          href={`/timber-sales/${savedId}`}
+          className="inline-block rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+        >
+          Open the saved sale
+        </Link>
+      ) : (
+        <button
+          onClick={save}
+          disabled={busy}
+          className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+        >
+          {busy ? "Saving..." : sale ? "Save changes" : "Save timber sale"}
+        </button>
+      )}
     </div>
   );
 }

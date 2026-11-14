@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatDollars } from "@/lib/format";
 import { SEC126_LABELS, recaptureUntil } from "@/lib/reforestation";
 import type { CostShareAwardRow, CostSharePaymentRow } from "@/types/db";
@@ -62,11 +63,19 @@ export function CostSharePayments({
   const [practice, setPractice] = useState("");
   const [choice, setChoice] = useState("undecided");
   const [error, setError] = useState<string | null>(null);
+  // Add stays off until the refreshed list has arrived, so a second tap
+  // cannot record the same payment twice.
+  const [busy, setBusy] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
+  const locked = busy || refreshing;
 
   async function add() {
+    if (locked) return;
     setError(null);
     const amt = Number(amount.replace(/[$,]/g, ""));
     if (!(amt > 0)) return setError("Enter the amount received.");
+    if (!date) return setError("Enter the date the payment was received.");
+    setBusy(true);
     const { error: err } = await supabase.from("cost_share_payments").insert({
       organization_id: orgId,
       award_id: awardId,
@@ -75,21 +84,24 @@ export function CostSharePayments({
       practice: practice.trim() || null,
       sec126_choice: choice,
     });
-    if (err) return setError(`Could not save: ${err.message}`);
+    setBusy(false);
+    if (err) return setError(friendlyDbError(err, "Could not save the payment. Please try again."));
     setAmount("");
     setPractice("");
-    router.refresh();
+    startRefresh(() => router.refresh());
   }
 
   async function setPaymentChoice(id: string, value: string) {
+    setError(null);
     const { error: err } = await supabase.from("cost_share_payments").update({ sec126_choice: value }).eq("id", id);
-    if (err) setError(`Could not save: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not save the tax choice. Please try again."));
     else router.refresh();
   }
 
   async function remove(id: string) {
+    setError(null);
     const { error: err } = await supabase.from("cost_share_payments").delete().eq("id", id);
-    if (err) setError(`Could not remove: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not remove the payment. Please try again."));
     else router.refresh();
   }
 
@@ -126,7 +138,9 @@ export function CostSharePayments({
                 </div>
                 {p.sec126_choice === "exclude" ? (
                   <p className="mt-1 text-xs text-amber-800">
-                    Recaptured as income if the land is sold before {recaptureUntil(p.received_date, 20)}.
+                    Recaptured as income if the land is sold before {recaptureUntil(p.received_date, 20)}. The
+                    amount that can be excluded has a cap and not every program qualifies, so have your
+                    accountant confirm the figure.
                   </p>
                 ) : null}
               </li>
@@ -148,7 +162,7 @@ export function CostSharePayments({
               </option>
             ))}
           </select>
-          <button onClick={add} className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600">
+          <button onClick={add} disabled={locked} className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50">
             Add
           </button>
         </div>

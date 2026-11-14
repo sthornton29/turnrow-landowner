@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDollars } from "@/lib/format";
-import type { SettlementLine } from "@/lib/leaseLogic";
+import { normalizeSettlementLine, type SettlementLine } from "@/lib/leaseLogic";
 import type { AllocationMethod, SettlementAllocation } from "@/lib/timberAllocation";
 import {
   ACQUISITION_LABELS,
@@ -10,7 +10,7 @@ import {
   soldFromSettlements,
   type AcquisitionType,
   type BasisSource,
-  type SoldQuantity,
+  type SaleCut,
 } from "@/lib/timberBasis";
 import type {
   TimberAccountEntryRow,
@@ -70,7 +70,7 @@ export default async function TimberAccountPage({ params }: { params: Promise<{ 
         .in("id", saleIds),
       supabase
         .from("timber_settlements")
-        .select("timber_sale_id, settlement_date, lines, total_amount, allocation")
+        .select("timber_sale_id, settlement_date, lines, total_amount, allocation, created_at")
         .in("timber_sale_id", saleIds),
       supabase.from("payments").select("timber_sale_id, amount, received_date").in("timber_sale_id", saleIds),
       supabase
@@ -92,33 +92,33 @@ export default async function TimberAccountPage({ params }: { params: Promise<{ 
       const saleShare = propertyShareOfSale(method, saleStands, acct.property_id);
       const mySettlements = (settlements ?? []).filter((s) => s.timber_sale_id === sale.id);
       let proceeds = 0;
-      const sold: SoldQuantity[] = [];
+      // One entry per settlement, with its date: depletion is proposed
+      // per tax year of the settlements (lib/timberBasis.ts).
+      const cuts: SaleCut[] = [];
       let lastDate: string | null = null;
-      if (sale.sale_type === "pay_as_cut") {
-        for (const s of mySettlements) {
-          const share = propertyShareOfSale(
-            method,
-            saleStands,
-            acct.property_id,
-            s.allocation as SettlementAllocation | null
-          );
-          proceeds += (Number(s.total_amount) || 0) * share;
-          sold.push(...soldFromSettlements([{ lines: s.lines as SettlementLine[] }], share));
-          if (!lastDate || s.settlement_date > lastDate) lastDate = s.settlement_date;
-        }
-      } else {
-        for (const p of (payments ?? []).filter((x) => x.timber_sale_id === sale.id)) {
-          proceeds += (Number(p.amount) || 0) * saleShare;
-          if (p.received_date && (!lastDate || p.received_date > lastDate)) lastDate = p.received_date;
-        }
+      // A sale's money counts whichever way it was recorded (settlements
+      // and payments both), whatever the sale type says today.
+      for (const s of mySettlements) {
+        const share = propertyShareOfSale(
+          method,
+          saleStands,
+          acct.property_id,
+          s.allocation as SettlementAllocation | null
+        );
+        proceeds += (Number(s.total_amount) || 0) * share;
+        cuts.push({
+          date: s.settlement_date,
+          createdAt: s.created_at as string | null,
+          sold: soldFromSettlements(
+            [{ lines: ((s.lines ?? []) as Array<Partial<SettlementLine>>).map(normalizeSettlementLine) }],
+            share
+          ),
+        });
+        if (!lastDate || s.settlement_date > lastDate) lastDate = s.settlement_date;
       }
-      // Merge quantities across settlements.
-      const merged = new Map<string, SoldQuantity>();
-      for (const q of sold) {
-        const k = `${q.product}|${q.unit}`;
-        const cur = merged.get(k) ?? { ...q, quantity: 0 };
-        cur.quantity = Math.round((cur.quantity + q.quantity) * 1000) / 1000;
-        merged.set(k, cur);
+      for (const p of (payments ?? []).filter((x) => x.timber_sale_id === sale.id)) {
+        proceeds += (Number(p.amount) || 0) * saleShare;
+        if (p.received_date && (!lastDate || p.received_date > lastDate)) lastDate = p.received_date;
       }
       const sellingExpenses = (costs ?? [])
         .filter((c) => c.timber_sale_id === sale.id && c.tax_category === "selling_expense")
@@ -131,7 +131,7 @@ export default async function TimberAccountPage({ params }: { params: Promise<{ 
         share: saleShare,
         proceeds: Math.round(proceeds * 100) / 100,
         sellingExpenses: Math.round(sellingExpenses * 100) / 100,
-        sold: Array.from(merged.values()),
+        cuts,
         lastDate: lastDate ?? sale.contract_date ?? null,
       };
     });
@@ -177,6 +177,7 @@ export default async function TimberAccountPage({ params }: { params: Promise<{ 
           entities={entities ?? []}
           account={acct}
           products={(products ?? []) as TimberAccountProductRow[]}
+          ledgerEntries={(entries ?? []) as TimberAccountEntryRow[]}
           defaultAcres={acct.acres_covered}
         />
       ) : null}

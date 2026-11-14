@@ -78,11 +78,22 @@ export function slugifyProduct(raw: string): string {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// "Total", "TOTAL:", "Pine Pulpwood Total", "Subtotal", "Grand Total".
+const TOTAL_CELL = /\b(?:sub[\s-]?)?totals?\b/i;
+
+function isTotalCell(cell: SheetCell | undefined): boolean {
+  return typeof cell === "string" && TOTAL_CELL.test(cell);
+}
+
 // Collapse per-load rows to one settlement line per product, keeping
 // the load count and date range. Rows whose product cell is empty or
-// whose quantity is not numeric (totals rows, blank separators) are
-// skipped. The line's rate is the weighted average actually paid
-// (dollars / quantity), so mixed-rate periods stay honest.
+// whose quantity is not numeric (blank separators) are skipped, and so
+// are total and subtotal rows (the product or ticket cell reads
+// "total"), which would otherwise count the same tons twice. A negative
+// row is a correction (a voided or re-weighed ticket): it stays in so
+// it nets out, but is not counted as a load. The line's rate is the
+// weighted average actually paid (dollars / quantity), so mixed-rate
+// periods stay honest.
 export function collapseLoads(
   rows: SheetRow[],
   map: SettlementColumnMap
@@ -104,9 +115,10 @@ export function collapseLoads(
 
   for (const row of rows.slice(map.header_row + 1)) {
     const rawProduct = row[map.product];
-    if (rawProduct === null || String(rawProduct).trim() === "") continue;
+    if (rawProduct === null || rawProduct === undefined || String(rawProduct).trim() === "") continue;
+    if (isTotalCell(rawProduct) || (map.ticket != null && isTotalCell(row[map.ticket]))) continue;
     const quantity = cellToNumber(row[map.quantity]);
-    if (quantity === null || quantity <= 0) continue;
+    if (quantity === null || quantity === 0) continue;
 
     const spelling = String(rawProduct).toLowerCase().trim();
     const mapped = productBySpelling.get(spelling);
@@ -129,26 +141,54 @@ export function collapseLoads(
     };
     group.quantity += quantity;
     group.amount += amount;
-    group.loads += 1;
+    if (quantity > 0) group.loads += 1;
     group.hasAmount = group.hasAmount || amountCell !== null || rate !== null;
     if (date) group.dates.push(date);
     groups.set(slug, group);
   }
 
-  return Array.from(groups.entries()).map(([product, g]) => {
-    const dates = g.dates.sort();
-    return {
-      product,
-      label: g.label,
-      quantity: round2(g.quantity),
-      unit: map.unit,
-      rate: g.quantity > 0 && g.hasAmount ? round2(g.amount / g.quantity) : 0,
-      amount: round2(g.amount),
-      load_count: g.loads,
-      date_from: dates[0] ?? null,
-      date_to: dates[dates.length - 1] ?? null,
-    };
-  });
+  return Array.from(groups.entries())
+    // A product whose loads were all reversed nets to nothing.
+    .filter(([, g]) => round2(g.quantity) !== 0 || round2(g.amount) !== 0)
+    .map(([product, g]) => {
+      const dates = g.dates.sort();
+      return {
+        product,
+        label: g.label,
+        quantity: round2(g.quantity),
+        unit: map.unit,
+        rate: g.quantity > 0 && g.hasAmount ? round2(g.amount / g.quantity) : 0,
+        amount: round2(g.amount),
+        load_count: g.loads,
+        date_from: dates[0] ?? null,
+        date_to: dates[dates.length - 1] ?? null,
+      };
+    });
+}
+
+// A settlement about to be saved that looks like one already on the
+// sale: the same date and total, or the same check number. Used to ask
+// before saving, since the same statement uploaded twice doubles the
+// income. Returns the look-alike, or null.
+export interface SettlementKey {
+  settlement_date: string;
+  total_amount: number;
+  check_number: string | null;
+}
+
+export function findDuplicateSettlement<T extends SettlementKey>(
+  existing: T[],
+  candidate: SettlementKey
+): T | null {
+  const check = (candidate.check_number ?? "").trim().toLowerCase();
+  return (
+    existing.find(
+      (s) =>
+        (check !== "" && (s.check_number ?? "").trim().toLowerCase() === check) ||
+        (s.settlement_date === candidate.settlement_date &&
+          Math.abs((Number(s.total_amount) || 0) - (Number(candidate.total_amount) || 0)) < 0.005)
+    ) ?? null
+  );
 }
 
 // Rate check against the contract, never blocking: "settlement pays

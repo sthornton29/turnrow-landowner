@@ -100,6 +100,7 @@ export interface AccountEntry {
   volume_change: number;
   basis_change: number;
   timber_sale_id?: string | null;
+  created_at?: string | null; // when the entry was recorded
 }
 
 export interface ProductBalance {
@@ -279,6 +280,142 @@ export function soldFromSettlements(
     }
   }
   return Array.from(map.values()).map((q) => ({ ...q, quantity: Math.round(q.quantity * 1000) / 1000 }));
+}
+
+// One settlement's cut on this tract: its date and the quantities (this
+// tract's share), as soldFromSettlements returns them.
+export interface SaleCut {
+  date: string;
+  sold: SoldQuantity[];
+  createdAt?: string | null; // when the settlement was entered
+}
+
+export interface DepletionPeriod {
+  year: number;
+  date: string; // the entry date to post: the last settlement date of the year
+  sold: SoldQuantity[]; // cut in the year and not yet covered by recorded depletion
+  proposal: DepletionProposal; // by quantity, from the balance left after earlier periods
+}
+
+export interface SaleDepletionPlan {
+  // The latest depletion entry recorded for the sale: settlements dated
+  // on or before it are already covered.
+  recordedThrough: string | null;
+  periods: DepletionPeriod[];
+  // Tax years with covered settlements but no depletion entry dated in
+  // them (depletion recorded in one lump before the per-year split).
+  yearsWithoutDepletion: number[];
+  // Dates of settlements entered AFTER the depletion was recorded but
+  // dated on or before recordedThrough (a statement found late, or one
+  // deleted and entered again). The recorded depletion was worked out
+  // without them. They are flagged, not proposed: "Remove and redo"
+  // brings them in without counting anything twice.
+  enteredLater: string[];
+}
+
+// Depletion belongs to the tax year the timber was cut and paid for, so
+// a sale whose settlements span two years gets one set of entries per
+// year, each dated the last settlement of its year. Settlements dated on
+// or before the sale's latest recorded depletion entry are already
+// covered, so only what has been cut since is proposed. Each year is
+// priced from the balance left after the years before it.
+export function depletionPlanForSale(
+  products: AccountProduct[],
+  entries: AccountEntry[],
+  saleId: string,
+  cuts: SaleCut[]
+): SaleDepletionPlan {
+  const recorded = entries.filter((e) => e.timber_sale_id === saleId && e.entry_type === "depletion");
+  const recordedThrough = recorded.reduce<string | null>(
+    (m, e) => (m === null || e.entry_date > m ? e.entry_date : m),
+    null
+  );
+  const stamp = (t: string | null | undefined) => (t ? Date.parse(t) : NaN);
+  const recordedAt = recorded.reduce<number | null>((m, e) => {
+    const t = stamp(e.created_at);
+    return Number.isFinite(t) && (m === null || t > m) ? t : m;
+  }, null);
+  const yearOf = (d: string) => Number(d.slice(0, 4));
+  const recordedYears = new Set(recorded.map((e) => yearOf(e.entry_date)));
+  const missing = new Set<number>();
+  const enteredLater: string[] = [];
+  const byYear = new Map<number, { date: string; sold: Map<string, SoldQuantity> }>();
+  for (const c of cuts) {
+    if (!c.date) continue;
+    const year = yearOf(c.date);
+    if (recordedThrough !== null && c.date <= recordedThrough) {
+      if (!recordedYears.has(year)) missing.add(year);
+      if (recordedAt !== null && stamp(c.createdAt) > recordedAt) enteredLater.push(c.date);
+      continue;
+    }
+    const cur = byYear.get(year) ?? { date: c.date, sold: new Map<string, SoldQuantity>() };
+    if (c.date > cur.date) cur.date = c.date;
+    for (const q of c.sold) {
+      if (!(q.quantity > 0)) continue;
+      const key = `${q.product}|${q.unit}`;
+      const sum = cur.sold.get(key) ?? { product: q.product, unit: q.unit, quantity: 0 };
+      sum.quantity = Math.round((sum.quantity + q.quantity) * 1000) / 1000;
+      cur.sold.set(key, sum);
+    }
+    byYear.set(year, cur);
+  }
+  const periods: DepletionPeriod[] = [];
+  const rolled: AccountEntry[] = [...entries];
+  for (const [year, p] of Array.from(byYear.entries()).sort((a, b) => a[0] - b[0])) {
+    const sold = Array.from(p.sold.values());
+    const proposal = proposeDepletion(accountBalance(products, rolled), sold);
+    periods.push({ year, date: p.date, sold, proposal });
+    for (const l of proposal.lines) {
+      rolled.push({
+        entry_date: p.date,
+        entry_type: "depletion",
+        product: l.product,
+        volume_change: l.volumeChange,
+        basis_change: l.basisChange,
+        timber_sale_id: saleId,
+      });
+    }
+  }
+  return {
+    recordedThrough,
+    periods,
+    yearsWithoutDepletion: Array.from(missing).sort((a, b) => a - b),
+    enteredLater: enteredLater.sort(),
+  };
+}
+
+// Depletion can never take more than the basis left. Given the entries
+// about to be posted, the first product (null = the whole account) whose
+// depletion would be more than its basis left, or null when all fit.
+export function depletionOverBasis(
+  balance: AccountBalance,
+  rows: Array<{ product: string | null; basis_change: number }>
+): { product: string | null; asked: number; left: number } | null {
+  const asked = new Map<string | null, number>();
+  for (const r of rows) asked.set(r.product, (asked.get(r.product) ?? 0) - (Number(r.basis_change) || 0));
+  for (const [product, amount] of asked) {
+    const left =
+      product === null ? balance.basis : balance.products.find((p) => p.product === product)?.basis ?? 0;
+    if (round2(amount) > left + 0.005) return { product, asked: round2(amount), left };
+  }
+  return null;
+}
+
+// Products that ledger entries point at but a new product list leaves
+// out. Saving such a list would strand those entries: depletion recorded
+// against "All timber" stops counting once the account is split into
+// sawtimber and pulpwood, and the basis reads as if nothing was sold.
+// The setup form refuses the change until the entries are removed.
+export function productsStrandedBySplit(
+  newProducts: string[],
+  entries: Array<{ product: string | null }>
+): string[] {
+  const kept = new Set(newProducts);
+  const stranded = new Set<string>();
+  for (const e of entries) {
+    if (e.product && !kept.has(e.product)) stranded.add(e.product);
+  }
+  return Array.from(stranded);
 }
 
 // Purchase or inheritance split: given total value and the FMV of each

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   allocateAmount,
   allocationShares,
+  manualPercentTotal,
+  manualPercentsValid,
   resolveSettlementShares,
+  standsWithoutAcres,
 } from "./timberAllocation";
 
 const stands = [
@@ -28,15 +31,85 @@ describe("allocationShares", () => {
     expect(shares[1].pct).toBeCloseTo(50);
   });
 
-  it("uses stored manual percentages as-is (under-100 stays unallocated)", () => {
+  it("uses stored manual percentages when they add to 100", () => {
     const shares = allocationShares("manual", [
-      { id: "a", acres: 60, allocation_pct: 50 },
+      { id: "a", acres: 60, allocation_pct: 70 },
       { id: "b", acres: 40, allocation_pct: 30 },
     ]);
     expect(shares).toEqual([
-      { standId: "a", pct: 50 },
+      { standId: "a", pct: 70 },
       { standId: "b", pct: 30 },
     ]);
+  });
+
+  // Manual percentages that do not add to 100 used to be applied as
+  // typed, which lost or invented dollars. They now fall back to acres.
+  it("falls back to acres when manual percentages are blank", () => {
+    const shares = allocationShares("manual", [
+      { id: "a", acres: 60, allocation_pct: null },
+      { id: "b", acres: 40, allocation_pct: null },
+    ]);
+    expect(allocateAmount(50000, shares)).toEqual([
+      { standId: "a", amount: 30000 },
+      { standId: "b", amount: 20000 },
+    ]);
+  });
+
+  it("falls back to acres for 60 and blank, so no dollars go missing", () => {
+    const shares = allocationShares("manual", [
+      { id: "a", acres: 60, allocation_pct: 60 },
+      { id: "b", acres: 40, allocation_pct: null },
+    ]);
+    const out = allocateAmount(50000, shares);
+    expect(out.reduce((s, a) => s + a.amount, 0)).toBe(50000);
+    expect(out).toEqual([
+      { standId: "a", amount: 30000 },
+      { standId: "b", amount: 20000 },
+    ]);
+  });
+
+  it("falls back to acres for 80 and 40, so no dollars are invented", () => {
+    const shares = allocationShares("manual", [
+      { id: "a", acres: 50, allocation_pct: 80 },
+      { id: "b", acres: 50, allocation_pct: 40 },
+    ]);
+    const out = allocateAmount(50000, shares);
+    expect(out.reduce((s, a) => s + a.amount, 0)).toBe(50000);
+    expect(out).toEqual([
+      { standId: "a", amount: 25000 },
+      { standId: "b", amount: 25000 },
+    ]);
+  });
+
+  it("totals and checks manual percentages", () => {
+    const sixtyBlank = [
+      { id: "a", acres: 60, allocation_pct: 60 },
+      { id: "b", acres: 40, allocation_pct: null },
+    ];
+    expect(manualPercentTotal(sixtyBlank)).toBe(60);
+    expect(manualPercentsValid(sixtyBlank)).toBe(false);
+    expect(manualPercentsValid(sixtyBlank, { a: 60, b: 40 })).toBe(true);
+    expect(manualPercentsValid(sixtyBlank, { a: 33.33, b: 33.33, c: 33.34 })).toBe(false);
+    expect(manualPercentsValid(sixtyBlank, { a: 120, b: -20 })).toBe(false);
+    expect(manualPercentsValid([])).toBe(false);
+  });
+
+  it("names linked stands with no drawn boundary when another has acres", () => {
+    expect(
+      standsWithoutAcres([
+        { id: "a", acres: 60 },
+        { id: "b", acres: null },
+        { id: "c", acres: 0 },
+      ])
+    ).toEqual(["b", "c"]);
+    expect(standsWithoutAcres(stands)).toEqual([]);
+    // No stand has acres: the split is equal, nothing is left out.
+    expect(
+      standsWithoutAcres([
+        { id: "a", acres: null },
+        { id: "b", acres: null },
+      ])
+    ).toEqual([]);
   });
 
   it("allocates nothing under none", () => {
@@ -89,6 +162,22 @@ describe("resolveSettlementShares", () => {
       percents: { a: 100 },
     });
     expect(shares).toEqual([{ standId: "a", pct: 100 }]);
+  });
+
+  it("a settlement's own percents stand alone: a stand it leaves out gets 0", () => {
+    const withStored = [
+      { id: "a", acres: 60, allocation_pct: 60 },
+      { id: "b", acres: 40, allocation_pct: 40 },
+    ];
+    expect(
+      resolveSettlementShares("manual", withStored, { method: "manual", percents: { a: 100 } })
+    ).toEqual([{ standId: "a", pct: 100 }]);
+  });
+
+  it("a settlement override whose percents do not add to 100 falls back to acres", () => {
+    expect(
+      resolveSettlementShares("by_acres", stands, { method: "manual", percents: { a: 60 } })
+    ).toEqual(allocationShares("by_acres", stands));
   });
 
   it("an override to none allocates nothing", () => {

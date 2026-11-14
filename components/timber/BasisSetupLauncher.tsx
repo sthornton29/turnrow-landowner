@@ -17,6 +17,7 @@ export default function BasisSetupLauncher({
   entities: Array<{ id: string; name: string }>;
   account: TimberAccountRow | null;
   products: TimberAccountProductRow[];
+  ledgerEntries?: Array<{ product: string | null }>;
   defaultAcres: number | null;
 }) {
   const [open, setOpen] = useState(false);

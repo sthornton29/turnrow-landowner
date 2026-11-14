@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError, isAccessError } from "@/lib/dbErrors";
 import { formatDollars } from "@/lib/format";
 import { TIMBER_PRODUCTS } from "@/lib/leaseLogic";
 import {
@@ -11,6 +12,8 @@ import {
   BASIS_NOTE,
   BASIS_SOURCE_LABELS,
   allocateByValue,
+  productLabel,
+  productsStrandedBySplit,
   type AcquisitionType,
   type BasisSource,
 } from "@/lib/timberBasis";
@@ -53,6 +56,7 @@ export default function BasisSetupForm({
   entities,
   account,
   products,
+  ledgerEntries = [],
   defaultAcres,
   onClose,
 }: {
@@ -61,6 +65,9 @@ export default function BasisSetupForm({
   entities: Array<{ id: string; name: string }>;
   account: TimberAccountRow | null;
   products: TimberAccountProductRow[];
+  // The account's ledger entries, when it has any: the product list
+  // cannot drop a product they point at.
+  ledgerEntries?: Array<{ product: string | null }>;
   defaultAcres: number | null;
   onClose?: () => void;
 }) {
@@ -93,6 +100,27 @@ export default function BasisSetupForm({
   const timberValue = num(timber);
   const productSum = rows.reduce((s, r) => s + (num(r.basis) ?? 0), 0);
   const singlePool = rows.length === 1;
+  // With two or more product rows the two numbers must agree before a
+  // save; neither one silently wins.
+  const mismatch = !singlePool && timberValue != null && Math.abs(productSum - timberValue) > 0.005;
+
+  // One row holds all of the timber basis, so it and the Timber field
+  // are the same number: typing in either one fills the other.
+  function changeTimber(value: string) {
+    setTimber(value);
+    if (singlePool) setRows([{ ...rows[0], basis: value }]);
+  }
+
+  function changeRowBasis(i: number, value: string) {
+    setRows(rows.map((x, j) => (j === i ? { ...x, basis: value } : x)));
+    if (singlePool) setTimber(value);
+  }
+
+  function removeRow(i: number) {
+    const left = rows.filter((_, j) => j !== i);
+    // Down to one row: it takes the Timber value, where you can see it.
+    setRows(left.length === 1 && timber.trim() !== "" ? [{ ...left[0], basis: timber }] : left);
+  }
 
   function splitByValues() {
     const t = num(total);
@@ -114,11 +142,15 @@ export default function BasisSetupForm({
   async function save() {
     setError(null);
     const tv = timberValue;
-    // A single all-timber row follows the timber value; a product split
-    // is the truth and sets the timber value.
-    const finalRows = singlePool && tv != null && num(rows[0].basis) == null
-      ? [{ ...rows[0], basis: String(tv) }]
-      : rows;
+    if (mismatch) {
+      setError(
+        `The products add to ${formatDollars(productSum)}, but the timber value above is ${formatDollars(tv)}. Make the two agree, then save.`
+      );
+      return;
+    }
+    // A single row follows the timber value (the two fields mirror each
+    // other); with a product split the two were just checked to agree.
+    const finalRows = singlePool && tv != null ? [{ ...rows[0], basis: String(tv) }] : rows;
     const productRows = finalRows
       .map((r) => ({ product: r.product, unit: r.unit, opening_volume: num(r.volume), opening_basis: num(r.basis) ?? 0 }))
       .filter((r) => r.opening_basis > 0 || (r.opening_volume ?? 0) > 0);
@@ -129,6 +161,21 @@ export default function BasisSetupForm({
         return;
       }
       seen.add(r.product);
+    }
+    // Entries already in the ledger point at products by name. Dropping
+    // one of those products would leave its depletion counting against
+    // nothing, and the basis left would read as if nothing had been sold.
+    if (account) {
+      const stranded = productsStrandedBySplit(
+        productRows.map((r) => r.product),
+        ledgerEntries
+      );
+      if (stranded.length > 0) {
+        setError(
+          `The ledger already has entries for ${stranded.map(productLabel).join(", ")} (depletion or adjustments), so that product cannot be removed or renamed here. On the ledger, remove those entries first (Remove and redo on the sale, or Remove on the entry), then change the products and record the depletion again.`
+        );
+        return;
+      }
     }
     const sum = productRows.reduce((s, r) => s + r.opening_basis, 0);
     const record = {
@@ -150,19 +197,55 @@ export default function BasisSetupForm({
     let id = account?.id ?? null;
     if (id) {
       const { error: err } = await supabase.from("timber_accounts").update(record).eq("id", id);
-      if (err) return fail(err.message);
+      if (err) return fail(friendlyDbError(err, "Could not save the timber basis. Please try again."));
       const { error: delErr } = await supabase.from("timber_account_products").delete().eq("account_id", id);
-      if (delErr) return fail(delErr.message);
+      if (delErr) return fail(friendlyDbError(delErr, "Could not save the timber by product. Please try again."));
     } else {
       const { data, error: err } = await supabase.from("timber_accounts").insert(record).select("id").single();
-      if (err || !data) return fail(err?.message ?? "no row");
+      if (err || !data) return fail(friendlyDbError(err, "Could not save the timber basis. Please try again."));
       id = data.id as string;
     }
     if (productRows.length > 0) {
       const { error: pErr } = await supabase
         .from("timber_account_products")
         .insert(productRows.map((r) => ({ ...r, organization_id: orgId, account_id: id })));
-      if (pErr) return fail(pErr.message);
+      if (pErr) {
+        // A new account has no earlier rows; and when access is refused
+        // the delete above removed nothing, so there is nothing to undo.
+        if (!account || isAccessError(pErr)) {
+          return fail(friendlyDbError(pErr, "The timber by product did not save. Press Save again."));
+        }
+        // The old rows were deleted just above. Put them back (and the
+        // timber value that went with them) so the account is not left
+        // with no products.
+        const { error: backErr } =
+          products.length > 0
+            ? await supabase.from("timber_account_products").insert(
+                products.map((p) => ({
+                  organization_id: orgId,
+                  account_id: id,
+                  product: p.product,
+                  unit: p.unit,
+                  opening_volume: p.opening_volume,
+                  opening_basis: p.opening_basis,
+                }))
+              )
+            : { error: null };
+        if (backErr) {
+          return fail(
+            "The timber by product did not save, and the earlier product rows could not be put back. Your entries are still on this form: press Save again."
+          );
+        }
+        const { error: valueErr } = await supabase
+          .from("timber_accounts")
+          .update({ timber_value: account.timber_value })
+          .eq("id", id);
+        return fail(
+          `${friendlyDbError(pErr, "The timber by product did not save.")} The earlier product rows were put back, so nothing changed there.${
+            valueErr ? " The Timber value shown on the account may not match them until you save again." : ""
+          } The other details were saved.`
+        );
+      }
     }
     setBusy(false);
     if (onClose) onClose();
@@ -172,7 +255,7 @@ export default function BasisSetupForm({
 
   function fail(msg: string) {
     setBusy(false);
-    setError(`Could not save: ${msg}`);
+    setError(msg);
   }
 
   const entityName = entities.find((e) => e.id === entityId)?.name ?? "the owner";
@@ -230,7 +313,7 @@ export default function BasisSetupForm({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label className={labelCls}>Timber</label>
-            <input value={timber} onChange={(e) => setTimber(e.target.value)} inputMode="decimal" placeholder="$" className={inputCls} />
+            <input value={timber} onChange={(e) => changeTimber(e.target.value)} inputMode="decimal" placeholder="$" className={inputCls} />
           </div>
           <div>
             <label className={labelCls}>Bare land</label>
@@ -320,14 +403,14 @@ export default function BasisSetupForm({
               <div className="flex gap-2">
                 <input
                   value={r.basis}
-                  onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, basis: e.target.value } : x)))}
+                  onChange={(e) => changeRowBasis(i, e.target.value)}
                   placeholder={singlePool && timberValue != null ? String(timberValue) : "Basis $"}
                   inputMode="decimal"
                   className={inputCls}
                 />
                 {rows.length > 1 ? (
                   <button
-                    onClick={() => setRows(rows.filter((_, j) => j !== i))}
+                    onClick={() => removeRow(i)}
                     className="text-xs text-red-600 hover:underline"
                     aria-label="Remove product"
                   >
@@ -338,10 +421,11 @@ export default function BasisSetupForm({
             </div>
           ))}
         </div>
-        {!singlePool && timberValue != null && Math.abs(productSum - timberValue) > 0.5 ? (
+        {mismatch ? (
           <p className="mt-2 text-xs text-amber-800">
             The products add to {formatDollars(productSum)}, but the timber value above is{" "}
-            {formatDollars(timberValue)}. On save, the products&apos; total becomes the timber basis.
+            {formatDollars(timberValue)}. Make the two agree before you save: change the products, or change
+            the Timber value above.
           </p>
         ) : null}
       </div>

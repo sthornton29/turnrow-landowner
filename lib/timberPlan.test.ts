@@ -132,6 +132,28 @@ describe("planted pine template", () => {
     expect(keys(recs)).not.toContain("first_thin");
   });
 
+  it("a harvest with no kind chosen still asks about replanting (thinning is its own type)", () => {
+    for (const acts of [
+      [{ activity_type: "harvest", status: "done", activity_year: 2025 }],
+      [{ activity_type: "harvest", status: "done", activity_year: 2025, details: {} }],
+    ] as PlanActivity[][]) {
+      const recs = planForStand(pine(), acts, 2026);
+      expect(keys(recs)).toContain("replant:2025");
+      expect(keys(recs)).not.toContain("first_thin");
+    }
+  });
+
+  it("keeps the yearly walk after a replant is answered not needed", () => {
+    const acts: PlanActivity[] = [
+      { activity_type: "harvest", status: "done", activity_year: 2025, details: { harvest_type: "clearcut" } },
+      { activity_type: "planting", status: "skipped", activity_year: 2026, plan_key: "replant:2025" },
+    ];
+    const stand = pine({ year_established: 1995 });
+    expect(keys(planForStand(stand, acts, 2026))).toEqual(["inspect:2026"]);
+    // ...and the walk comes back each year, never an empty plan.
+    expect(keys(planForStand(stand, acts, 2027))).toEqual(["inspect:2027"]);
+  });
+
   it("asks for the planting year when it is missing", () => {
     const recs = planForStand(pine({ year_established: null }), [], 2026);
     expect(recs.find((r) => r.key === "needs_year")?.setupOnly).toBe(true);

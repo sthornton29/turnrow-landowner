@@ -24,23 +24,57 @@ export interface StandShare {
   pct: number;
 }
 
+// One stand's manual percentage. A settlement's own percents stand
+// alone (a stand it leaves out gets 0, not the sale's stored number);
+// without them the sale's stored percentage applies.
+function manualPct(s: AllocatableStand, percents?: Record<string, number>): number {
+  const raw = percents ? percents[s.id] : s.allocation_pct;
+  return Number(raw ?? 0) || 0;
+}
+
+// Manual percentages count only when every one is 0 or more and they
+// add to 100 (to the hundredth). Anything else (boxes left blank, 60 and
+// blank, 80 and 40) would lose or invent dollars.
+export function manualPercentTotal(
+  stands: AllocatableStand[],
+  percents?: Record<string, number>
+): number {
+  const total = stands.reduce((sum, s) => sum + manualPct(s, percents), 0);
+  return Math.round(total * 100) / 100;
+}
+
+export function manualPercentsValid(
+  stands: AllocatableStand[],
+  percents?: Record<string, number>
+): boolean {
+  if (stands.length === 0) return false;
+  if (stands.some((s) => manualPct(s, percents) < 0)) return false;
+  return Math.abs(manualPercentTotal(stands, percents) - 100) <= 0.01;
+}
+
+// Linked stands that get nothing in a by-acres split because they have
+// no drawn boundary (no acres) while another linked stand does. Empty
+// when every stand has acres, or none does (then the split is equal).
+export function standsWithoutAcres(stands: AllocatableStand[]): string[] {
+  const missing = stands.filter((s) => !((s.acres ?? 0) > 0));
+  if (missing.length === 0 || missing.length === stands.length) return [];
+  return missing.map((s) => s.id);
+}
+
 // The percentage share of each linked stand under a method. by_acres
 // splits by mapped acres (equal split if no stand has acres, so linked
-// stands never silently drop to zero); manual uses the stored
-// percentages as-is (they may deliberately sum under 100, leaving a
-// remainder unallocated); none allocates nothing.
+// stands never silently drop to zero); manual uses the percentages when
+// they add to 100 and otherwise falls back to the by-acres split (the
+// screens that take percentages warn about it); none allocates nothing.
 export function allocationShares(
   method: AllocationMethod,
   stands: AllocatableStand[],
   percents?: Record<string, number>
 ): StandShare[] {
   if (method === "none" || stands.length === 0) return [];
-  if (method === "manual") {
+  if (method === "manual" && manualPercentsValid(stands, percents)) {
     return stands
-      .map((s) => ({
-        standId: s.id,
-        pct: percents?.[s.id] ?? s.allocation_pct ?? 0,
-      }))
+      .map((s) => ({ standId: s.id, pct: manualPct(s, percents) }))
       .filter((s) => s.pct > 0);
   }
   const totalAcres = stands.reduce((sum, s) => sum + (s.acres ?? 0), 0);
@@ -60,8 +94,8 @@ export interface AllocatedAmount {
 
 // Dollars split by the shares, rounded to cents. When the shares sum to
 // (at least) 100%, the last stand absorbs the rounding remainder so the
-// pieces add back to the whole; under-100% manual splits keep their
-// true remainder unallocated instead.
+// pieces add back to the whole; shares handed in that sum under 100%
+// keep their true remainder unallocated instead.
 export function allocateAmount(
   amount: number,
   shares: StandShare[]
