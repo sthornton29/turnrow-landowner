@@ -20,5 +20,17 @@ export async function requireOrg() {
 
   if (!profile?.organization_id) redirect("/onboarding");
 
-  return { supabase, user, profile };
+  // Admins see and manage everything; users see only the entities they
+  // were granted and cannot create org-level records. Row level security
+  // enforces this; isAdmin lets pages hide what would be refused.
+  return { supabase, user, profile, isAdmin: profile.role === "admin" };
+}
+
+// For the few pages that only make sense for an admin (creating a lease,
+// a timber sale, uploading tax statements): anyone else goes back to the
+// list page, where they see what they have access to.
+export async function requireAdmin(fallbackPath: string) {
+  const session = await requireOrg();
+  if (!session.isAdmin) redirect(fallbackPath);
+  return session;
 }
