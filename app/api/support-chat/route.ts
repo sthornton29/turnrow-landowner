@@ -71,13 +71,24 @@ export async function POST(req: NextRequest) {
 
   const pathname = typeof body?.pathname === "string" ? body.pathname.slice(0, 200) : "/";
   const topic = topicForRoute(HELP_TOPICS, pathname);
-  const system = [
-    SYSTEM_RULES,
-    "",
-    "==== TURNROW LANDOWNER DOCUMENTATION ====",
-    HELP_DIGEST,
-    topic ? `\n==== THE PAGE THE USER IS ON RIGHT NOW: ${topic.title} ====\n${topic.body}` : "",
-  ].join("\n");
+  // Two blocks. The rules and the whole documentation are the same for
+  // every question from every page, so they are marked for the prompt
+  // cache: follow-up questions inside a few minutes read them at about a
+  // tenth of the price. The page the user is on changes, so it comes
+  // after the cached block and never disturbs it.
+  const system: Anthropic.TextBlockParam[] = [
+    {
+      type: "text",
+      text: [SYSTEM_RULES, "", "==== TURNROW LANDOWNER DOCUMENTATION ====", HELP_DIGEST].join("\n"),
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+  if (topic) {
+    system.push({
+      type: "text",
+      text: `==== THE PAGE THE USER IS ON RIGHT NOW: ${topic.title} ====\n${topic.body}`,
+    });
+  }
 
   const client = new Anthropic();
   const stream = client.messages.stream({

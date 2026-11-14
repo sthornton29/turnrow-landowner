@@ -3,31 +3,41 @@ title: Farm activity
 route: /farm-activity
 group: Farm Data
 order: 2
-updated: 2026-08-25
-keywords: farm activity, entity, farming entity, operated by, plantings, crop year, varieties, harvested, harvesting, in progress, harvest complete, actual yield, yield, production, irrigated, dryland, by field, by property, by entity, by tenant, crop mix, harvest progress, projected yield, prices, summary, drill in, crops layer
+updated: 2026-11-14
+keywords: farm activity, farm data, entity, farming entity, operated by, plantings, crop year, varieties, harvested, harvesting, growing, harvest complete, actual yield, projected yield, yield, irrigated, dryland, by field, by property, by entity, by tenant, crop mix, harvest progress, prices, final, summary, drill in, crops layer, ignore, not mapped, manage connections
 ---
 ## What this page shows
 
-Everything connected tenants have shared, by crop year, at three levels.
+Everything connected tenants have shared, one crop year at a time. Pick the year, an entity, a tenant, or a property at the top and tap **Apply**. A strip under the filters shows each connection with the date it last synced and a **Manage connections** link.
 
-**The summary at the top** rolls the year up by entity (how your land is held) and by tenant (each farm connection). Each card shows the acres in crops, the crop mix (acres per crop, with a colored bar), harvest progress (acres harvested of acres planted), and, when the farmer shares them, a projected or actual yield per crop and their crop prices. A "No entity" card covers land not assigned to an entity. An organization with one entity and one tenant sees a single card instead of two sections.
+**The summary cards** roll the year up two ways: **By entity** (how your land is held; a **No entity** card covers land not assigned to one) and **By tenant** (each farming entity your tenants' software names). Each card shows acres in crops, the crop mix with a colored bar, and acres harvested of acres planted. When the farmer shares them, it also shows a yield per crop marked actual or projected, and crop prices marked projected or final. An account with one entity and one tenant sees a single card.
 
-**Tap a card** to drill in. The page narrows to that entity or tenant and lists its properties as rows with the same numbers. Tap a property to see its fields: the crop on each mapped field, varieties, planting date, its harvest status (Growing, Harvesting, or Harvested), and yield when shared. Breadcrumbs at the top step back up, and the filters follow along (drilling in sets the entity, connection, or property filter; clearing a filter returns to the summary).
+**Tap a card** to drill in. The page narrows to that entity or tenant and lists its properties with the same numbers. Tap a property to see its fields. The links at the top step back up, and clearing a filter returns to the summary.
 
-The card totals are sums of the field rows beneath them, so they always agree.
+**The field tables** list each planting by property: field, crop and varieties, acres, planting date, status (Growing, Harvesting, or Harvested), and yield. Card totals are sums of these rows.
 
 ## Actual vs projected during harvest
 
-A yield reads ACTUAL only once the field's harvest is complete, matching how your tenant's own software treats it. A field still being cut shows Harvesting and the projected yield instead, because dividing a partial harvest over the whole field would read artificially low. A crop's actual on a summary card averages only the finished fields, with "X of Y ac complete" beside it while others are still going; it never quietly blends in unfinished fields.
+A yield reads as actual only once the field's harvest is complete. A field still being cut shows Harvesting and the tenant's projected yield, marked projected, because dividing a partial harvest over the whole field would read too low. On a summary card, a crop's actual yield averages only the finished fields, with "X of Y ac complete" beside it while others are still going.
 
 The Map's Crops layer colors ag fields by the same data for the current year.
 
+## Which years are kept current
+
+Every sync refreshes the current crop year and the one before it, because harvest and final prices often arrive after December 31. Older years stay as they were last synced. The page opens on the latest year with data.
+
 ## Your tenant's farming entities
 
-A farm often runs as several entities (a family corporation for one set of fields, an LLC for another). When your tenant's software shares which entity operates each field, the tenant's card breaks out per entity (acres, crop mix, harvest, and that entity's own prices) under the whole-operation totals, the field table gains an Entity column, and the map's field panel says who operates the field. A tenant with one entity shows nothing extra.
+A farm often runs as several entities (a family corporation for one set of fields, an LLC for another). When your tenant's software shares which entity operates each field, each farming entity gets its own tenant card with its own acres, crop mix, harvest, and prices. The field tables gain an **Entity** column, and the map's field panel says who operates the field.
+
+## Ignored and unmatched fields
+
+- Fields set to **Ignore this field** on Field mapping are left out of every total and list here. A line under the totals says how many plantings were left out.
+- Plantings on fields you have not matched yet are listed under "Not mapped to your land yet". They count on the tenant's card, which notes the acres, but not toward any entity or property.
 
 ## Common questions
 
-- **Yield or prices show "Not shared."** The farmer did not enable that scope; ask them or leave it. Acres and harvest progress always show, because plantings are always shared.
-- **A field is missing.** Confirm its mapping under Farms then Mapping. Plantings on fields that are not mapped yet count toward the tenant's card but not toward any entity or property.
+- **Yield or prices read "not shared".** The farmer did not turn that on; ask them or leave it. Acres and harvest progress always show, because plantings are always shared.
+- **A field is missing.** Check its match under Farm Data, then **Manage connections**, then **Field mapping**, and make sure it is not set to Ignore this field.
 - **A tenant farms for two of my entities.** The tenant card rolls up across both; each entity card shows only its own land.
+- **The numbers look old.** Open **Manage connections** and press **Refresh now**. The card there says when the connection last synced and whether anything went wrong.

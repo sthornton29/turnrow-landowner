@@ -1,5 +1,161 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-14 (PRE-ROLLOUT REVIEW before inviting the rest of the family;
+branch pre-rollout-review, NOT YET ON MAIN; migrations 0052 and 0053
+WRITTEN BUT NOT APPLIED). Eight read-only section reviews, then fixes.
+Where this entry disagrees with older text below, this entry is current.
+
+SECURITY. (1) assistant_query (0022) could be called over REST by any
+signed-in account, even one with no organization (signup is open at the
+auth level), and its word denylist did not stop set_config() or
+query_to_xml(): a SELECT could change the role or the JWT claims that row
+level security trusts and read any organization's rows. Reproduced in a
+throwaway Postgres against the 0022 function body. FIX: an ALLOWLIST of
+callable names (lib/assistantSql.ts ALLOWED_CALLS, the same array in the
+0052 function; assistantSql.test.ts fails if they drift), no double
+quotes, no schema prefixes other than the app's own, no pg_ names. Known
+limit: any double quote is refused, JSON literals included. (2) 0052 also:
+storage.objects select/delete policies follow the documents table (admin,
+or the uploader, or a visible documents / document_versions row points at
+the object), assistant_usage is select-own / insert-own only, accept_invite
+needs email_confirmed_at. (3) lib/apiAuth.ts requireOrgApi(): EVERY route
+under /api needs a signed-in member of an organization (adminOnly() for
+farm connect, checked before the one-time share code is redeemed);
+price-recipe and timber-scan/vision gained the hourly limit (kind
+"extract") and input caps; proxy.ts answers a signed-out /api call with a
+JSON 401. (4) Route errors are plain sentences; upstream text goes to the
+log. After 0052 is applied run RLS_TEST=1 npx vitest run
+lib/entityScope.live.test.ts (it now tries the escapes and file access).
+
+0053: the five composite ON DELETE SET NULL keys that had no column list
+(payments.expected_payment_id, timber_sales.buyer_tenant_id,
+assets.parent_asset_id, field_mappings.local_field_id and
+local_property_id) nulled organization_id and so REFUSED the parent
+delete; recreated as SET NULL (column). remove_member(target): admin-only,
+same org, never yourself; clears organization_id, role, and entity_access.
+
+SHARED HELPERS (use these, do not reinvent). lib/format.ts: formatDate
+("Dec 10, 2026"; date-only values never shift), formatDateTime, todayISO()
+(the Central date; the server is UTC), plural(), APP_TIME_ZONE. No screen
+prints a stored date (2026-12-10) or a bare toLocaleDateString() any more;
+keep it that way.
+lib/dbErrors.ts friendlyDbError(error, fallback): raw database text never
+reaches the screen. lib/auth.ts requireOrg() also returns isAdmin;
+requireAdmin(fallbackPath) gates /leases/new, /timber-sales/new,
+/taxes/upload. lib/safeNext.ts safeNextPath() for every redirect target.
+
+SIGN-IN. /forgot-password and /reset-password (also "Change password"
+from Settings); resend confirmation from the sign-in form; show/hide
+password; login keeps ?next= (proxy.ts sets it); /auth/callback reports
+link_expired / link_failed and sends a recovery link to /reset-password
+from the exchange's redirectType; /auth/confirm verifies a token_hash (any
+device; needs the Supabase email templates pointed at it); proxy forwards
+/?code= to the callback. Onboarding shows the signed-in email and a "check
+again" link. Settings: AccountPanel (own name, password), MembersPanel
+(one Save per member with a result line, Remove from account, invite needs
+an entity for a user, shows the sign-up link to send: the app has never
+emailed invitations), wider admin-only records notice. app/(app)/
+not-found.tsx, error.tsx (props are { error, retry } in this Next),
+loading.tsx; app/not-found.tsx; app/global-error.tsx.
+
+LEASES AND INCOME. Rent is expected only for schedule installments whose
+due date falls inside start_date..end_date (lib/leaseLogic.ts termPlan,
+rentDueYears, rentShareDue; a first-year installment dated before the
+start is kept when the term would otherwise hold fewer than its lease
+years, so a Feb 1 to Dec 31 lease is unchanged). Status no longer gates
+projection: an expired or terminated lease keeps the expected rent of its
+term. isLapsedExpectedRow: on such a lease an unpaid generated row for a
+LEASE YEAR after the year it ended stops counting (by lease year, never by
+due date: the crop share lease's final settlement is due the July after it
+ends); Income, the lease breakdown, Home, and the ops brief share the
+rule. planScheduleRefresh matches a paid row to its installment by
+position when its label or date was edited; refresh inserts before it
+deletes; isoDate clamps to the month; percent schedules that total 100 add
+to the cent. tenantAutoFill removes a crop's entries under a practice the
+tenant no longer reports (irrigated + dryland collapsing to blended at
+harvest double counted). outstandingTotal sums per line. income_records
+with basis accrued or calculated are NOT received (YearTotals.unconfirmed;
+shown apart; a select on /income/records marks one received).
+newestBenchmarks filters to the program year first.
+
+TAXES. lib/tax.ts draftDates / statementDateProblem: due and delinquent
+dates must fit the tax year (bills that print no year made the reader
+guess; two 2026 Morgan statements were saved with 2025 dates, still to be
+corrected in the data); taxTools.ts tells the reader to return null
+instead. lastDayToPay (delinquent_date is the first late day),
+allocationBasis (payments spread over the whole statement, not the lines
+a member can see). Taxes page opens on the latest year with statements and
+lists past-due statements of any year; outstanding is per statement.
+Report: missing-bill finding fires per parcel from Oct 1, "No {year} bills
+on file", deadlineText, duplicate parcel copies map to the kept one, lines
+with no parcel follow the statement's entity. Matching is county-scoped;
+receipt, bill, and duplicate numbers are never learned. Protest packet:
+acreage ground only when the county exceeds the deed, same-entity
+comparables, hedged wording, worksheet line. taxChange decomposes only
+when both years printed the same kind of value. Upload: "Confirm all
+ready" skips statements with an unsure mark on a money, date, year, or
+parcel field (descriptive fields still ring amber).
+
+TIMBER. depletionPlanForSale: depletion per tax year of the settlements,
+never above basis (depletionOverBasis); productsStrandedBySplit blocks a
+product change that would strand entries; a type change keeps the other
+type's terms and the summary counts settlements and payments together;
+checklist lines for sales with no stands, unlinked selling costs, costs on
+work not done, off-year selling costs; manual percentages apply only at
+100 (else by acres with a warning); collapseLoads skips total rows and
+nets corrections; findDuplicateSettlement. Timber Scan: lib/timberScan/
+proposals.ts withoutSavedStands trims a cached scan; candidateYears starts
+at last year; one 50 second budget.
+
+MAP. Phones: Layers button + Add (layersOpen). components/map/editModes.ts
+replaces both select modes: a shape is never dragged as a whole, Delete
+point (lib/geo/vertexDelete.ts). Edit boundary zooms in on the shape
+(only ever in). Property delete lives on the property
+page (admins, typed name, full cascade list). RowEditor patches only keys
+on the row. lib/geo/normalize.ts stripToXY and fitBoundsOf; parse rejects
+non lat/long files. Per-layer load errors keep the last rows. New
+properties ask for the holding entity.
+
+FARM DATA. syncCropYear runs the current AND prior crop year every run
+(sync_detail gains year, production, prior); a failed /production pull
+leaves the harvest columns alone (buildPlantingOnlyRow). Ignored fields
+leave every total (withoutIgnoredFields). Suggestions need a name signal.
+mergeEntity moves tax statements, entity_accounts, timber_accounts,
+cost_share_awards, income_records, and entity_access.
+
+DOCUMENTS. Uploads never resume from an earlier attempt and a row is
+inserted only after storageObjectExists; deleteDocumentEverywhere deletes
+the row first and keeps a file another row shares; large photos are read
+from a downscaled copy (readerCopy); mergeExtracted instead of replacing
+extracted; the list page ships a search line, not extracted. Plotter:
+curves continue the prior course, parseAngle, metersPerDegree(lat),
+aliquot clauses with extra words warn instead of plotting as if absent,
+the point of beginning must be confirmed, typed REPLACE / SAVE.
+
+HELP. Every topic in docs/help was checked against the code on 2026-11-14
+(34 corrected, signing-in, tenants, parcels, and ag-fields added; 38
+topics). lib/helpMarkdown.tsx also renders "1. " numbered steps. The help
+chat (app/api/support-chat) sends the rules and the digest as one cached
+system block and the current page's topic as a second, uncached one: the
+digest is about 170 KB, so keep anything that changes per request out of
+the first block. Some help sentences are true only once 0053 is applied
+(a deleted expected payment keeps its money as unscheduled payments; a
+deleted tenant's timber sales keep the buyer's name).
+
+DEPENDENCIES. next 16.4.6 (advisories against 16.0.0 to 16.4.0) plus npm
+audit fix; "lint" is now tsc --noEmit. xlsx 0.18.5 still carries two
+advisories (the fix is published only on the SheetJS CDN): undecided.
+
+OPEN, FOR A DECISION: whether 'user' members should be able to delete
+(they can today); admin-only writes on tenants, farm_marketing_prices,
+county_tax_defaults; a member's share of a lease or timber sale that spans
+entities (needs a definer function for total acres); rent paid after New
+Year stays outstanding in the old year; government share year window and
+acre denominator; expense_share_pct is stored and unused; timber summary
+ignores the account's taxpayer; settlement deductions cannot be recorded;
+viewport (maximumScale 1 stops iOS zooming on input focus, and blocks
+pinch zoom on Android); 1,000-row reads are not paged.
+
 2026-11-09 (HISTORICAL INCOME, migration 0051, LIVE, commit 22778c3).
 income_records: income received outside a lease payment or timber
 settlement (year, received_date, period text, payer, payee_name,
