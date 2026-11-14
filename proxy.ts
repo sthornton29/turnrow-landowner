@@ -7,7 +7,18 @@ import { NextResponse, type NextRequest } from "next/server";
 // read-only ops API, 2026-11-08) is called with a bearer token by the
 // morning brief and Turnrow Farm; its routes enforce OPS_TOKEN, and the
 // ops actions under /api/ops/actions (2026-11-09) enforce OPS_WRITE_TOKEN.
-const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/api/farm/sync", "/api/ops"];
+// /forgot-password and /reset-password are the password reset pages: the
+// first is used signed out by definition, and the second explains itself
+// when the emailed link did not sign the person in.
+const PUBLIC_PATHS = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/auth",
+  "/api/farm/sync",
+  "/api/ops",
+];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -42,14 +53,25 @@ export async function proxy(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
 
   if (!user && !isPublic) {
+    // A signed-out request to the API gets a plain 401 the caller can
+    // read, not a redirect to an HTML page it would try to parse.
+    if (path.startsWith("/api/")) {
+      return NextResponse.json({ error: "Please sign in." }, { status: 401 });
+    }
     const url = request.nextUrl.clone();
+    // Remember where they were headed (a link someone texted them) so
+    // signing in takes them there instead of always to the map.
+    const wanted = path + request.nextUrl.search;
     url.pathname = "/login";
+    url.search = "";
+    if (path !== "/" && wanted.length <= 500) url.searchParams.set("next", wanted);
     return NextResponse.redirect(url);
   }
 
   if (user && (path === "/login" || path === "/signup")) {
     const url = request.nextUrl.clone();
     url.pathname = "/map";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 
