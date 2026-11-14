@@ -25,11 +25,16 @@ export default function MappingClient({
   initialMappings,
   fields,
   properties,
+  isAdmin,
 }: {
   connection: { id: string; label: string; status: string };
   initialMappings: FieldMappingRow[];
   fields: Array<{ id: string; name: string; acres: number | null; property_id: string }>;
   properties: Array<{ id: string; name: string }>;
+  // Row level security (migration 0034) shows a member who is not an
+  // admin only the farmer's fields already matched to land they can see.
+  // Unmatched and ignored fields reach admins alone, so the page says so.
+  isAdmin: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [mappings, setMappings] = useState(initialMappings);
@@ -164,6 +169,12 @@ export default function MappingClient({
           property if you have not drawn them). {confirmed} confirmed
           {needsReview > 0 ? `, ${needsReview} awaiting review` : ""}.
         </p>
+        {!isAdmin ? (
+          <p className="mt-1 text-sm text-gray-600">
+            This list shows only the fields already matched to land you can
+            see. An admin on your account matches the rest.
+          </p>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-3">

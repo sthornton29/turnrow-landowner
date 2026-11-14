@@ -10,7 +10,7 @@ export default async function MappingPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase } = await requireOrg();
+  const { supabase, isAdmin } = await requireOrg();
 
   const [{ data: connection }, { data: mappings }, { data: fields }, { data: properties }] =
     await Promise.all([
@@ -39,6 +39,7 @@ export default async function MappingPage({
       initialMappings={mappings ?? []}
       fields={fields ?? []}
       properties={properties ?? []}
+      isAdmin={isAdmin}
     />
   );
 }

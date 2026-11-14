@@ -54,9 +54,9 @@ export default async function EntitiesPage() {
         <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
           {isAdmin ? (
             <>
-              No entities yet. Create one above, or import parcels with the county
-              import{"'"}s owner search: confirmed owner groupings become entities
-              automatically.
+              No entities yet. Create one above, or choose Create new entity
+              beside Held by entity when you import parcels from county
+              records. An import never creates an entity on its own.
             </>
           ) : (
             "You have not been given access to any entities yet. Ask an admin on your account to add you in Settings."

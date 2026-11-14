@@ -74,6 +74,31 @@ describe('projectFarms', () => {
     })
     expect(rows[0].flat).toBe(true)
     expect(rows[0].net).toBe(Math.round(2000 * 0.85 * 0.946 * 100) / 100)
+    expect(rows[0].notes.join(' ')).toContain('flat estimate')
+  })
+
+  it('with no flat rate supplied the row has no estimate and the note gives the real reason', () => {
+    const base = {
+      programYear: 2025, farms,
+      baseAcres: [{ fsa_farm_id: 'f1', commodity: 'corn', base_acres: 100, plc_yield: 150 }],
+      elections: [{ fsa_farm_id: 'f1', commodity: 'corn', program_year: 2025, election: 'arc_co' as const }],
+      commodities: [corn], config,
+    }
+    // No benchmark row for the county.
+    const noBench = projectFarms({ ...base, priceData: [] })
+    expect(noBench[0].computable).toBe(false)
+    expect(noBench[0].net).toBe(0)
+    expect(noBench[0].notes.join(' ')).toContain('No FSA county benchmark row')
+    expect(noBench[0].notes.join(' ')).toContain('no estimate is made yet')
+    expect(noBench[0].notes.join(' ')).not.toContain('flat estimate')
+    // ARC-IC is not modeled at all.
+    const ic = projectFarms({
+      ...base, priceData: [],
+      elections: [{ fsa_farm_id: 'f1', commodity: 'corn', program_year: 2025, election: 'arc_ic' as const }],
+    })
+    expect(ic[0].computable).toBe(false)
+    expect(ic[0].notes.join(' ')).toContain('ARC-IC')
+    expect(ic[0].notes.join(' ')).toContain('no estimate is made yet')
   })
 
   it('allocates to properties by link percent, unlinked farms are flagged', () => {

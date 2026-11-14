@@ -238,9 +238,25 @@ export default function AssetDetail({
             >
               Show on map
             </Link>
-          ) : (
+          ) : asset.is_active ? (
+            // The map opens with this asset's panel up (it cannot zoom to
+            // a spot that does not exist yet); Move pin there starts the
+            // crosshair and Place here saves the location.
             <span className="ml-auto text-sm text-gray-500">
-              No location yet; place it from the map page.
+              No location yet.{" "}
+              <Link
+                href={`/map?focus=asset:${asset.id}`}
+                className="font-medium text-kelly-700 hover:underline"
+              >
+                Place on map
+              </Link>
+              : press Move pin there, then Place here.
+            </span>
+          ) : (
+            // The map leaves inactive assets out, so there is no panel to
+            // open for this one until it is reactivated.
+            <span className="ml-auto text-sm text-gray-500">
+              No location yet. Reactivate it to place it on the map.
             </span>
           )}
         </div>
@@ -417,7 +433,7 @@ export default function AssetDetail({
               <p className="mb-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
                 This pivot has a coverage circle; its center, radius, and sweep
                 are edited on the map (open the pivot there and choose Edit
-                coverage circle).
+                coverage).
               </p>
             ) : null}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -16,11 +16,16 @@ export default function EntityPicker({
   propertyId,
   entities,
   value,
+  canCreate = true,
 }: {
   orgId: string;
   propertyId: string;
   entities: Array<{ id: string; name: string }>;
   value: string | null;
+  // Creating an entity is admin work (row level security refuses anyone
+  // else), so pass false for other members to leave "+ New entity..."
+  // out of the list.
+  canCreate?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -127,7 +132,7 @@ export default function EntityPicker({
             {entity.name}
           </option>
         ))}
-        <option value={NEW}>+ New entity...</option>
+        {canCreate ? <option value={NEW}>+ New entity...</option> : null}
       </select>
       {error ? <span className="text-sm text-red-600">{error}</span> : null}
     </span>

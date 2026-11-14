@@ -659,7 +659,8 @@ export default function FeaturePanel({
             href={detailPagePath(entityType, row.id)}
             className="mt-0.5 inline-block text-sm font-medium text-kelly-700 hover:underline"
           >
-            View full page &rarr;
+            {/* An issue has no page of its own: the link opens the list. */}
+            {isIssue ? "View all issues" : "View full page"} &rarr;
           </Link>
         </div>
         <button

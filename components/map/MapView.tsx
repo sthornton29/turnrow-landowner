@@ -4171,7 +4171,8 @@ export default function MapView({
           </div>
           <p className="mt-1 text-xs text-gray-500">
             Starts with what the map shows now. Uncheck anything to leave it
-            out; the map follows, so what you see is what goes in the file.
+            out, and the map drops it too. An item you add back from a layer
+            that is switched off goes in the file but stays hidden on the map.
           </p>
 
           <div className="mt-2 space-y-2 text-sm">
@@ -4723,12 +4724,11 @@ export default function MapView({
         ? (() => {
             const c = circleEdit.params;
             const sqFt = circleAreaSqFt(c.diameterFt);
-            const isBin = circleEdit.assetType === "grain_bin";
             return (
               <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[94%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
                 <p className="text-xs">
-                  White handle moves the center, blue sets the diameter.
-                  {isBin ? " The diameter is the bin's diameter spec; typing it on the asset page resizes this circle too." : ""}
+                  White handle moves the center, blue sets the diameter. You
+                  can also type the diameter here.
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-center justify-center gap-2">
                   <label className="flex items-center gap-1 text-xs">

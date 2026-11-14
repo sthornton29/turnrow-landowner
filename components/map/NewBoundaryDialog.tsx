@@ -509,7 +509,15 @@ export default function NewBoundaryDialog({
                   </p>
                 ) : null}
               </div>
-            ) : null}
+            ) : (
+              // No entity exists to choose from, so the property is saved
+              // with none. Say what that means and where to fix it.
+              <p className="text-xs text-amber-700">
+                There is no entity to choose yet, so this property will be
+                saved with no entity and only admins will see it. Set Held by
+                on the property{"'"}s page afterward.
+              </p>
+            )}
           </>
         )}
 

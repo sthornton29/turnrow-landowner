@@ -15,12 +15,16 @@ import { formatNumber } from "@/lib/format";
 export default function MoveChildren({
   table,
   itemLabel,
+  itemLabelPlural,
   items,
   properties,
   currentPropertyId,
 }: {
   table: string;
   itemLabel: string; // e.g. "parcel"
+  // The plural when adding "s" is wrong ("cemeteries",
+  // "pastures/grassland"). Left out, it is itemLabel plus "s".
+  itemLabelPlural?: string;
   items: Array<{ id: string; label: string }>;
   properties: Array<{ id: string; name: string }>;
   currentPropertyId: string;
@@ -33,6 +37,7 @@ export default function MoveChildren({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const pluralLabel = itemLabelPlural ?? `${itemLabel}s`;
   const targets = properties.filter((p) => p.id !== currentPropertyId);
   if (items.length === 0 || targets.length === 0) return null;
 
@@ -69,7 +74,7 @@ export default function MoveChildren({
         onClick={() => setOpen(true)}
         className="text-sm font-medium text-kelly-700 hover:underline"
       >
-        Move {itemLabel}s to another property
+        Move {pluralLabel} to another property
       </button>
     );
   }
@@ -78,8 +83,8 @@ export default function MoveChildren({
     <div className="mt-2 space-y-2 rounded-lg border border-kelly-100 bg-kelly-50 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-pine-900">
-          Move {formatNumber(selected.size)} {itemLabel}
-          {selected.size === 1 ? "" : "s"} to
+          Move {formatNumber(selected.size)}{" "}
+          {selected.size === 1 ? itemLabel : pluralLabel} to
         </span>
         <select
           value={targetId}

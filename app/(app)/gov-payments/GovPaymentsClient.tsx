@@ -401,8 +401,12 @@ export default function GovPaymentsClient({
       (e: { commodity: string; estimate: number | null; composition: string }) =>
         `${COMMODITY_LABELS[e.commodity as keyof typeof COMMODITY_LABELS] ?? e.commodity}: ${e.estimate == null ? "no published months" : `$${e.estimate.toFixed(4)}`} (${e.composition})`
     );
+    // Only a platform admin's refresh saves the blend (the route decides).
+    // For everyone else nothing on the page changes, so the line says so.
     setMessage(
-      (isPlatformAdmin ? "Refreshed from NASS. " : "Live NASS blend (shown only; a platform admin saves estimates). ") +
+      (isPlatformAdmin
+        ? "Refreshed from NASS. "
+        : "Latest USDA NASS blend, shown for reference only. The prices and projections on this page were not changed; Turnrow keeps the saved season prices current. ") +
         lines.join("; ")
     );
     router.refresh();
@@ -629,6 +633,12 @@ export default function GovPaymentsClient({
                         return allocs.map((a) => {
                           const r = rowByKey.get(`${a.farmId}|${a.commodity}`);
                           const key = `${pid}|${a.farmId}|${a.commodity}`;
+                          // ARC-IC, and ARC-CO with no county benchmark or no
+                          // MYA price: the projection has no flat rate to fall
+                          // back on today (nothing supplies one), so the row
+                          // has no estimate and adds $0.00. The row and its
+                          // drivers say so.
+                          const noEstimate = !!r && r.flat && !r.computable;
                           return [
                             <tr key={key} className="border-t border-gray-50">
                               <td className="px-4 py-1.5 pl-8 text-gray-700">
@@ -659,7 +669,11 @@ export default function GovPaymentsClient({
                               </td>
                               <td className="px-4 py-1.5 text-right tabular-nums text-gray-700">
                                 {r ? (r.computable ? `$${r.grossPerAcre.toFixed(2)}/ac` : "n/a") : ""}
-                                {r?.flat ? <span className="ml-1 text-xs text-amber-700">flat est.</span> : null}
+                                {noEstimate ? (
+                                  <span className="block text-xs text-amber-700">no estimate yet, counted as $0.00</span>
+                                ) : r?.flat ? (
+                                  <span className="ml-1 text-xs text-amber-700">flat est.</span>
+                                ) : null}
                               </td>
                               <td className="px-4 py-1.5 text-right tabular-nums font-medium text-pine-900">{formatDollars(a.net)}</td>
                             </tr>,
@@ -670,13 +684,18 @@ export default function GovPaymentsClient({
                                     {Object.entries(r.drivers).map(([k, v]) => (
                                       <span key={k}>
                                         <span className="text-gray-500">{k.replace(/_/g, " ")}:</span>{" "}
-                                        {typeof v === "number" ? formatNumber(Math.round(v * 10000) / 10000) : String(v)}
+                                        {typeof v === "number" ? formatNumber(Math.round(v * 10000) / 10000) : v === null ? "none" : String(v)}
                                       </span>
                                     ))}
                                   </div>
                                   {r.notes.map((n) => (
                                     <p key={n} className="mt-1 text-amber-800">{n}</p>
                                   ))}
+                                  {noEstimate ? (
+                                    <p className="mt-1 text-amber-800">
+                                      This row counts as $0.00 in the totals until it can be estimated.
+                                    </p>
+                                  ) : null}
                                   {r.election === "arc_co" && farm ? (
                                     <button onClick={() => lookupBenchmark(farm, a.commodity)} disabled={priceBusy} className="mt-1 font-medium text-kelly-700 hover:underline">
                                       Look up the FSA county benchmark
@@ -870,7 +889,13 @@ export default function GovPaymentsClient({
             <div>
               <p className="font-semibold text-gray-900">ARC-CO (Agriculture Risk Coverage, county)</p>
               <p>
-                Benchmark revenue = benchmark price x benchmark county yield (from FSA{"'"}s annual benchmark workbook). Guarantee = {Math.round(config.arcGuaranteePct * 100)}% of benchmark revenue. Actual revenue = expected county yield x max(MYA, loan rate). The payment rate is the shortfall, capped at {Math.round(config.arcPaymentCapPct * 100)}% of benchmark revenue, then the same factor and sequestration apply. Without a county benchmark row the app shows a flat estimate and says so.
+                Benchmark revenue = benchmark price x benchmark county yield (from FSA{"'"}s annual benchmark workbook). Guarantee = {Math.round(config.arcGuaranteePct * 100)}% of benchmark revenue. Actual revenue = expected county yield x max(MYA, loan rate). The payment rate is the shortfall, capped at {Math.round(config.arcPaymentCapPct * 100)}% of benchmark revenue, then the same factor and sequestration apply. When no county benchmark is on file for the farm{"'"}s county, or no MYA price is on file yet, no estimate is made: the row reads n/a, is marked {'"'}no estimate yet{'"'}, and counts as $0.00 in the totals. Open Drivers on the row to look up the county benchmark.
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900">ARC-IC (Agriculture Risk Coverage, individual)</p>
+              <p>
+                ARC-IC pays on each farm{"'"}s own revenue, which the app does not model. No estimate is made for these rows yet: they read n/a, are marked {'"'}no estimate yet{'"'}, and count as $0.00 in the totals.
               </p>
             </div>
             <div>

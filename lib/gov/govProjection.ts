@@ -223,15 +223,21 @@ export function projectFarms(args: {
       continue
     }
 
-    // ARC-CO without a benchmark row, and ARC-IC: flat estimate.
+    // ARC-CO that cannot be computed, and ARC-IC. A flat rate per acre
+    // stands in when the caller supplies one. No caller does today, so
+    // these rows carry no estimate, and the note says which it is and the
+    // real reason (a benchmark row can be on file while the season
+    // average price is the piece that is missing).
     const rate = args.arcFlatRatePerAcre ?? null
-    notes.push(
+    const reason =
       election === 'arc_ic'
-        ? 'ARC-IC pays on individual farm revenue, which is not modeled; flat estimate.'
-        : farm.county
-          ? `No FSA county benchmark row for ${farm.county} County; flat estimate.`
-          : 'The farm has no county set, so no county benchmark can be looked up; flat estimate.',
-    )
+        ? 'ARC-IC pays on individual farm revenue, which is not modeled'
+        : !farm.county
+          ? 'The farm has no county set, so no county benchmark can be looked up'
+          : bench?.benchmark_price == null || bench.benchmark_yield == null
+            ? `No FSA county benchmark row for ${farm.county} County`
+            : 'No season average price is on file for this crop and year yet'
+    notes.push(`${reason}; ${rate != null ? 'flat estimate.' : 'no estimate is made yet.'}`)
     const r = computeArcCoFlatPayment({
       projectedRatePerAcre: rate ?? 0,
       baseAcres,

@@ -323,6 +323,7 @@ export default async function PropertyDetailPage({
                 propertyId={property.id}
                 entities={entities ?? []}
                 value={property.entity_id}
+                canCreate={isAdmin}
               />
             </div>
           </div>
@@ -588,6 +589,7 @@ export default async function PropertyDetailPage({
             <MoveChildren
               table="pastures"
               itemLabel="pasture/grassland"
+              itemLabelPlural="pastures/grassland"
               items={(pastures ?? []).map((p) => ({
                 id: p.id,
                 label: `${p.name} (${formatAcres(p.acres)} ac)`,
@@ -630,6 +632,7 @@ export default async function PropertyDetailPage({
             <MoveChildren
               table="cemeteries"
               itemLabel="cemetery"
+              itemLabelPlural="cemeteries"
               items={(cemeteries ?? []).map((c) => ({ id: c.id, label: c.name }))}
               properties={moveTargets}
               currentPropertyId={property.id}
