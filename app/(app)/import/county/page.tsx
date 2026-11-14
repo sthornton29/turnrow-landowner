@@ -27,7 +27,9 @@ export default async function CountyImportPage({
       .eq("status", "active")
       .order("state")
       .order("county"),
-    supabase.from("properties").select("id, name, county, entity_id").order("name"),
+    // acres is null until a property has a boundary; the import form
+    // uses that to avoid replacing a drawn boundary without asking.
+    supabase.from("properties").select("id, name, county, entity_id, acres").order("name"),
     supabase.from("parcels").select("id, parcel_number, county, property_id"),
     supabase
       .from("entity_aliases")
@@ -46,7 +48,13 @@ export default async function CountyImportPage({
     <CountyImportClient
       orgId={profile.organization_id!}
       services={services ?? []}
-      properties={properties ?? []}
+      properties={(properties ?? []).map((p) => ({
+        id: p.id as string,
+        name: p.name as string,
+        county: p.county as string | null,
+        entity_id: p.entity_id as string | null,
+        has_boundary: p.acres !== null,
+      }))}
       existingParcels={parcels ?? []}
       knownAliases={knownAliases}
       entities={entities ?? []}

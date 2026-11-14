@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatNumber } from "@/lib/format";
+import { formatAcres, formatNumber, plural } from "@/lib/format";
 import {
   ASSET_TYPES,
   ROAD_TYPE_LABELS,
@@ -28,7 +28,7 @@ export default async function PropertyDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   const { data: property } = await supabase
     .from("properties_geo")
@@ -83,7 +83,10 @@ export default async function PropertyDetailPage({
       .order("name"),
     supabase
       .from("timber_stands")
-      .select("id, name, stand_type, species, year_established, site_index, last_thinning_year, last_burn_year, notes, acres")
+      // Every column the inline Edit form shows (EDIT_FIELDS in
+      // components/map/FeaturePanel.tsx), so saving it changes only
+      // what was typed.
+      .select("id, name, stand_type, species, year_established, tpa_planted, site_index, site_index_base_age, management_goal, last_thinning_year, last_burn_year, notes, acres")
       .eq("property_id", id)
       .order("name"),
     supabase
@@ -106,7 +109,7 @@ export default async function PropertyDetailPage({
     supabase
       .from("easements_geo")
       .select(
-        "id, name, easement_type, relationship, holder, recorded_ref, expiration_date, width_ft, elevation_ft, program, restrictions, notes, acres, miles"
+        "id, name, easement_type, relationship, holder, recorded_ref, expiration_date, width_ft, elevation_ft, program, restrictions, emergency_phone, notes, acres, miles"
       )
       .eq("property_id", id)
       .order("name"),
@@ -160,6 +163,120 @@ export default async function PropertyDetailPage({
   const timberAcres = (stands ?? []).reduce((s, t) => s + (t.acres ?? 0), 0);
   const roadMiles = (roads ?? []).reduce((s, r) => s + (r.miles ?? 0), 0);
 
+  // A property with parcels but no drawn outline has no acres of its
+  // own yet ("0.0 acres" would read as a measurement). And when the
+  // outline and the parcels disagree by more than 5 percent, say so:
+  // one of them is usually out of date.
+  const hasBoundary = property.boundary_geojson !== null;
+  const boundaryAcres = property.acres ?? 0;
+  const acresGapPct =
+    hasBoundary && parcelAcres > 0 && boundaryAcres > 0
+      ? (Math.abs(boundaryAcres - parcelAcres) / parcelAcres) * 100
+      : 0;
+
+  // What deleting this property takes with it, for the admin-only delete
+  // control at the foot of the page. Every line is a foreign key in
+  // supabase/migrations that cascades from the property (or from a
+  // parcel, ag field, or timber stand on it); the "unlinked" ones are
+  // the keys that set the property to null instead. Keep this in step
+  // with the migrations when a table gains a property_id.
+  const deleteLists = isAdmin ? await (async () => {
+    const countOf = async (table: string) =>
+      (
+        await supabase
+          .from(table)
+          .select("id", { count: "exact", head: true })
+          .eq("property_id", id)
+      ).count ?? 0;
+    const [
+      activityCount,
+      costCount,
+      basisCount,
+      awardCount,
+      scanCount,
+      fsaLinkCount,
+      docLinkCount,
+      issueCount,
+      incomeRecordCount,
+    ] = await Promise.all([
+      countOf("stand_activities"),
+      countOf("timber_costs"),
+      countOf("timber_accounts"),
+      countOf("cost_share_awards"),
+      countOf("timber_scans"),
+      countOf("fsa_farm_properties"),
+      countOf("document_properties"),
+      countOf("maintenance_issues"),
+      countOf("income_records"),
+    ]);
+    const inactiveAssets = (assets ?? []).filter((a) => !a.is_active).length;
+    const aliasCount = (aliasRows.data ?? []).length;
+    const line = (n: number, text: string) => (n > 0 ? [text] : []);
+    const deleted = [
+      ...line(
+        (parcels ?? []).length,
+        `${plural((parcels ?? []).length, "parcel")}, with the tax identifiers, valuation history, and valuation notices kept for ${(parcels ?? []).length === 1 ? "it" : "them"}`
+      ),
+      ...line((fields ?? []).length, plural((fields ?? []).length, "ag field")),
+      ...line(
+        (pastures ?? []).length,
+        plural((pastures ?? []).length, "pasture/grassland", "pastures/grassland")
+      ),
+      ...line((wetlandRows ?? []).length, plural((wetlandRows ?? []).length, "wetland")),
+      ...line(
+        (habitatRows ?? []).length,
+        plural((habitatRows ?? []).length, "pollinator habitat")
+      ),
+      ...line(
+        (stands ?? []).length,
+        `${plural((stands ?? []).length, "timber stand")}, with ${(stands ?? []).length === 1 ? "its" : "their"} links to timber sales`
+      ),
+      ...line((roads ?? []).length, plural((roads ?? []).length, "road")),
+      ...line(
+        (assets ?? []).length,
+        plural((assets ?? []).length, "asset") +
+          (inactiveAssets > 0 ? ` (${formatNumber(inactiveAssets)} inactive)` : "")
+      ),
+      ...line(
+        (cemeteries ?? []).length,
+        plural((cemeteries ?? []).length, "cemetery", "cemeteries")
+      ),
+      ...line(
+        activityCount,
+        plural(activityCount, "timber activity record")
+      ),
+      ...line(costCount, plural(costCount, "timber cost")),
+      ...line(
+        basisCount,
+        `${plural(basisCount, "timber basis account")}, with ${basisCount === 1 ? "its" : "their"} entries`
+      ),
+      ...line(
+        awardCount,
+        `${plural(awardCount, "cost-share award")}, with ${awardCount === 1 ? "its" : "their"} payments`
+      ),
+      ...line(scanCount, plural(scanCount, "Timber Scan result")),
+      ...line(
+        leaseLinkCount ?? 0,
+        `${plural(leaseLinkCount ?? 0, "lease land link")} (the leases themselves are kept)`
+      ),
+      ...line(
+        fsaLinkCount,
+        `${plural(fsaLinkCount, "FSA farm link")} (the FSA farms themselves are kept)`
+      ),
+      ...line(
+        docLinkCount,
+        `${plural(docLinkCount, "document link")} (the documents themselves are kept)`
+      ),
+      ...line(aliasCount, `${plural(aliasCount, "other name")} this property is also called`),
+    ];
+    const unlinked = [
+      ...line((easementRows ?? []).length, plural((easementRows ?? []).length, "easement")),
+      ...line(issueCount, plural(issueCount, "maintenance issue")),
+      ...line(incomeRecordCount, plural(incomeRecordCount, "income record")),
+    ];
+    return { deleted, unlinked };
+  })() : null;
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div>
@@ -173,8 +290,15 @@ export default async function PropertyDetailPage({
               {[property.county, property.state].filter(Boolean).join(", ") ||
                 "No county set"}
               {" · "}
-              {formatAcres(property.acres)} acres
+              {hasBoundary ? `${formatAcres(property.acres)} acres` : "No boundary yet"}
             </p>
+            {acresGapPct > 5 ? (
+              <p className="mt-0.5 text-xs text-amber-700">
+                The drawn boundary is {formatAcres(boundaryAcres)} acres, but
+                the parcels add up to {formatAcres(parcelAcres)} acres. One
+                of the two may be out of date.
+              </p>
+            ) : null}
             {(property.fsa_numbers ?? []).length > 0 ? (
               <p className="mt-1.5 flex flex-wrap gap-1.5">
                 {(property.fsa_numbers as string[]).map((n) => (
@@ -808,38 +932,20 @@ export default async function PropertyDetailPage({
         </section>
       ) : null}
 
-      <section className="border-t border-gray-200 pt-4">
-        <DeletePropertyButton
-          propertyId={property.id}
-          propertyName={property.name}
-          cascadeSummary={[
-            [(parcels ?? []).length, "parcel"],
-            [(fields ?? []).length, "ag field"],
-            [(pastures ?? []).length, "pasture"],
-            [(wetlandRows ?? []).length, "wetland"],
-            [(habitatRows ?? []).length, "pollinator habitat"],
-            [(stands ?? []).length, "timber stand"],
-            [(roads ?? []).length, "road"],
-            [(assets ?? []).length, "asset"],
-          ]
-            .filter(([count]) => (count as number) > 0)
-            .map(
-              ([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`
-            )
-            .join(", ")}
-          leaseLinkCount={leaseLinkCount ?? 0}
-          redirectTo="/properties"
-        />
-        <p className="mt-1 text-xs text-gray-500">
-          Deletes this property and everything on it (parcels, ag fields,
-          pastures, wetlands, pollinator habitats, timber stands, roads,
-          assets) and removes any
-          lease land links. Leases,
-          payments, and tax records are kept; tax statements on deleted
-          parcels become unmatched. Move anything you want to keep to another
-          property first.
-        </p>
-      </section>
+      {/* Deleting a property is an admin's decision: it takes everything
+          on the property with it. The button opens the full list and
+          asks for the property's name before anything is removed. */}
+      {deleteLists ? (
+        <section className="border-t border-gray-200 pt-4">
+          <DeletePropertyButton
+            propertyId={property.id}
+            propertyName={property.name}
+            deleted={deleteLists.deleted}
+            unlinked={deleteLists.unlinked}
+            redirectTo="/properties"
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

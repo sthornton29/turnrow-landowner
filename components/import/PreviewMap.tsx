@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import mapboxgl, { GeoJSONSource } from "mapbox-gl";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { bboxOf } from "@/lib/geo/normalize";
+import { fitBoundsOf } from "@/lib/geo/normalize";
 import type { EntityType } from "@/types/db";
 
 export interface PreviewFeature {
@@ -112,7 +112,9 @@ export default function PreviewMap({ features }: { features: PreviewFeature[] })
       ),
     };
     (map.getSource("preview") as GeoJSONSource)?.setData(fc);
-    const box = bboxOf(features.map((f) => f.geometry));
+    // fitBoundsOf leaves out anything that is not longitude/latitude:
+    // Mapbox throws on such a box, which would take the whole page down.
+    const box = fitBoundsOf(features.map((f) => f.geometry));
     if (box) map.fitBounds(box, { padding: 40, duration: 0 });
   };
 

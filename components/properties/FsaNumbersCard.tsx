@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 
 // FSA farm numbers on a property: the key that lets a scanned 156EZ land
 // its farms on the right land. A property can carry several; chips with
@@ -31,7 +32,7 @@ export default function FsaNumbersCard({
       .eq("id", propertyId);
     setBusy(false);
     if (err) {
-      setError("Could not save. " + err.message);
+      setError(friendlyDbError(err, "Could not save the FSA numbers. Please try again."));
       return;
     }
     setList(next);

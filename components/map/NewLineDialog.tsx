@@ -26,6 +26,7 @@ export default function NewLineDialog({
   fixedKind,
   properties,
   suggestedPropertyId = null,
+  isAdmin = false,
   saving,
   error,
   onSave,
@@ -34,15 +35,20 @@ export default function NewLineDialog({
   fixedKind: LineKind;
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
+  // Members who are not admins cannot save a pipe or fence with no
+  // property (row level security refuses it), so for them it is required.
+  isAdmin?: boolean;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewLinePayload) => void;
   onCancel: () => void;
 }) {
   const kind = fixedKind;
-  const [propertyId, setPropertyId] = useState(
-    suggestedPropertyId ?? properties[0]?.id ?? ""
-  );
+  // Starts on the property the line sits in, when there is one;
+  // otherwise empty, so the choice is made rather than defaulted to
+  // whichever property comes first in the alphabet.
+  const [propertyId, setPropertyId] = useState(suggestedPropertyId ?? "");
+  const propertyRequired = kind === "road" || !isAdmin;
 
   function handleSubmit(formData: FormData) {
     onSave({
@@ -92,7 +98,7 @@ export default function NewLineDialog({
 
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            Property{kind !== "road" ? " (optional)" : ""}
+            Property{propertyRequired ? "" : " (optional)"}
             {suggestedPropertyId && propertyId === suggestedPropertyId ? (
               <span
                 className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
@@ -109,12 +115,12 @@ export default function NewLineDialog({
           ) : (
             <select
               name="property_id"
-              required={kind === "road"}
+              required={propertyRequired}
               value={propertyId}
               onChange={(e) => setPropertyId(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
             >
-              {kind !== "road" ? <option value="">None</option> : null}
+              <option value="">{propertyRequired ? "Choose a property..." : "None"}</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}

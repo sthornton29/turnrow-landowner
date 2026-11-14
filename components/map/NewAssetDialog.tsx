@@ -16,6 +16,7 @@ export default function NewAssetDialog({
   properties,
   suggestedPropertyId = null,
   fixedType = null,
+  isAdmin = false,
   saving,
   error,
   onSave,
@@ -23,6 +24,9 @@ export default function NewAssetDialog({
 }: {
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
+  // Members who are not admins cannot save an asset with no property
+  // (row level security refuses it), so for them it is required.
+  isAdmin?: boolean;
   // Locks the type (the Add menu's pivot flow already knows it) and
   // hides the type selector.
   fixedType?: AssetType | null;
@@ -89,7 +93,7 @@ export default function NewAssetDialog({
 
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            Property (optional)
+            Property{isAdmin ? " (optional)" : ""}
             {suggestedPropertyId && propertyId === suggestedPropertyId ? (
               <span
                 className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
@@ -101,11 +105,12 @@ export default function NewAssetDialog({
           </label>
           <select
             name="property_id"
+            required={!isAdmin}
             value={propertyId}
             onChange={(e) => setPropertyId(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none"
           >
-            <option value="">None</option>
+            <option value="">{isAdmin ? "None" : "Choose a property..."}</option>
             {properties.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

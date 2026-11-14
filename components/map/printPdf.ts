@@ -467,12 +467,31 @@ export async function generateMapPdf(job: PrintJob): Promise<void> {
   pdf.setLineWidth(0.2);
   pdf.rect(m.x, m.y, m.w, m.h);
 
-  // Legend: only the checked layers, flowing in columns.
+  // Scale bar (bottom right of the footer strip). Sized here because
+  // the legend has to stop short of it.
+  const bar = niceScaleBar(groundFtAcross);
+  const barMm = (bar.feet / groundFtAcross) * m.w;
+  const barX = m.x + m.w - barMm;
+
+  // Legend: only the checked layers, flowing in columns that end before
+  // the scale bar. With many entries (crops, entities) the columns
+  // narrow to fit the footer rather than run under the bar or off the
+  // page, and a long label is cut to its column.
   pdf.setFontSize(8);
   pdf.setTextColor(60, 60, 60);
-  const colWidth = 52;
   const rowHeight = 5;
-  const legendRows = Math.max(3, Math.ceil(job.legend.length / 4));
+  const legendW = Math.max(40, barX - 6 - m.x);
+  const maxLegendRows = Math.max(3, Math.floor((page.h - 14 - footerY) / rowHeight));
+  let colWidth = 52;
+  let legendRows = Math.max(
+    3,
+    Math.ceil(job.legend.length / Math.max(1, Math.min(4, Math.floor(legendW / colWidth))))
+  );
+  if (legendRows > maxLegendRows) {
+    legendRows = maxLegendRows;
+    colWidth = Math.min(52, legendW / Math.ceil(job.legend.length / legendRows));
+  }
+  const legendLabelW = Math.max(4, colWidth - 8);
   job.legend.forEach((entry, i) => {
     const col = Math.floor(i / legendRows);
     const rowIdx = i % legendRows;
@@ -523,13 +542,8 @@ export async function generateMapPdf(job: PrintJob): Promise<void> {
       pdf.setLineDashPattern([], 0);
     }
     pdf.setTextColor(60, 60, 60);
-    pdf.text(entry.label, x + 6.5, y);
+    pdf.text(pdf.splitTextToSize(entry.label, legendLabelW)[0] as string, x + 6.5, y);
   });
-
-  // Scale bar (bottom right of the footer strip)
-  const bar = niceScaleBar(groundFtAcross);
-  const barMm = (bar.feet / groundFtAcross) * m.w;
-  const barX = m.x + m.w - barMm;
 
   // Maintenance issues in the frame: a compact text list to the right
   // of the legend columns when it fits, else on a second page.

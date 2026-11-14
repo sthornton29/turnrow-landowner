@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 
 // "Also called": the historical names a family uses for a tract ("View
 // Celeste", "the Martin homeplace") that deeds print and the property
@@ -33,7 +34,11 @@ export default function PropertyAliases({
       .insert({ organization_id: orgId, property_id: propertyId, alias });
     setBusy(false);
     if (err) {
-      setError(err.message.includes("duplicate") ? "Already recorded." : err.message);
+      setError(
+        err.message.includes("duplicate")
+          ? "Already recorded."
+          : friendlyDbError(err, "Could not add that name. Please try again.")
+      );
       return;
     }
     setDraft("");

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl, { GeoJSONSource, MapMouseEvent } from "mapbox-gl";
 import type { Feature, FeatureCollection } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { bboxOf, labelPointOf, toMultiPolygon } from "@/lib/geo/normalize";
+import { fitBoundsOf, labelPointOf, toMultiPolygon } from "@/lib/geo/normalize";
 
 export interface SearchMapFeature {
   localId: string;
@@ -238,7 +238,7 @@ export default function CountySearchMap({
     const map = mapRef.current;
     if (map && loadedRef.current && features.length !== countRef.current) {
       countRef.current = features.length;
-      const box = bboxOf(features.map((f) => f.geometry));
+      const box = fitBoundsOf(features.map((f) => f.geometry));
       if (box) map.fitBounds(box, { padding: 40, duration: 300 });
     }
   }, [features]);
@@ -253,7 +253,7 @@ export default function CountySearchMap({
     if (highlightedId) {
       const feature = features.find((f) => f.localId === highlightedId);
       if (feature) {
-        const box = bboxOf([feature.geometry]);
+        const box = fitBoundsOf([feature.geometry]);
         if (box) map.fitBounds(box, { padding: 100, maxZoom: 16, duration: 400 });
       }
     }

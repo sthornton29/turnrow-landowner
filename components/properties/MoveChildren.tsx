@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatNumber } from "@/lib/format";
 
 // Bulk-move a property's children (parcels, fields, timber stands,
@@ -54,7 +55,7 @@ export default function MoveChildren({
       .in("id", Array.from(selected));
     setBusy(false);
     if (err) {
-      setError("Could not move: " + err.message);
+      setError(friendlyDbError(err, "Could not move those. Please try again."));
       return;
     }
     setSelected(new Set());

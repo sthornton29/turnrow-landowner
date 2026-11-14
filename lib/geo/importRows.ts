@@ -1,6 +1,7 @@
 import type { Geometry, MultiPolygon } from "geojson";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AssetType, EntityType } from "@/types/db";
+import { friendlyDbError } from "@/lib/dbErrors";
 import type { FeatureKind, ParseResult } from "./parse";
 import { approxAcres } from "./normalize";
 import { suggestPropertyId } from "./propertyMatch";
@@ -142,6 +143,24 @@ export async function saveImportRows(
     return error;
   }
 
+  // Insert-then-set-geometry is two steps. When the shape fails after
+  // the row went in, take the row back out so nothing is left behind
+  // without a shape and a retry does not add a second copy.
+  async function undoInsert(
+    table: string,
+    id: string,
+    name: string,
+    gErr: { code?: string; message?: string }
+  ) {
+    const { error: delErr } = await supabase.from(table).delete().eq("id", id);
+    const why = friendlyDbError(gErr, "Its shape could not be stored.");
+    failures.push(
+      delErr
+        ? `${name}: ${why} A record named "${name}" was left with no shape; delete it before trying again.`
+        : `${name}: nothing was saved. ${why}`
+    );
+  }
+
   function resolveProperty(r: ImportRow): string | null {
     if (r.propertyRef.startsWith("existing:")) {
       return r.propertyRef.slice("existing:".length);
@@ -160,12 +179,12 @@ export async function saveImportRows(
       .select("id")
       .single();
     if (error || !data) {
-      failures.push(`${r.name}: ${error?.message ?? "insert failed"}`);
+      failures.push(`${r.name}: ${friendlyDbError(error, "It could not be saved.")}`);
       continue;
     }
     const gErr = await setGeometry("property", data.id, r.geometry);
     if (gErr) {
-      failures.push(`${r.name}: geometry failed (${gErr.message})`);
+      await undoInsert("properties", data.id, r.name, gErr);
       continue;
     }
     newPropertyIds.set(r.localId, data.id);
@@ -198,12 +217,12 @@ export async function saveImportRows(
       .select("id")
       .single();
     if (error || !data) {
-      failures.push(`${r.name}: ${error?.message ?? "insert failed"}`);
+      failures.push(`${r.name}: ${friendlyDbError(error, "It could not be saved.")}`);
       continue;
     }
     const gErr = await setGeometry(r.entityType, data.id, r.geometry);
     if (gErr) {
-      failures.push(`${r.name}: geometry failed (${gErr.message})`);
+      await undoInsert(IMPORT_TABLE[r.entityType], data.id, r.name, gErr);
       continue;
     }
     savedLocalIds.push(r.localId);

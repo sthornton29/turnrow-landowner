@@ -17,10 +17,12 @@ export default function MapClient({
   orgId,
   orgName,
   focus,
+  isAdmin,
 }: {
   orgId: string;
   orgName: string | null;
   focus: SelectedFeature | null;
+  isAdmin: boolean;
 }) {
   if (!process.env.NEXT_PUBLIC_MAPBOX_TOKEN) {
     return (
@@ -29,5 +31,5 @@ export default function MapClient({
       </div>
     );
   }
-  return <MapView orgId={orgId} orgName={orgName} focus={focus} />;
+  return <MapView orgId={orgId} orgName={orgName} focus={focus} isAdmin={isAdmin} />;
 }

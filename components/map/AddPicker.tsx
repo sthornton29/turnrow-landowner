@@ -293,7 +293,11 @@ export default function AddPicker({
   onPickPivot,
   onPickImport,
   onCancel,
+  canAddProperty = true,
 }: {
+  // False for members who are not admins: a new property is an admin's
+  // to create (theirs would be refused on save), so the card is left out.
+  canAddProperty?: boolean;
   onPickDraw: (type: DrawType) => void;
   onPickAsset: (assetType: AssetType, placement: AssetPlacement) => void;
   onPickPivot: () => void;
@@ -339,13 +343,13 @@ export default function AddPicker({
     () =>
       SECTIONS.map((s) => ({
         ...s,
-        items: q
-          ? s.items.filter(
-              (i) => i.label.toLowerCase().includes(q) || i.hint.toLowerCase().includes(q)
-            )
-          : s.items,
+        items: s.items.filter(
+          (i) =>
+            (canAddProperty || i.key !== "property") &&
+            (!q || i.label.toLowerCase().includes(q) || i.hint.toLowerCase().includes(q))
+        ),
       })).filter((s) => s.items.length > 0),
-    [q]
+    [q, canAddProperty]
   );
 
   const round = assetType ? ROUND_ASSET_TYPES.includes(assetType) : false;

@@ -26,7 +26,7 @@ export default async function MapPage({
 }: {
   searchParams: Promise<{ focus?: string }>;
 }) {
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
   const { focus: focusParam } = await searchParams;
   const { data: org } = await supabase
     .from("organizations")
@@ -47,6 +47,7 @@ export default async function MapPage({
       orgId={profile.organization_id!}
       orgName={org?.name ?? null}
       focus={focus}
+      isAdmin={isAdmin}
     />
   );
 }

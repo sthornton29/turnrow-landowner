@@ -10,6 +10,7 @@ import {
   easementShowsElevation,
   easementShowsProgram,
 } from "@/lib/easements";
+import { NO_ENTITY } from "@/lib/entities";
 import type {
   EasementRelationship,
   EasementType,
@@ -35,6 +36,8 @@ export interface NewBoundaryPayload {
   propertyId: string | null; // required for parcel/field/timber_stand
   county: string | null;
   state: string | null;
+  // New property only: the entity that holds it (null = no entity).
+  entityId: string | null;
   // Timber stand details, saved with the stand in one step (no
   // post-save trip to the detail page). Only standType is required.
   standType: StandType | null;
@@ -85,6 +88,8 @@ export default function NewBoundaryDialog({
   areaCount = 1,
   properties,
   suggestedPropertyId = null,
+  entities = [],
+  isAdmin = false,
   saving,
   error,
   onSave,
@@ -102,6 +107,11 @@ export default function NewBoundaryDialog({
   areaCount?: number;
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
+  // The holding entities, for a new property's "Held by" choice.
+  entities?: Array<{ id: string; name: string }>;
+  // Members who are not admins cannot save an easement with no property
+  // (row level security refuses it), so for them it is required.
+  isAdmin?: boolean;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewBoundaryPayload) => void;
@@ -111,9 +121,12 @@ export default function NewBoundaryDialog({
   hidden?: boolean;
 }) {
   const entityType = fixedType;
-  const [propertyId, setPropertyId] = useState(
-    suggestedPropertyId ?? properties[0]?.id ?? ""
-  );
+  // Starts on the property the shape sits in, when there is one;
+  // otherwise empty, so the choice is made rather than defaulted to
+  // whichever property comes first in the alphabet.
+  const [propertyId, setPropertyId] = useState(suggestedPropertyId ?? "");
+  // New property: which entity holds it. "" = not chosen yet.
+  const [entityChoice, setEntityChoice] = useState("");
   // Timber stand fields: state (not form values) so they survive the
   // whole multi-area session like name/property do.
   const [standType, setStandType] = useState<StandType | null>(null);
@@ -124,6 +137,8 @@ export default function NewBoundaryDialog({
   const isEasement = entityType === "easement";
   // Easements often cross property lines, so their property is optional.
   const needsProperty = entityType !== "property" && !isEasement;
+  // Optional for an admin only (see isAdmin above).
+  const propertyRequired = needsProperty || !isAdmin;
   const isTimber = entityType === "timber_stand";
 
   function pickStandType(t: StandType) {
@@ -153,6 +168,10 @@ export default function NewBoundaryDialog({
           : null,
       county: str("county"),
       state: str("state"),
+      entityId:
+        entityType === "property" && entityChoice !== "" && entityChoice !== NO_ENTITY
+          ? entityChoice
+          : null,
       standType: isTimber ? standType : null,
       species: isTimber ? species.trim() || null : null,
       yearEstablished: isTimber ? num("year_established") : null,
@@ -420,7 +439,7 @@ export default function NewBoundaryDialog({
         {needsProperty || isEasement ? (
           <div>
             <label className={labelClass}>
-              Property{isEasement ? " (optional; easements cross lines)" : ""}
+              Property{isEasement && !propertyRequired ? " (optional; easements cross lines)" : ""}
               {suggestedPropertyId && propertyId === suggestedPropertyId ? (
                 <span
                   className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700"
@@ -437,12 +456,12 @@ export default function NewBoundaryDialog({
             ) : (
               <select
                 name="property_id"
-                required={!isEasement}
+                required={propertyRequired}
                 value={propertyId}
                 onChange={(e) => setPropertyId(e.target.value)}
                 className={inputClass}
               >
-                {isEasement ? <option value="">None</option> : null}
+                <option value="">{propertyRequired ? "Choose a property..." : "None"}</option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -452,16 +471,46 @@ export default function NewBoundaryDialog({
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className={labelClass}>County</label>
-              <input name="county" className={inputClass} />
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelClass}>County</label>
+                <input name="county" className={inputClass} />
+              </div>
+              <div>
+                <label className={labelClass}>State</label>
+                <input name="state" className={inputClass} />
+              </div>
             </div>
-            <div>
-              <label className={labelClass}>State</label>
-              <input name="state" className={inputClass} />
-            </div>
-          </div>
+            {/* Who holds the new property. Asked for, not defaulted:
+                family members who are not admins see a property only
+                through its entity. */}
+            {entities.length > 0 ? (
+              <div>
+                <label className={labelClass}>Held by</label>
+                <select
+                  required
+                  value={entityChoice}
+                  onChange={(e) => setEntityChoice(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Choose an entity...</option>
+                  {entities.map((entity) => (
+                    <option key={entity.id} value={entity.id}>
+                      {entity.name}
+                    </option>
+                  ))}
+                  <option value={NO_ENTITY}>No entity</option>
+                </select>
+                {entityChoice === NO_ENTITY ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    With no entity, only admins will see this property.
+                    Family members see a property through its entity.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </>
         )}
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}

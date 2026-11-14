@@ -33,6 +33,7 @@ export default function NewIssueDialog({
   approxAcres = null,
   properties,
   suggestedPropertyId = null,
+  isAdmin = false,
   saving,
   error,
   onSave,
@@ -43,6 +44,9 @@ export default function NewIssueDialog({
   approxAcres?: number | null;
   properties: PropertyGeo[];
   suggestedPropertyId?: string | null;
+  // Members who are not admins cannot save an issue with no property
+  // (row level security refuses it), so for them it is required.
+  isAdmin?: boolean;
   saving: boolean;
   error: string | null;
   onSave: (payload: NewIssuePayload) => void;
@@ -123,7 +127,7 @@ export default function NewIssueDialog({
         </div>
         <div>
           <label className={labelClass}>
-            Property (optional)
+            Property{isAdmin ? " (optional)" : ""}
             {suggestedPropertyId && propertyId === suggestedPropertyId ? (
               <span className="ml-1.5 rounded-full bg-kelly-100 px-2 py-0.5 text-[10px] font-medium text-kelly-700">
                 Suggested from location
@@ -131,11 +135,12 @@ export default function NewIssueDialog({
             ) : null}
           </label>
           <select
+            required={!isAdmin}
             value={propertyId}
             onChange={(e) => setPropertyId(e.target.value)}
             className={inputClass}
           >
-            <option value="">None</option>
+            <option value="">{isAdmin ? "None" : "Choose a property..."}</option>
             {properties.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

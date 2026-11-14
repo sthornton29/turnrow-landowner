@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatNumber } from "@/lib/format";
+import { formatAcres, plural } from "@/lib/format";
 import { ENTITY_TYPE_LABELS, NO_ENTITY } from "@/lib/entities";
 import PropertySectionTabs from "@/components/entities/PropertySectionTabs";
 import type { LandEntity } from "@/types/db";
-import { createProperty } from "./actions";
+import NewPropertyForm from "./NewPropertyForm";
 
 export const metadata = { title: "Properties" };
 
@@ -13,7 +13,7 @@ export default async function PropertiesPage({
 }: {
   searchParams: Promise<{ view?: string }>;
 }) {
-  const { supabase } = await requireOrg();
+  const { supabase, isAdmin } = await requireOrg();
   const { view } = await searchParams;
 
   const [
@@ -46,6 +46,9 @@ export default async function PropertiesPage({
   }
 
   const totalAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
+  // Acres come from the drawn boundary. A property without one has no
+  // acres yet (null), which must not print as "0.0".
+  const noBoundaryCount = (properties ?? []).filter((p) => p.acres === null).length;
   const entityList = (entities ?? []) as LandEntity[];
   const hasEntities = entityList.length > 0;
   const entityName = new Map(entityList.map((e) => [e.id, e.name]));
@@ -65,15 +68,15 @@ export default async function PropertiesPage({
         <div className="flex items-baseline justify-between gap-2">
           <span className="font-semibold text-gray-900">{p.name}</span>
           <span className="whitespace-nowrap text-sm font-medium text-pine-900">
-            {formatAcres(p.acres)} ac
+            {p.acres === null ? "No boundary yet" : `${formatAcres(p.acres)} ac`}
           </span>
         </div>
         <p className="mt-0.5 text-sm text-gray-500">
           {[p.county, p.state].filter(Boolean).join(", ") || "No county set"}
           {" · "}
-          {formatNumber(parcelCount.get(p.id) ?? 0)} parcels
+          {plural(parcelCount.get(p.id) ?? 0, "parcel")}
           {" · "}
-          {formatNumber(fieldCount.get(p.id) ?? 0)} ag fields (
+          {plural(fieldCount.get(p.id) ?? 0, "ag field")} (
           {formatAcres(fieldAcres.get(p.id) ?? 0)} ac)
           {(p.fsa_numbers ?? []).length > 0
             ? ` · FSA ${(p.fsa_numbers as string[]).join(", ")}`
@@ -109,8 +112,11 @@ export default async function PropertiesPage({
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Properties</h1>
           <p className="mt-0.5 text-sm text-gray-600">
-            {formatNumber((properties ?? []).length)} properties,{" "}
+            {plural((properties ?? []).length, "property", "properties")},{" "}
             {formatAcres(totalAcres)} total acres
+            {noBoundaryCount > 0
+              ? ` (${plural(noBoundaryCount, "property", "properties")} with no boundary yet)`
+              : ""}
           </p>
         </div>
         {hasEntities ? (
@@ -137,57 +143,26 @@ export default async function PropertiesPage({
         ) : null}
       </div>
 
-      {/* Create a property without a boundary (boundary can be added on the map) */}
-      <details className="rounded-xl border border-gray-200 bg-white">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-kelly-700">
-          + New property
-        </summary>
-        <form action={createProperty} className="flex flex-wrap gap-2 px-4 pb-4">
-          <input
-            name="name"
-            required
-            placeholder="Property name"
-            className="min-w-48 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+      {/* Create a property without a boundary (boundary can be added on
+          the map). Admins only: a new property is theirs to set up, and
+          anyone else's would be refused on save. */}
+      {isAdmin ? (
+        <details className="rounded-xl border border-gray-200 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-kelly-700">
+            + New property
+          </summary>
+          <NewPropertyForm
+            entities={entityList.map((e) => ({ id: e.id, name: e.name }))}
           />
-          <input
-            name="county"
-            placeholder="County"
-            className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="state"
-            placeholder="State"
-            className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="fsa_numbers"
-            placeholder="FSA numbers (comma separated, optional)"
-            className="min-w-56 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          {hasEntities ? (
-            <select
-              name="entity_id"
-              defaultValue=""
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="">No entity</option>
-              {entityList.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <button
-            type="submit"
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-          >
-            Create
-          </button>
-        </form>
-      </details>
+        </details>
+      ) : null}
 
-      {(properties ?? []).length === 0 ? (
+      {(properties ?? []).length === 0 && !isAdmin ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
+          No properties have been shared with you yet. Ask an admin on your
+          account to give you access.
+        </div>
+      ) : (properties ?? []).length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
           No properties yet. The fastest start:{" "}
           <Link
@@ -235,8 +210,7 @@ export default async function PropertiesPage({
                     ) : null}
                   </h2>
                   <span className="text-sm font-medium text-pine-900">
-                    {formatNumber(rows.length)} propert
-                    {rows.length === 1 ? "y" : "ies"} · {formatAcres(acres)} ac
+                    {plural(rows.length, "property", "properties")} · {formatAcres(acres)} ac
                   </span>
                 </div>
                 <ul className="space-y-2">{rows.map(propertyCard)}</ul>

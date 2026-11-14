@@ -40,6 +40,7 @@ export default function ImportPanel({
   rows,
   notes,
   properties,
+  canAddProperty = true,
   parsing,
   saving,
   result,
@@ -51,6 +52,9 @@ export default function ImportPanel({
   rows: ImportRow[];
   notes: string[];
   properties: Array<{ id: string; name: string }>;
+  // False for members who are not admins: a new property is an admin's
+  // to create, so "Property" is left out of the type choices.
+  canAddProperty?: boolean;
   parsing: boolean;
   saving: boolean;
   result: ImportSaveResult | null;
@@ -148,7 +152,9 @@ export default function ImportPanel({
                   }}
                   className={selectClass}
                 >
-                  {IMPORT_POLYGON_OPTIONS.map(([value, label]) => (
+                  {IMPORT_POLYGON_OPTIONS.filter(
+                    ([value]) => canAddProperty || value !== "property"
+                  ).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>

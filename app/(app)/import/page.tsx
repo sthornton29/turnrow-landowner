@@ -4,7 +4,7 @@ import ImportClient from "@/components/import/ImportClient";
 export const metadata = { title: "Import" };
 
 export default async function ImportPage() {
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   // Boundaries come along so the client can suggest which property each
   // imported feature belongs to by location.
@@ -17,6 +17,7 @@ export default async function ImportPage() {
     <ImportClient
       orgId={profile.organization_id!}
       existingProperties={properties ?? []}
+      isAdmin={isAdmin}
     />
   );
 }

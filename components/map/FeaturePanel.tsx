@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { uploadDocument } from "@/components/documents/classify";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import {
@@ -388,6 +389,7 @@ export default function FeaturePanel({
   farmActivity = null,
   assetChildren = null,
   parentAssetName = null,
+  isAdmin = false,
   onClose,
   onEditGeometry,
   onSplit,
@@ -411,6 +413,9 @@ export default function FeaturePanel({
   // name, resolved by the map from its loaded asset list.
   assetChildren?: Array<{ id: string; name: string; capacityBu: number | null }> | null;
   parentAssetName?: string | null;
+  // Only admins can delete a property (on its page); the link to that
+  // page is worded to match.
+  isAdmin?: boolean;
   onClose: () => void;
   onEditGeometry: () => void;
   onSplit?: () => void; // timber stands: split with a drawn line
@@ -481,7 +486,7 @@ export default function FeaturePanel({
       .eq("id", issue.id);
     setBusy(false);
     if (err) {
-      setError("Could not update the issue.");
+      setError(friendlyDbError(err, "Could not update the issue. Please try again."));
       return;
     }
     onChanged();
@@ -535,26 +540,59 @@ export default function FeaturePanel({
       .eq("id", row.id);
     setBusy(false);
     if (err) {
-      setError("Could not save changes.");
+      setError(friendlyDbError(err, "Could not save changes. Please try again."));
       return;
     }
     setEditing(false);
     onChanged();
   }
 
+  // Deleting a PROPERTY is not offered here: it takes everything on the
+  // property with it, so it lives on the property's own page, behind a
+  // full list of what goes and a typed confirmation (admins only).
   async function remove() {
+    if (entityType === "property") return;
     const isAsset = entityType === "asset";
+    // What the database removes along with the record (its cascading
+    // foreign keys), so the confirmation says what is really lost.
+    const goesWithIt: Partial<Record<EntityType, string>> = {
+      parcel:
+        "Its tax identifiers, valuation history, and valuation notices are deleted with it. Tax statements that list it are kept, but they will show it as not matched to a parcel.",
+      field:
+        "Its lease links are deleted with it (the leases themselves are kept), and any farm software field matched to it becomes unmatched.",
+      timber_stand:
+        "Its links to timber sales and to stand activity records are deleted with it (the sales and the activity records themselves are kept).",
+    };
     const message = isAsset
       ? "Mark this asset inactive? It stays in your records but comes off the map list as removed."
-      : `Delete this ${TYPE_LABEL[entityType].toLowerCase()}? This cannot be undone.`;
+      : [
+          `Delete this ${TYPE_LABEL[entityType].toLowerCase()}?`,
+          goesWithIt[entityType],
+          "This cannot be undone.",
+        ]
+          .filter(Boolean)
+          .join(goesWithIt[entityType] ? "\n\n" : " ");
     if (!window.confirm(message)) return;
     setBusy(true);
+    setError(null);
     const { error: err } = isAsset
       ? await supabase.from("assets").update({ is_active: false }).eq("id", row.id)
       : await supabase.from(ENTITY_TABLE[entityType]).delete().eq("id", row.id);
     setBusy(false);
     if (err) {
-      setError("Could not complete that. Properties with things attached must be emptied first.");
+      setError(
+        // A delete refused over a "required value" is a record still
+        // linked from somewhere else; "fill in the empty fields" would
+        // be the wrong thing to say about a delete.
+        !isAsset && err.code === "23502"
+          ? "This is still linked to other records, so it cannot be removed yet."
+          : friendlyDbError(
+              err,
+              isAsset
+                ? "Could not mark the asset inactive. Please try again."
+                : "Could not delete that. Please try again."
+            )
+      );
       return;
     }
     onClose();
@@ -932,14 +970,27 @@ export default function FeaturePanel({
                 KML
               </button>
             ) : null}
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
-            >
-              {entityType === "asset" ? "Deactivate" : "Delete"}
-            </button>
+            {entityType === "property" ? null : (
+              <button
+                onClick={remove}
+                disabled={busy}
+                className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+              >
+                {entityType === "asset" ? "Deactivate" : "Delete"}
+              </button>
+            )}
           </div>
+          {/* A property is never deleted from the map: that takes its
+              parcels, ag fields, timber, and records with it, so it is
+              done on the property's own page, which lists all of it. */}
+          {entityType === "property" ? (
+            <Link
+              href={detailPagePath("property", row.id)}
+              className="inline-block text-sm font-medium text-gray-600 hover:text-kelly-700 hover:underline"
+            >
+              {isAdmin ? "Manage or delete this property" : "Manage this property"} &rarr;
+            </Link>
+          ) : null}
           {photoNote ? (
             <p className={"text-sm " + (photoNote.endsWith("full page.") ? "text-gray-600" : "text-red-600")}>
               {photoNote}

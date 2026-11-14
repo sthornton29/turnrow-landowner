@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatNumber } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatNumber, plural, todayISO } from "@/lib/format";
 import { toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
 import { harvestIdentifiers } from "@/lib/taxIdentifiers";
@@ -51,6 +52,15 @@ function acresText(r: ResultRow): string {
   const acres = acresOf(r);
   if (!acres) return "no boundary returned";
   return `${formatAcres(acres.value)} ac${acres.estimated ? " est." : ""}`;
+}
+
+// County names as they are compared for duplicates: "Lawrence",
+// "lawrence county", and "LAWRENCE COUNTY " are one county.
+function countyKey(name: string | null | undefined): string {
+  return (name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+county$/, "");
 }
 
 interface KnownAlias {
@@ -100,6 +110,8 @@ export default function CountyImportClient({
     name: string;
     county: string | null;
     entity_id: string | null;
+    // False until the property has a boundary of its own.
+    has_boundary: boolean;
   }>;
   existingParcels: Array<{
     id: string;
@@ -171,9 +183,26 @@ export default function CountyImportClient({
   const [newEntityName, setNewEntityName] = useState("");
   const [newEntityType, setNewEntityType] = useState<LandEntityType>("llc");
   const [newEntityNotes, setNewEntityNotes] = useState("");
-  const [mergeOutline, setMergeOutline] = useState(true);
+  // "Set property boundary to merged outline". Its starting position
+  // depends on the target: ON for a property with no boundary yet, OFF
+  // for one that already has a boundary (hand-drawn or surveyed), which
+  // the merge would replace. A choice made by hand is remembered for the
+  // target it was made on and starts over when the target changes.
+  const [mergeChoice, setMergeChoice] = useState<{ target: string; on: boolean } | null>(null);
+  // Properties whose boundary was set from parcels earlier in this
+  // session: merging again loses nothing, so they keep the box ticked
+  // as more parcels are added.
+  const [mergedThisSession, setMergedThisSession] = useState<Set<string>>(new Set());
   const [dupChoices, setDupChoices] = useState<Record<string, "skip" | "update">>({});
   const [importing, setImporting] = useState(false);
+
+  const mergeTarget = assignMode === "new" ? "new" : propertyId;
+  const targetProperty =
+    assignMode === "existing" ? (localProperties.find((p) => p.id === propertyId) ?? null) : null;
+  const targetHasOwnBoundary =
+    !!targetProperty?.has_boundary && !mergedThisSession.has(targetProperty.id);
+  const mergeOutline =
+    mergeChoice && mergeChoice.target === mergeTarget ? mergeChoice.on : !targetHasOwnBoundary;
 
   const service = services.find((s) => s.id === serviceId) ?? null;
   const rowById = useMemo(
@@ -480,12 +509,14 @@ export default function CountyImportClient({
   const duplicates = useMemo(() => {
     if (!service) return new Map<string, { id: string; parcel_number: string }>();
     const map = new Map<string, { id: string; parcel_number: string }>();
-    const county = service.county.toLowerCase();
+    const county = countyKey(service.county);
     const pool = [...existingParcels, ...sessionParcels].filter(
-      (p) => (p.county ?? "").toLowerCase() === county || !p.county
+      (p) => countyKey(p.county) === county || !p.county
     );
     for (const row of selectedRows) {
       const norm = normalizeParcelNumber(row.parcel_number);
+      // A row with no parcel number cannot be matched to anything.
+      if (!norm) continue;
       const hit = pool.find((p) => normalizeParcelNumber(p.parcel_number) === norm);
       if (hit) map.set(row.localId, hit);
     }
@@ -498,10 +529,10 @@ export default function CountyImportClient({
   const alreadyImported = useMemo(() => {
     const set = new Set<string>();
     if (!service) return set;
-    const county = service.county.toLowerCase();
+    const county = countyKey(service.county);
     const normPool = new Set(
       [...existingParcels, ...sessionParcels]
-        .filter((p) => (p.county ?? "").toLowerCase() === county || !p.county)
+        .filter((p) => countyKey(p.county) === county || !p.county)
         .map((p) => normalizeParcelNumber(p.parcel_number))
     );
     for (const r of results) {
@@ -552,24 +583,79 @@ export default function CountyImportClient({
         onConflict: "organization_id,normalized_alias",
         ignoreDuplicates: true,
       });
-    if (aliasErr) failures.push("Owner aliases: " + aliasErr.message);
+    if (aliasErr) {
+      failures.push(
+        "Owner names: " + friendlyDbError(aliasErr, "they could not be remembered for next time.")
+      );
+    }
   }
 
   async function runImport() {
-    if (!service || selectedRows.length === 0) return;
-    setImporting(true);
+    if (!service || selectedRows.length === 0 || importing) return;
     setError(null);
+
+    // Check everything BEFORE anything is created, so fixing a mistake
+    // and pressing the button again never leaves a spare entity or an
+    // empty property behind.
+    if (importEntityId === ENTITY_NEW && !newEntityName.trim()) {
+      setError("Name the new entity.");
+      return;
+    }
+    if (assignMode === "new" && !newPropertyName.trim()) {
+      setError("Name the new property.");
+      return;
+    }
+    if (assignMode === "existing" && !propertyId) {
+      setError("Pick a property.");
+      return;
+    }
+
+    // Selection already blocks boundary-less rows; this narrows the type.
+    const importRows = selectedRows.filter(
+      (r): r is ResultRow & { multiPolygon: MultiPolygon } =>
+        r.multiPolygon !== null
+    );
+    // What this click will really do: parcels to add, and parcels already
+    // in the records whose geometry was marked Update. A parcel number
+    // that appears twice among the selected rows is added once.
+    const toAdd: typeof importRows = [];
+    const toUpdate: Array<{ row: (typeof importRows)[number]; existingId: string }> = [];
+    const numbersInBatch = new Set<string>();
+    let repeats = 0;
+    for (const row of importRows) {
+      const dup = duplicates.get(row.localId);
+      if (dup) {
+        if ((dupChoices[row.localId] ?? "skip") === "update") {
+          toUpdate.push({ row, existingId: dup.id });
+        }
+        continue;
+      }
+      const norm = normalizeParcelNumber(row.parcel_number);
+      if (norm) {
+        if (numbersInBatch.has(norm)) {
+          repeats++;
+          continue;
+        }
+        numbersInBatch.add(norm);
+      }
+      toAdd.push(row);
+    }
+    if (toAdd.length === 0 && toUpdate.length === 0) {
+      setError("Nothing imported (all selected parcels were skipped duplicates).");
+      return;
+    }
+    // A new property is created only when a parcel will go into it; with
+    // nothing to add there is no property to hold an entity either.
+    const hasTarget = assignMode === "existing" || toAdd.length > 0;
+    const typedPropertyName = newPropertyName.trim();
+
+    setImporting(true);
 
     // Resolve the entity choice. The ONLY way an entity is created here
     // is the explicit create form; null means assign nothing (and an
     // existing property keeps whatever entity it already has).
     let chosenEntityId: string | null = null;
-    if (importEntityId === ENTITY_NEW) {
-      if (!newEntityName.trim()) {
-        setError("Name the new entity.");
-        setImporting(false);
-        return;
-      }
+    if (hasTarget && importEntityId === ENTITY_NEW) {
       const { data, error: err } = await supabase
         .from("entities")
         .insert({
@@ -581,7 +667,7 @@ export default function CountyImportClient({
         .select("id, name")
         .single();
       if (err || !data) {
-        setError("Could not create the entity: " + (err?.message ?? ""));
+        setError(friendlyDbError(err, "Could not create the entity. Please try again."));
         setImporting(false);
         return;
       }
@@ -591,24 +677,24 @@ export default function CountyImportClient({
           a.name.localeCompare(b.name)
         )
       );
-    } else if (importEntityId !== "") {
+      // It exists from here on: if a later step fails, a second try
+      // picks this entity instead of creating it again.
+      setImportEntityId(data.id);
+      setNewEntityName("");
+      setNewEntityNotes("");
+    } else if (hasTarget && importEntityId !== "" && importEntityId !== ENTITY_NEW) {
       chosenEntityId = importEntityId;
     }
 
     // Resolve the target property
-    let targetPropertyId = propertyId;
+    let targetPropertyId: string | null = assignMode === "existing" ? propertyId : null;
     let createdProperty = false;
-    if (assignMode === "new") {
-      if (!newPropertyName.trim()) {
-        setError("Name the new property.");
-        setImporting(false);
-        return;
-      }
+    if (assignMode === "new" && toAdd.length > 0) {
       const { data, error: err } = await supabase
         .from("properties")
         .insert({
           organization_id: orgId,
-          name: newPropertyName.trim(),
+          name: typedPropertyName,
           county: service.county,
           state: service.state,
           entity_id: chosenEntityId,
@@ -616,20 +702,33 @@ export default function CountyImportClient({
         .select("id")
         .single();
       if (err || !data) {
-        setError("Could not create the property: " + (err?.message ?? ""));
+        setError(friendlyDbError(err, "Could not create the property. Please try again."));
         setImporting(false);
         return;
       }
-      targetPropertyId = data.id;
+      const newPropertyId: string = data.id;
+      targetPropertyId = newPropertyId;
       createdProperty = true;
-    }
-    if (!targetPropertyId) {
-      setError("Pick a property.");
-      setImporting(false);
-      return;
+      // Same rule as the entity: the form now points at the property
+      // that exists, so a second try adds to it instead of making another.
+      setLocalProperties((list) =>
+        [
+          ...list,
+          {
+            id: newPropertyId,
+            name: typedPropertyName,
+            county: service.county,
+            entity_id: chosenEntityId,
+            has_boundary: false,
+          },
+        ].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setAssignMode("existing");
+      setPropertyId(newPropertyId);
+      setNewPropertyName("");
     }
 
-    const source = `Imported from ${service.display_name} county records on ${new Date().toISOString().slice(0, 10)}`;
+    const source = `Imported from ${service.display_name} county records on ${todayISO()}`;
     // Every identifier the county's record carries (PPIN, folio, ...)
     // lands in the parcel's identifier store so tax statements match on
     // the county's own numbers. The parcel number itself mirrors by trigger.
@@ -654,50 +753,48 @@ export default function CountyImportClient({
     };
     const failures: string[] = [];
     let importedCount = 0;
+    let addedCount = 0;
     const importedNow: string[] = [];
     const newSessionParcels: typeof sessionParcels = [];
 
-    // Selection already blocks boundary-less rows; this narrows the type.
-    const importRows = selectedRows.filter(
-      (r): r is ResultRow & { multiPolygon: MultiPolygon } =>
-        r.multiPolygon !== null
-    );
-    for (const row of importRows) {
-      const dup = duplicates.get(row.localId);
-      if (dup) {
-        const choice = dupChoices[row.localId] ?? "skip";
-        if (choice === "skip") continue;
-        // Update geometry (and provenance) on the existing parcel
-        const { error: gErr } = await supabase.rpc("set_geometry", {
-          p_entity_type: "parcel",
-          p_entity_id: dup.id,
-          p_geojson: row.multiPolygon,
-        });
-        if (gErr) {
-          failures.push(`${row.parcel_number}: ${gErr.message}`);
-          continue;
-        }
-        await supabase
-          .from("parcels")
-          .update({
-            deeded_acres: row.deeded_acres,
-            source,
-            attributes: row.attributes ?? {},
-            attributes_source: service.display_name,
-            attributes_fetched_at: new Date().toISOString(),
-          })
-          .eq("id", dup.id);
-        await saveHarvestedIdentifiers(dup.id, row.attributes);
-        importedCount++;
-        importedNow.push(row.localId);
+    // Parcels already in the records, marked Update: refresh the
+    // geometry (and provenance) on the existing parcel.
+    for (const { row, existingId } of toUpdate) {
+      const { error: gErr } = await supabase.rpc("set_geometry", {
+        p_entity_type: "parcel",
+        p_entity_id: existingId,
+        p_geojson: row.multiPolygon,
+      });
+      if (gErr) {
+        failures.push(
+          `${row.parcel_number}: ${friendlyDbError(gErr, "its boundary could not be updated.")}`
+        );
         continue;
       }
+      await supabase
+        .from("parcels")
+        .update({
+          deeded_acres: row.deeded_acres,
+          source,
+          attributes: row.attributes ?? {},
+          attributes_source: service.display_name,
+          attributes_fetched_at: new Date().toISOString(),
+        })
+        .eq("id", existingId);
+      await saveHarvestedIdentifiers(existingId, row.attributes);
+      importedCount++;
+      importedNow.push(row.localId);
+    }
 
+    // New parcels, into the target property (there is always one when
+    // there is anything to add).
+    const addTo = targetPropertyId ?? "";
+    for (const row of addTo ? toAdd : []) {
       const { data, error: err } = await supabase
         .from("parcels")
         .insert({
           organization_id: orgId,
-          property_id: targetPropertyId,
+          property_id: addTo,
           parcel_number: row.parcel_number || "UNKNOWN",
           county: service.county,
           notes: row.owner_name ? `Owner as recorded: ${row.owner_name}` : null,
@@ -710,42 +807,68 @@ export default function CountyImportClient({
         .select("id")
         .single();
       if (err || !data) {
-        failures.push(`${row.parcel_number}: ${err?.message ?? "insert failed"}`);
+        failures.push(
+          `${row.parcel_number}: ${friendlyDbError(err, "it could not be saved.")}`
+        );
         continue;
       }
-      await saveHarvestedIdentifiers(data.id, row.attributes);
       const { error: gErr } = await supabase.rpc("set_geometry", {
         p_entity_type: "parcel",
         p_entity_id: data.id,
         p_geojson: row.multiPolygon,
       });
-      if (gErr) failures.push(`${row.parcel_number}: geometry failed (${gErr.message})`);
+      if (gErr) {
+        // The parcel went in but its boundary did not: take it back out
+        // so nothing is left without a shape and a second try does not
+        // add a second copy.
+        const { error: delErr } = await supabase.from("parcels").delete().eq("id", data.id);
+        const why = friendlyDbError(gErr, "Its boundary could not be stored.");
+        failures.push(
+          delErr
+            ? `${row.parcel_number}: ${why} It was left in your records with no boundary; delete it before trying again.`
+            : `${row.parcel_number}: nothing was saved. ${why}`
+        );
+        continue;
+      }
+      await saveHarvestedIdentifiers(data.id, row.attributes);
       importedCount++;
+      addedCount++;
       importedNow.push(row.localId);
       newSessionParcels.push({
         id: data.id,
         parcel_number: row.parcel_number || "UNKNOWN",
         county: service.county,
-        property_id: targetPropertyId,
+        property_id: addTo,
       });
     }
 
     // Merged property outline
-    if (mergeOutline && importedCount > 0) {
+    if (targetPropertyId && mergeOutline && importedCount > 0) {
       const { error: mErr } = await supabase.rpc("set_property_boundary_from_parcels", {
         p_property_id: targetPropertyId,
       });
-      if (mErr) failures.push("Property outline: " + mErr.message);
+      if (mErr) {
+        failures.push(
+          "Property outline: " + friendlyDbError(mErr, "it could not be set from the parcels.")
+        );
+      } else {
+        const mergedId = targetPropertyId;
+        setMergedThisSession((prev) => new Set(prev).add(mergedId));
+      }
     }
 
-    if (chosenEntityId && importedCount > 0) {
+    if (targetPropertyId && chosenEntityId && importedCount > 0) {
       // Assign the chosen entity to the target property (never clears an
       // existing assignment; No entity means leave things alone).
       const { error: entErr } = await supabase
         .from("properties")
         .update({ entity_id: chosenEntityId })
         .eq("id", targetPropertyId);
-      if (entErr) failures.push("Property entity: " + entErr.message);
+      if (entErr) {
+        failures.push(
+          "Property entity: " + friendlyDbError(entErr, "it could not be assigned.")
+        );
+      }
       // Remember the imported groups' spellings as aliases of that entity.
       if (searchType === "entity") {
         await saveAliasesForImport(chosenEntityId, failures);
@@ -762,34 +885,23 @@ export default function CountyImportClient({
       return sum + (r ? (acresOf(r)?.value ?? 0) : 0);
     }, 0);
     const propName = createdProperty
-      ? newPropertyName.trim()
+      ? typedPropertyName
       : (localProperties.find((p) => p.id === targetPropertyId)?.name ??
         "the property");
 
     if (importedNow.length > 0) {
       setImportedIds((prev) => new Set([...prev, ...importedNow]));
       setSessionParcels((prev) => [...prev, ...newSessionParcels]);
-      setImportedPropertyIds((prev) => new Set(prev).add(targetPropertyId));
-      if (createdProperty) {
-        setLocalProperties((list) =>
-          [
-            ...list,
-            {
-              id: targetPropertyId,
-              name: propName,
-              county: service.county,
-              entity_id: chosenEntityId,
-            },
-          ].sort((a, b) => a.name.localeCompare(b.name))
-        );
-        setAssignMode("existing");
-        setPropertyId(targetPropertyId);
-      } else if (chosenEntityId) {
-        setLocalProperties((list) =>
-          list.map((p) =>
-            p.id === targetPropertyId ? { ...p, entity_id: chosenEntityId } : p
-          )
-        );
+      if (targetPropertyId) {
+        const touchedId = targetPropertyId;
+        setImportedPropertyIds((prev) => new Set(prev).add(touchedId));
+        if (chosenEntityId) {
+          setLocalProperties((list) =>
+            list.map((p) =>
+              p.id === touchedId ? { ...p, entity_id: chosenEntityId } : p
+            )
+          );
+        }
       }
       setSelected(new Set());
       setDupChoices({});
@@ -800,9 +912,13 @@ export default function CountyImportClient({
       entityTouchedRef.current = false;
     }
 
+    const repeatNote =
+      repeats > 0
+        ? ` ${plural(repeats, "selected row")} repeated a parcel number already in this batch and ${repeats === 1 ? "was" : "were"} left out.`
+        : "";
     if (failures.length > 0) {
       setError(
-        `Imported ${importedCount}; some problems: ${failures.slice(0, 3).join("; ")}`
+        `Imported ${formatNumber(importedCount)}; some problems: ${failures.slice(0, 3).join("; ")}${repeatNote}`
       );
       return;
     }
@@ -810,11 +926,22 @@ export default function CountyImportClient({
       setError("Nothing imported (all selected parcels were skipped duplicates).");
       return;
     }
+    const updatedCount = importedCount - addedCount;
     setToast({
-      message: createdProperty
-        ? `Property "${propName}" created with ${formatNumber(importedCount)} parcel${importedCount === 1 ? "" : "s"}, ${formatAcres(acresNow)} acres`
-        : `${formatNumber(importedCount)} parcel${importedCount === 1 ? "" : "s"} added to ${propName}, ${formatAcres(acresNow)} acres`,
-      focus: `property:${targetPropertyId}`,
+      message:
+        (createdProperty
+          ? `Property "${propName}" created with ${plural(addedCount, "parcel")}, ${formatAcres(acresNow)} acres`
+          : targetPropertyId && addedCount > 0
+            ? `${plural(addedCount, "parcel")} added to ${propName}, ${formatAcres(acresNow)} acres`
+            : `${plural(updatedCount, "parcel")} updated, ${formatAcres(acresNow)} acres`) +
+        (updatedCount > 0 && addedCount > 0
+          ? `, and ${plural(updatedCount, "parcel")} already in your records updated`
+          : "") +
+        "." +
+        repeatNote,
+      focus: targetPropertyId
+        ? `property:${targetPropertyId}`
+        : `parcel:${toUpdate[0]?.existingId ?? ""}`,
     });
   }
 
@@ -954,12 +1081,21 @@ export default function CountyImportClient({
             <input
               type="checkbox"
               checked={mergeOutline}
-              onChange={(e) => setMergeOutline(e.target.checked)}
+              onChange={(e) => setMergeChoice({ target: mergeTarget, on: e.target.checked })}
               className="h-4 w-4 accent-kelly-500"
             />
             Set property boundary to merged outline
           </label>
         </div>
+        {/* The merge replaces whatever boundary the property has. For
+            one that was drawn or surveyed, that is said before it happens. */}
+        {mergeOutline && targetHasOwnBoundary && targetProperty ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            This replaces the boundary {targetProperty.name} has now with the
+            outline of its parcels. Leave the box unticked to keep the current
+            boundary.
+          </p>
+        ) : null}
 
         {/* Which entity holds this property. Suggest only: a known owner
             preselects its EXISTING entity; creation is always explicit. */}

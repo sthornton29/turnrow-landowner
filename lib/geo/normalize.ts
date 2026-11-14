@@ -87,6 +87,90 @@ export function bboxOf(
   return found ? [west, south, east, north] : null;
 }
 
+// True for a real longitude/latitude pair. A file in a projected grid
+// (state plane feet, Web Mercator meters) carries numbers in the
+// hundreds of thousands or millions instead.
+export function isLngLat(x: unknown, y: unknown): boolean {
+  return (
+    typeof x === "number" &&
+    typeof y === "number" &&
+    Number.isFinite(x) &&
+    Number.isFinite(y) &&
+    x >= -180 &&
+    x <= 180 &&
+    y >= -90 &&
+    y <= 90
+  );
+}
+
+function eachPosition(coords: unknown, fn: (x: number, y: number) => void): void {
+  if (!Array.isArray(coords)) return;
+  if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+    fn(coords[0], coords[1]);
+  } else {
+    for (const c of coords) eachPosition(c, fn);
+  }
+}
+
+// False when any position of the geometry is not a real
+// longitude/latitude pair (or the geometry has no positions at all).
+export function isLngLatGeometry(geometry: Geometry | null | undefined): boolean {
+  if (!geometry) return false;
+  if (geometry.type === "GeometryCollection") {
+    return geometry.geometries.length > 0 && geometry.geometries.every(isLngLatGeometry);
+  }
+  let any = false;
+  let ok = true;
+  eachPosition(geometry.coordinates, (x, y) => {
+    any = true;
+    if (!isLngLat(x, y)) ok = false;
+  });
+  return any && ok;
+}
+
+// The box to hand to map.fitBounds: bboxOf, but positions that are not a
+// real longitude/latitude are left out. Mapbox throws on a latitude past
+// 90, so one shape saved from a file in feet or meters would otherwise
+// break the map for everyone who opens it. Null when nothing usable.
+export function fitBoundsOf(
+  geometries: Array<Geometry | MultiPolygon | Polygon | null | undefined>
+): [number, number, number, number] | null {
+  let west = Infinity,
+    south = Infinity,
+    east = -Infinity,
+    north = -Infinity;
+  let found = false;
+  for (const g of geometries) {
+    if (!g || !("coordinates" in g)) continue;
+    eachPosition(g.coordinates, (x, y) => {
+      if (!isLngLat(x, y)) return;
+      west = Math.min(west, x);
+      south = Math.min(south, y);
+      east = Math.max(east, x);
+      north = Math.max(north, y);
+      found = true;
+    });
+  }
+  return found ? [west, south, east, north] : null;
+}
+
+// Every position cut down to [x, y]. KML carries a third (altitude)
+// value on every point, Google Earth always writes one, and this app's
+// own KML export writes ",0"; the database columns are two-dimensional.
+export function stripToXY<G extends Geometry>(geometry: G): G {
+  const strip = (c: unknown): unknown =>
+    Array.isArray(c)
+      ? typeof c[0] === "number"
+        ? c.slice(0, 2)
+        : c.map(strip)
+      : c;
+  const g: Geometry = geometry;
+  if (g.type === "GeometryCollection") {
+    return { ...g, geometries: g.geometries.map(stripToXY) } as unknown as G;
+  }
+  return { ...g, coordinates: strip(g.coordinates) } as unknown as G;
+}
+
 // Approximate centroid (average of the outer ring's vertices) for labels.
 export function labelPointOf(mp: MultiPolygon): [number, number] | null {
   // Use the largest polygon's outer ring.

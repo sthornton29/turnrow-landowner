@@ -30,6 +30,7 @@ const PreviewMap = dynamic(() => import("./PreviewMap"), { ssr: false });
 export default function ImportClient({
   orgId,
   existingProperties,
+  isAdmin = false,
 }: {
   orgId: string;
   existingProperties: Array<{
@@ -37,6 +38,9 @@ export default function ImportClient({
     name: string;
     boundary_geojson: MultiPolygon | null;
   }>;
+  // A new property is an admin's to create (anyone else's would be
+  // refused on save), so only admins are offered "Property" as a type.
+  isAdmin?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,7 +58,10 @@ export default function ImportClient({
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<ImportSaveResult | null>(null);
 
-  const defaultPolygonType = defaultPolygonTypeFor(existingProperties.length);
+  const defaultPolygonType = isAdmin ? defaultPolygonTypeFor(existingProperties.length) : "field";
+  const polygonOptions = IMPORT_POLYGON_OPTIONS.filter(
+    ([value]) => isAdmin || value !== "property"
+  );
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
@@ -207,7 +214,7 @@ export default function ImportClient({
           <div>
             <PreviewMap features={previewFeatures} />
             <p className="mt-1 text-xs text-gray-500">
-              White = property, gold = parcel, green = field, mint = timber,
+              White = property, gold = parcel, green = ag field, mint = timber,
               gray = road, blue = asset. Faded shapes are excluded.
             </p>
           </div>
@@ -245,7 +252,7 @@ export default function ImportClient({
                       }}
                       className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
                     >
-                      {IMPORT_POLYGON_OPTIONS.map(([value, label]) => (
+                      {polygonOptions.map(([value, label]) => (
                         <option key={value} value={value}>
                           {label}
                         </option>

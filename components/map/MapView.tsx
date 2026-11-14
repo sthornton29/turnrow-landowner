@@ -15,10 +15,12 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatAcres } from "@/lib/format";
 import {
   approxAcres,
   bboxOf,
+  fitBoundsOf,
   labelPointOf,
   toMultiLineString,
   toMultiPolygon,
@@ -149,6 +151,7 @@ import {
   type PrintLayerFlags,
 } from "./printPdf";
 import FeaturePanel, { ENTITY_TABLE } from "./FeaturePanel";
+import { countDrawPositions, pointEditMode, selectMode } from "./editModes";
 import ImportPanel, { importPreviewFC } from "./ImportPanel";
 import { rowsToExportFeatures } from "./exportFeatures";
 import NewBoundaryDialog, { type BoundaryType, type NewBoundaryPayload } from "./NewBoundaryDialog";
@@ -466,10 +469,16 @@ export default function MapView({
   orgId,
   orgName,
   focus,
+  isAdmin = false,
 }: {
   orgId: string;
   orgName?: string | null;
   focus?: SelectedFeature | null;
+  // Admins manage everything; other members see only the entities they
+  // were granted, and row level security refuses their writes to a
+  // property with no entity or to an asset or issue with no property.
+  // The save forms use this to hide what could not succeed.
+  isAdmin?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -490,6 +499,12 @@ export default function MapView({
   const [cemeteries, setCemeteries] = useState<CemeteryGeo[]>([]);
   const [issues, setIssues] = useState<MaintenanceIssueGeo[]>([]);
   const [loading, setLoading] = useState(true);
+  // A load that failed (weak signal) keeps whatever was on the map and
+  // shows a banner with Retry; it never reads as "Nothing on the map
+  // yet", not even once the banner is dismissed.
+  const [loadProblem, setLoadProblem] = useState<"none" | "failed" | "dismissed">("none");
+  // The basemap itself could not load (offline, bad token).
+  const [mapError, setMapError] = useState(false);
   const [cropsOn, setCropsOn] = useState(false);
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
   const [entityColorsOn, setEntityColorsOn] = useState(false);
@@ -561,6 +576,10 @@ export default function MapView({
     }
   }, [mapFilterExcluded]);
   const [fullscreen, setFullscreen] = useState(false);
+  // Phones only: the left control column is a panel behind the Layers
+  // button, closed until asked for. From md up the column always shows
+  // and this is ignored.
+  const [layersOpen, setLayersOpen] = useState(false);
 
   // Draw/save state. drawKind is the tool (polygon or line); the
   // session says what it becomes (fixed before drawing).
@@ -603,6 +622,9 @@ export default function MapView({
   const [drawingShape, setDrawingShape] = useState(false);
   const drawingShapeRef = useRef(setDrawingShape);
   drawingShapeRef.current = setDrawingShape;
+  // A point of the boundary being edited is selected (tapped): Delete
+  // point can take it out.
+  const [vertexSelected, setVertexSelected] = useState(false);
   // Per-shape acreage while drawing a boundary: the shape in progress,
   // each completed area, and the total (lib/geo/drawArea.ts). Refreshed
   // on every draw render; completed areas also get an on-map label.
@@ -765,7 +787,7 @@ export default function MapView({
 
   const loadData = useCallback(async () => {
     const currentYear = new Date().getFullYear();
-    const [p, pa, f, pas, w, ph, t, r, ue, a, mappings, farmData, projYields, connections, ents, cem, iss] = await Promise.all([
+    const loaded = await Promise.all([
       supabase.from("properties_geo").select("*").order("name"),
       supabase.from("parcels_geo").select("*").order("parcel_number"),
       supabase.from("fields_geo").select("*").order("name"),
@@ -786,20 +808,35 @@ export default function MapView({
       supabase.from("entities").select("id, name").order("name"),
       supabase.from("cemeteries_geo").select("*").order("name"),
       supabase.from("maintenance_issues_geo").select("*").order("created_at", { ascending: false }),
-    ]);
-    setEntities((ents.data as Array<{ id: string; name: string }>) ?? []);
-    setCemeteries((cem.data as CemeteryGeo[]) ?? []);
-    setIssues((iss.data as MaintenanceIssueGeo[]) ?? []);
-    setProperties((p.data as PropertyGeo[]) ?? []);
-    setParcels((pa.data as ParcelGeo[]) ?? []);
-    setFields((f.data as FieldGeo[]) ?? []);
-    setPastures((pas.data as PastureGeo[]) ?? []);
-    setWetlands((w.data as WetlandGeo[]) ?? []);
-    setPollinatorHabitats((ph.data as PollinatorHabitatGeo[]) ?? []);
-    setTimber((t.data as TimberStandGeo[]) ?? []);
-    setRoads((r.data as RoadGeo[]) ?? []);
-    setEasements((ue.data as EasementGeo[]) ?? []);
-    setAssets((a.data as AssetGeo[]) ?? []);
+    ]).catch(() => null);
+    if (!loaded) {
+      setLoadProblem("failed");
+      setLoading(false);
+      return;
+    }
+    const [p, pa, f, pas, w, ph, t, r, ue, a, mappings, farmData, projYields, connections, ents, cem, iss] = loaded;
+    // On a weak signal a query comes back with an error and no rows.
+    // A layer whose query failed keeps what it had: writing [] there
+    // would take every shape off the map and read as an empty account.
+    setLoadProblem(loaded.some((result) => result.error) ? "failed" : "none");
+    if (!ents.error) setEntities((ents.data as Array<{ id: string; name: string }>) ?? []);
+    if (!cem.error) setCemeteries((cem.data as CemeteryGeo[]) ?? []);
+    if (!iss.error) setIssues((iss.data as MaintenanceIssueGeo[]) ?? []);
+    if (!p.error) setProperties((p.data as PropertyGeo[]) ?? []);
+    if (!pa.error) setParcels((pa.data as ParcelGeo[]) ?? []);
+    if (!f.error) setFields((f.data as FieldGeo[]) ?? []);
+    if (!pas.error) setPastures((pas.data as PastureGeo[]) ?? []);
+    if (!w.error) setWetlands((w.data as WetlandGeo[]) ?? []);
+    if (!ph.error) setPollinatorHabitats((ph.data as PollinatorHabitatGeo[]) ?? []);
+    if (!t.error) setTimber((t.data as TimberStandGeo[]) ?? []);
+    if (!r.error) setRoads((r.data as RoadGeo[]) ?? []);
+    if (!ue.error) setEasements((ue.data as EasementGeo[]) ?? []);
+    if (!a.error) setAssets((a.data as AssetGeo[]) ?? []);
+    if (mappings.error || farmData.error || projYields.error || connections.error) {
+      // Farm activity is built from all four; keep the last good set.
+      setLoading(false);
+      return;
+    }
 
     // Current-year farm activity keyed to local fields / properties
     const connectionLabel = new Map(
@@ -1152,11 +1189,29 @@ export default function MapView({
 
     // keybindings off: Escape is handled by our discard-shape logic so
     // it never kills a whole multi-area session.
-    const draw = new MapboxDraw({ displayControlsDefault: false, keybindings: false });
+    // The two select modes are our own (./editModes.ts): a press on a
+    // shape's body never drags the whole boundary, the map pans instead.
+    const draw = new MapboxDraw({
+      displayControlsDefault: false,
+      keybindings: false,
+      modes: { ...MapboxDraw.modes, simple_select: selectMode, direct_select: pointEditMode },
+    });
     map.addControl(draw);
     drawRef.current = draw;
 
+    // A failed style load (offline, bad token) is otherwise a blank gray
+    // map with no explanation. Once the map is up, a tile that fails on
+    // a weak signal is routine and is not reported.
+    let styleUp = false;
+    map.on("error", (e) => {
+      // Mapbox stops logging errors once anything listens for them.
+      console.error(e.error);
+      if (!styleUp) setMapError(true);
+    });
+
     map.on("load", () => {
+      styleUp = true;
+      setMapError(false);
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       for (const id of [
         "properties", "parcels", "fields", "pastures", "wetlands", "pollinator-habitats",
@@ -1612,6 +1667,12 @@ export default function MapView({
       });
     }
 
+    // Delete point is offered only while a point is selected in the
+    // point editor; the draw tool reports that as its "trash" action.
+    map.on("draw.actionable", (e: { actions: { trash: boolean } }) => {
+      setVertexSelected(e.actions.trash && draw.getMode() === "direct_select");
+    });
+
     map.on("draw.create", (e: { features: Feature[] }) => {
       const geometry = e.features[0]?.geometry;
       if (!geometry) return;
@@ -1719,7 +1780,10 @@ export default function MapView({
     setData("print-ghost", { type: "FeatureCollection", features: ghostFeatures });
 
     if (!didFitRef.current) {
-      const box = bboxOf([
+      // fitBoundsOf, here and at every other fit: a shape whose
+      // coordinates are not longitude/latitude is left out of the box
+      // instead of making fitBounds throw for the whole organization.
+      const box = fitBoundsOf([
         ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
         ...pastures.map(geomOf), ...wetlands.map(geomOf), ...pollinatorHabitats.map(geomOf), ...timber.map(geomOf),
         ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
@@ -1803,7 +1867,7 @@ export default function MapView({
     if (!row) return;
     setSelected(focus);
     const g = geomOf(row);
-    const box = g ? bboxOf([g]) : null;
+    const box = g ? fitBoundsOf([g]) : null;
     if (box) {
       if (g?.type === "Point") {
         map.flyTo({ center: box.slice(0, 2) as [number, number], zoom: 16 });
@@ -1927,10 +1991,20 @@ export default function MapView({
     mapRef.current?.resize();
   }, [fullscreen]);
 
+  // On a phone the open Layers panel would sit on top of the drawing
+  // toolbar; it closes when a tool starts (Layers reopens it).
+  useEffect(() => {
+    if (mode !== "view") setLayersOpen(false);
+  }, [mode]);
+
   // ---------------------------------------------------------------- actions
 
   function resetDrawState() {
     drawRef.current?.deleteAll();
+    // deleteAll leaves a draw tool running on a shape that no longer
+    // exists (taps then do nothing); put the tool down too.
+    drawRef.current?.changeMode("simple_select");
+    setVertexSelected(false);
     setMode("view");
     setPendingPoly(null);
     setPendingLine(null);
@@ -1984,6 +2058,7 @@ export default function MapView({
   discardShapeRef.current = () => {
     const draw = drawRef.current;
     if (!draw) return;
+    const tool = draw.getMode();
     const keep = completedDrawIdsRef.current;
     for (const f of draw.getAll().features) {
       if (!keep.has(String(f.id))) draw.delete(String(f.id));
@@ -1997,6 +2072,7 @@ export default function MapView({
         setDrawingShape(false);
       } else {
         // Back to the save dialog with completed areas intact.
+        draw.changeMode("simple_select");
         setPendingExtraDraw(false);
         setDrawingShape(false);
       }
@@ -2005,6 +2081,13 @@ export default function MapView({
       if (drawKindRef.current === "line") draw.changeMode("draw_line_string");
       else draw.changeMode("draw_polygon");
       setDrawingShape(true);
+    } else if (tool === "draw_line_string") {
+      // The split line (or the first line of something that had none):
+      // the tool was drawing on the shape just removed and would ignore
+      // every tap from here on, so start it fresh.
+      draw.changeMode("draw_line_string");
+    } else if (tool === "draw_polygon") {
+      draw.changeMode("draw_polygon");
     } else {
       setDrawingShape(false);
     }
@@ -2023,6 +2106,16 @@ export default function MapView({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // The draw tool announces a finished shape (draw.create) from inside
+  // its own switch back to select mode, and that switch finishes after
+  // anything a handler sets, undoing it. A tool change made in answer to
+  // a finished shape goes through here so it happens once that is done.
+  function afterDrawSettles(change: (draw: MapboxDraw) => void) {
+    window.setTimeout(() => {
+      if (drawRef.current) change(drawRef.current);
+    }, 0);
+  }
+
   // ---- Add/cut an area with a drawn polygon ----
 
   function startBoundaryOp(op: "add" | "subtract") {
@@ -2031,6 +2124,7 @@ export default function MapView({
     boundaryOpRef.current = op;
     if (!editTargetRef.current) setPendingExtraDraw(true);
     setDrawingShape(true);
+    setVertexSelected(false);
     setEditHint(
       op === "add"
         ? "Draw the area to add (it does not need to touch). Double tap the last point to finish."
@@ -2089,7 +2183,14 @@ export default function MapView({
       draw.deleteAll();
       const ids = draw.add(asFeature(combined));
       completedDrawIdsRef.current = new Set(ids.map(String));
-      draw.changeMode("direct_select", { featureId: ids[0] });
+      // Back to the point editor (without this the combined shape has
+      // no points to drag until it is tapped twice).
+      const featureId = String(ids[0]);
+      afterDrawSettles((d) => {
+        if (editTargetRef.current && d.get(featureId)) {
+          d.changeMode("direct_select", { featureId });
+        }
+      });
       setSaveError(null);
       setEditHint("Drag the points to adjust, add or cut more, then press Save.");
     } else {
@@ -2272,7 +2373,7 @@ export default function MapView({
     setMode("circle");
     setCircleEdit({ assetId, assetType, params, existingDetails });
     if (map) {
-      const box = bboxOf([circlePolygon(params)]);
+      const box = fitBoundsOf([circlePolygon(params)]);
       if (box) map.fitBounds(box, { padding: 120, duration: 300, maxZoom: 19 });
     }
   }
@@ -2325,7 +2426,7 @@ export default function MapView({
       : await applyGeometry({ entityType: "asset", id: edit.assetId }, circlePolygon(edit.params));
     setSaving(false);
     if (dErr || gErr) {
-      setSaveError("Could not save the circle. " + (dErr?.message ?? gErr?.message ?? ""));
+      setSaveError(friendlyDbError(dErr ?? gErr, "Could not save the circle. Please try again."));
       return;
     }
     const sel: SelectedFeature = { entityType: "asset", id: edit.assetId };
@@ -2386,7 +2487,7 @@ export default function MapView({
     setSaveError(null);
     setMode("pivot");
     setPivotEdit({ assetId: row.id, params });
-    const box = bboxOf([compositePivotGeometry(params).watered]);
+    const box = fitBoundsOf([compositePivotGeometry(params).watered]);
     if (box) map.fitBounds(box, { padding: 100, duration: 300 });
   }
 
@@ -2470,7 +2571,7 @@ export default function MapView({
       : await applyGeometry({ entityType: "asset", id: edit.assetId }, polygon);
     setSaving(false);
     if (dErr || gErr) {
-      setSaveError("Could not save the circle. " + (dErr?.message ?? gErr?.message ?? ""));
+      setSaveError(friendlyDbError(dErr ?? gErr, "Could not save the circle. Please try again."));
       return;
     }
     const sel: SelectedFeature = { entityType: "asset", id: edit.assetId };
@@ -2528,10 +2629,16 @@ export default function MapView({
         : remainder?.geometry.type === "Polygon"
           ? [remainder.geometry.coordinates]
           : [];
-    if (parts.length < 2) {
-      setSaveError("The line did not cross the whole stand; nothing was split.");
+    // Clear the line and hand the tool back for another try.
+    const tryAgain = (message: string) => {
+      setSaveError(message);
       drawRef.current?.deleteAll();
-      drawRef.current?.changeMode("draw_line_string");
+      afterDrawSettles((d) => {
+        if (splitTargetRef.current) d.changeMode("draw_line_string");
+      });
+    };
+    if (parts.length < 2) {
+      tryAgain("The line did not cross the whole stand; nothing was split.");
       return;
     }
     const acresOfPart = (c: MultiPolygon["coordinates"][number]) =>
@@ -2540,11 +2647,20 @@ export default function MapView({
         properties: {},
         geometry: { type: "Polygon", coordinates: c },
       }) / 4046.8564224;
-    const ordered = [...parts].sort((a, b) => acresOfPart(b) - acresOfPart(a));
+    // A line that grazes a corner or runs along an edge leaves slivers.
+    // Anything under 0.05 acres (it would read "0.0 acres") is dropped
+    // rather than saved as a stand of its own.
+    const ordered = [...parts]
+      .sort((a, b) => acresOfPart(b) - acresOfPart(a))
+      .filter((p) => acresOfPart(p) >= 0.05);
+    if (ordered.length < 2) {
+      tryAgain("The line only trimmed a sliver off the stand; nothing was split. Draw it across the stand.");
+      return;
+    }
     if (
       !window.confirm(
         `Split "${stand.name}" into ${ordered.length} stands (about ${ordered
-          .map((p) => acresOfPart(p).toFixed(1))
+          .map((p) => formatAcres(acresOfPart(p)))
           .join(" and ")} acres)? Stand info is copied to the new stand${ordered.length > 2 ? "s" : ""}.`
       )
     ) {
@@ -2552,21 +2668,27 @@ export default function MapView({
       return;
     }
     setSaving(true);
-    const failures: string[] = [];
-    const largest: Geometry = { type: "Polygon", coordinates: ordered[0] };
-    const gErr = await applyGeometry(target, largest);
-    if (gErr) failures.push(gErr.message);
-    for (let i = 1; i < ordered.length; i++) {
+    setSaveError(null);
+    // New stands first, the original last. Until the very last step the
+    // original still has its whole shape, so when anything fails the new
+    // stands made so far are taken back out and nothing has changed.
+    const made: Array<{ id: string; name: string }> = [];
+    let problem: string | null = null;
+    for (let i = 1; i < ordered.length && !problem; i++) {
+      const name = `${stand.name} (${i + 1})`;
       const { data, error } = await supabase
         .from("timber_stands")
         .insert({
           organization_id: orgId,
           property_id: stand.property_id,
-          name: `${stand.name} (${i + 1})`,
+          name,
           stand_type: stand.stand_type,
           species: stand.species,
           year_established: stand.year_established,
+          tpa_planted: stand.tpa_planted,
           site_index: stand.site_index,
+          site_index_base_age: stand.site_index_base_age,
+          management_goal: stand.management_goal,
           last_thinning_year: stand.last_thinning_year,
           last_burn_year: stand.last_burn_year,
           notes: stand.notes,
@@ -2574,20 +2696,39 @@ export default function MapView({
         .select("id")
         .single();
       if (error || !data) {
-        failures.push(error?.message ?? "insert failed");
-        continue;
+        problem = friendlyDbError(error, "A new stand could not be created.");
+        break;
       }
-      const gErr2 = await applyGeometry(
+      made.push({ id: data.id, name });
+      const gErr = await applyGeometry(
         { entityType: "timber_stand", id: data.id },
         { type: "Polygon", coordinates: ordered[i] }
       );
-      if (gErr2) failures.push(gErr2.message);
+      if (gErr) problem = friendlyDbError(gErr, "A new stand's shape could not be saved.");
     }
-    setSaving(false);
-    if (failures.length > 0) {
-      setSaveError("Split problems: " + failures.slice(0, 2).join("; "));
+    if (!problem) {
+      const gErr = await applyGeometry(target, { type: "Polygon", coordinates: ordered[0] });
+      if (gErr) problem = friendlyDbError(gErr, "The original stand's shape could not be updated.");
+    }
+    if (problem) {
+      const leftBehind: string[] = [];
+      for (const s of made) {
+        const { error } = await supabase.from("timber_stands").delete().eq("id", s.id);
+        if (error) leftBehind.push(`"${s.name}"`);
+      }
+      setSaving(false);
+      setSaveError(
+        leftBehind.length === 0
+          ? `The split did not finish, so nothing was changed. ${problem}`
+          : `The split did not finish. ${problem} "${stand.name}" still has its whole shape, but ${leftBehind.join(" and ")} could not be removed. Delete ${leftBehind.length === 1 ? "it" : "them"} before trying again.`
+      );
+      // Clear the line so the stand can be split again from here.
+      drawRef.current?.deleteAll();
+      if (splitTargetRef.current) drawRef.current?.changeMode("draw_line_string");
+      if (leftBehind.length > 0) await loadData();
       return;
     }
+    setSaving(false);
     const sel = { ...target };
     resetDrawState();
     await loadData();
@@ -2599,6 +2740,7 @@ export default function MapView({
     setSelected(null);
     setSaveError(null);
     editTargetRef.current = null;
+    setLayersOpen(false);
     setPickerOpen(true);
   }
 
@@ -2704,7 +2846,7 @@ export default function MapView({
       const ids = draw.add({ type: "Feature", geometry: g, properties: {} });
       completedDrawIdsRef.current = new Set(ids.map(String));
       draw.changeMode("direct_select", { featureId: ids[0] });
-      setEditHint("Drag the points to adjust, then press Save.");
+      setEditHint("Drag a point to move it, or tap it and press Delete point. Then press Save.");
     } else if (isLineTarget || selected.entityType === "road") {
       draw.changeMode("draw_line_string");
       setDrawingShape(true);
@@ -2725,6 +2867,21 @@ export default function MapView({
     return error;
   }
 
+  // Delete point: takes out the point selected in the point editor. The
+  // editor refuses when the shape would be left with too few points
+  // (./editModes.ts); say so rather than doing nothing.
+  function deleteSelectedPoint() {
+    const draw = drawRef.current;
+    if (!draw) return;
+    const before = countDrawPositions(draw.getAll());
+    draw.trash();
+    if (countDrawPositions(draw.getAll()) === before) {
+      setSaveError("That point has to stay: an area needs at least three points and a line needs two.");
+    } else {
+      setSaveError(null);
+    }
+  }
+
   const saveEditedRef = useRef<() => void>(() => {});
   saveEditedRef.current = async () => {
     const draw = drawRef.current;
@@ -2733,9 +2890,12 @@ export default function MapView({
 
     const all = draw.getAll().features;
     let g: Geometry | null = null;
+    // Same rule as startEditGeometry: roads always, and an asset,
+    // easement, or issue whose shape is a line.
     const isLineTarget =
       target.entityType === "road" ||
-      ((target.entityType === "asset" || target.entityType === "maintenance_issue") &&
+      ((target.entityType === "asset" || target.entityType === "easement" ||
+        target.entityType === "maintenance_issue") &&
         all.some((f) => f.geometry.type.includes("Line")));
     if (isLineTarget) {
       const parts: MultiLineString["coordinates"] = [];
@@ -2761,7 +2921,7 @@ export default function MapView({
     const error = await applyGeometry(target, g);
     setSaving(false);
     if (error) {
-      setSaveError("Could not save. " + error.message);
+      setSaveError(friendlyDbError(error, "Could not save the shape. Please try again."));
       return;
     }
     const sel = { ...target };
@@ -2819,7 +2979,7 @@ export default function MapView({
       });
       setSaving(false);
       if (error) {
-        setSaveError("Could not save the location. " + error.message);
+        setSaveError(friendlyDbError(error, "Could not save the location. Please try again."));
         return;
       }
       const sel = { ...target };
@@ -2851,12 +3011,21 @@ export default function MapView({
   ): Promise<SelectedFeature | null> {
     const { data, error } = await supabase.from(table).insert(insert).select("id").single();
     if (error || !data) {
-      setSaveError("Could not save. " + (error?.message ?? ""));
+      setSaveError(friendlyDbError(error, "That did not save. Please try again."));
       return null;
     }
     const gErr = await applyGeometry({ entityType, id: data.id }, geometry);
     if (gErr) {
-      setSaveError("Saved the record, but the geometry failed: " + gErr.message);
+      // The record went in but its shape did not. Take the record back
+      // out so nothing sits on the lists without a shape and a second
+      // try does not add a second copy.
+      const { error: delErr } = await supabase.from(table).delete().eq("id", data.id);
+      const why = friendlyDbError(gErr, "The shape could not be stored.");
+      setSaveError(
+        delErr
+          ? `${why} A record with no shape was left behind. Delete it from its list page before trying again.`
+          : `Nothing was saved. ${why}`
+      );
       return null;
     }
     return { entityType, id: data.id };
@@ -2882,6 +3051,10 @@ export default function MapView({
       base.name = payload.name;
       base.county = payload.county;
       base.state = payload.state;
+      // Who holds it. Family members who are not admins see a property
+      // only through its entity, so one saved without an entity is
+      // invisible to them.
+      base.entity_id = payload.entityId;
     } else {
       base.name = payload.name;
       base.property_id = payload.propertyId;
@@ -3339,7 +3512,8 @@ export default function MapView({
     setImportResult(null);
     const newRows: ImportRow[] = [];
     const notes: string[] = [];
-    const defaultPolygonType = defaultPolygonTypeFor(properties.length);
+    // Only an admin's import can start a new property.
+    const defaultPolygonType = isAdmin ? defaultPolygonTypeFor(properties.length) : "field";
     for (const file of files) {
       try {
         const parsed = await parseBoundaryFile(file);
@@ -3356,7 +3530,7 @@ export default function MapView({
     setImportNotes((prev) => [...prev, ...notes]);
     setImportParsing(false);
     if (importInputRef.current) importInputRef.current.value = "";
-    const box = bboxOf(newRows.map((r) => r.geometry));
+    const box = fitBoundsOf(newRows.map((r) => r.geometry));
     if (box) mapRef.current?.fitBounds(box, { padding: 80, maxZoom: 16, duration: 600 });
   }
 
@@ -3589,13 +3763,15 @@ export default function MapView({
   function fitAll() {
     const map = mapRef.current;
     if (!map) return;
-    const box = bboxOf([
+    const box = fitBoundsOf([
       ...properties.map(geomOf), ...parcels.map(geomOf), ...fields.map(geomOf),
       ...pastures.map(geomOf), ...wetlands.map(geomOf), ...pollinatorHabitats.map(geomOf), ...timber.map(geomOf),
       ...roads.map(geomOf), ...easements.map(geomOf), ...assets.map(geomOf),
       ...cemeteries.map(geomOf), ...issues.map(geomOf),
     ]);
     if (box) map.fitBounds(box, { padding: 60 });
+    // On a phone, show the result rather than the panel that asked for it.
+    setLayersOpen(false);
   }
 
   const hasAnything = Object.values(rowLists).some((rows) => rows.some(geomOf));
@@ -4089,6 +4265,7 @@ export default function MapView({
           rows={importRows ?? []}
           notes={importNotes}
           properties={properties}
+          canAddProperty={isAdmin}
           parsing={importParsing}
           saving={importSaving}
           result={importResult}
@@ -4099,11 +4276,59 @@ export default function MapView({
         />
       ) : null}
 
+      {/* Phones (below md): the control column would cover half the map
+          and run under the bottom tab bar, so two buttons stand in for
+          it. Layers opens the column as a panel; + Add is always one tap
+          away. While a toolbar holds the top of the screen (drawing,
+          editing, placing) Layers waits at the bottom left instead. */}
+      {!layersOpen ? (
+        <div
+          className={
+            "absolute left-3 z-20 flex gap-2 md:hidden " +
+            (mode === "view" ? "top-3" : "bottom-10")
+          }
+        >
+          <button
+            onClick={() => setLayersOpen(true)}
+            className="rounded-lg bg-white/95 px-3 py-2 text-sm font-semibold text-gray-800 shadow-md"
+          >
+            Layers
+          </button>
+          {mode === "view" && !importOpen ? (
+            <button
+              onClick={startAdd}
+              className="rounded-lg bg-kelly-500 px-3 py-2 text-sm font-semibold text-white shadow-md hover:bg-kelly-600"
+            >
+              + Add
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Left control column. 11.5rem is sized so every layer name in
           the toggle box fits on one line at 13px, measured against a
           future "Government payments" (131px in Segoe UI); see
-          LayerToggle.tsx. */}
-      <div className="absolute left-3 top-3 z-20 flex w-[11.5rem] flex-col gap-2">
+          LayerToggle.tsx. On a phone it is the Layers panel: hidden
+          until opened, never taller than the map, scrolling inside
+          (the max-md classes; 12.5rem there keeps the same 11.5rem
+          inside the panel's padding). */}
+      <div
+        className={
+          "absolute left-3 top-3 z-20 w-[11.5rem] flex-col gap-2 md:flex " +
+          (layersOpen
+            ? "flex max-md:z-30 max-md:max-h-[calc(100%-1.5rem)] max-md:w-[12.5rem] max-md:overflow-y-auto max-md:overscroll-contain max-md:rounded-xl max-md:bg-white max-md:p-2 max-md:shadow-2xl"
+            : "hidden")
+        }
+      >
+        <div className="sticky top-0 z-10 -mx-2 -mt-2 flex items-center justify-between bg-white px-2 pb-1 pt-2 md:hidden">
+          <span className="text-sm font-semibold text-gray-900">Map layers</span>
+          <button
+            onClick={() => setLayersOpen(false)}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
         <LayerToggle
           visibility={visibility}
           onChange={setVisibility}
@@ -4143,7 +4368,11 @@ export default function MapView({
             export or import panel has its own say over what shows. */}
         {mode === "view" && !exportOpen && !importOpen ? (
           <button
-            onClick={() => setFilterOpen((o) => !o)}
+            onClick={() => {
+              setFilterOpen((o) => !o);
+              // The filter is a sheet over the same part of a phone screen.
+              setLayersOpen(false);
+            }}
             className={
               "rounded-lg px-2 py-1.5 text-left text-[13px] font-medium shadow-md " +
               (mapFilterExcluded.size > 0
@@ -4298,7 +4527,10 @@ export default function MapView({
             Zoom all
           </button>
           <button
-            onClick={() => setFullscreen((f) => !f)}
+            onClick={() => {
+              setFullscreen((f) => !f);
+              setLayersOpen(false);
+            }}
             className="flex-1 rounded-lg bg-white/95 px-2 py-1.5 text-xs font-medium text-gray-700 shadow-md hover:bg-white"
           >
             {fullscreen ? "Exit full" : "Fullscreen"}
@@ -4336,6 +4568,7 @@ export default function MapView({
                           pivotShapeKindRef.current = null;
                           setPivotDrawKind(null);
                           drawRef.current?.deleteAll();
+                          drawRef.current?.changeMode("simple_select");
                         }}
                         className={addClass}
                       >
@@ -4543,11 +4776,14 @@ export default function MapView({
       {mode !== "view" && mode !== "pivot" && mode !== "circle" ? (
         <div className="absolute inset-x-0 top-3 z-20 mx-auto w-fit max-w-[92%] rounded-lg bg-pine-900/95 px-3 py-2 text-white shadow-lg">
           <p className="text-xs">{editHint}</p>
-          <div className="mt-1.5 flex justify-center gap-2">
+          <div className="mt-1.5 flex flex-wrap justify-center gap-2">
             {mode === "edit" ? (
               <button
                 onClick={() => saveEditedRef.current()}
-                disabled={saving}
+                // Not while a shape is half drawn: the unfinished shape
+                // would be saved as part of the boundary.
+                disabled={saving || drawingShape}
+                title={drawingShape ? "Finish or discard the shape you are drawing first" : undefined}
                 className="rounded bg-kelly-500 px-3 py-1 text-xs font-semibold hover:bg-kelly-600 disabled:opacity-60"
               >
                 {saving ? "Saving..." : "Save"}
@@ -4568,6 +4804,16 @@ export default function MapView({
                   Cut area
                 </button>
               </>
+            ) : null}
+            {mode === "edit" && !drawingShape ? (
+              <button
+                onClick={deleteSelectedPoint}
+                disabled={!vertexSelected || saving}
+                title="Tap a point on the shape to select it, then press this to take it out"
+                className="rounded bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25 disabled:opacity-50"
+              >
+                Delete point
+              </button>
             ) : null}
             {mode === "place" && !pendingPoint ? (
               <>
@@ -4629,8 +4875,50 @@ export default function MapView({
         </div>
       ) : null}
 
-      {/* Empty state */}
-      {!loading && !hasAnything && mode === "view" ? (
+      {/* Trouble banners: the basemap did not load, or the shapes did
+          not (whatever was on the map stays). Both name the likely
+          cause and offer the way out. */}
+      {mapError || loadProblem === "failed" ? (
+        <div className="absolute inset-x-0 top-24 z-30 mx-auto w-fit max-w-[92%] space-y-1.5 md:top-14">
+          {mapError ? (
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-lg">
+              <span>The map could not load. Check your connection and reload.</span>
+              <button
+                onClick={() => window.location.reload()}
+                className="shrink-0 rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+              >
+                Reload
+              </button>
+            </div>
+          ) : null}
+          {loadProblem === "failed" ? (
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-lg">
+              <span>Could not load the map. Check your connection.</span>
+              <button
+                onClick={() => {
+                  setLoading(true);
+                  void loadData();
+                }}
+                disabled={loading}
+                className="shrink-0 rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+              >
+                {loading ? "Trying..." : "Retry"}
+              </button>
+              <button
+                onClick={() => setLoadProblem("dismissed")}
+                aria-label="Dismiss"
+                className="shrink-0 rounded-full px-1.5 text-lg leading-none text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                &times;
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Empty state: only when a load actually came back empty, never
+          after one that failed. */}
+      {!loading && loadProblem === "none" && !mapError && !hasAnything && mode === "view" ? (
         <div className="absolute inset-x-0 top-16 z-10 mx-auto w-fit max-w-[90%] rounded-lg bg-white/95 px-4 py-3 text-center shadow-lg md:top-3">
           <p className="text-sm font-medium text-gray-800">Nothing on the map yet</p>
           <p className="text-xs text-gray-500">
@@ -4709,11 +4997,12 @@ export default function MapView({
         </div>
       ) : null}
 
-      {/* One-tap recovery when the panel is closed but items are hidden. */}
+      {/* One-tap recovery when the panel is closed but items are hidden
+          (on a phone it sits one row down, under Layers and + Add). */}
       {!filterOpen && !printOpen && !exportOpen && !importOpen && mode === "view" && mapFilterExcluded.size > 0 ? (
         <button
           onClick={() => setMapFilterExcluded(new Set())}
-          className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 shadow-md hover:bg-amber-100"
+          className="absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 shadow-md hover:bg-amber-100 md:top-3"
         >
           {mapFilterExcluded.size} hidden · clear
         </button>
@@ -4730,6 +5019,7 @@ export default function MapView({
             startImportFiles();
           }}
           onCancel={() => setPickerOpen(false)}
+          canAddProperty={isAdmin}
         />
       ) : null}
 
@@ -4742,6 +5032,7 @@ export default function MapView({
           approxAcres={pendingPoly ? approxAcres(pendingPoly) : null}
           properties={properties}
           suggestedPropertyId={pendingPoly ? suggestedForPoly : pendingLine ? suggestedForLine : suggestedForPoint}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewIssue}
@@ -4755,6 +5046,7 @@ export default function MapView({
           approxAcres={null}
           properties={properties}
           suggestedPropertyId={suggestedForPoint}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewBoundary}
@@ -4773,6 +5065,8 @@ export default function MapView({
           approxLengthFt={pendingLine ? approxLengthFt(pendingLine) : null}
           properties={properties}
           suggestedPropertyId={pendingPoly ? suggestedForPoly : suggestedForLine}
+          entities={entities}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewBoundary}
@@ -4788,6 +5082,7 @@ export default function MapView({
           fixedKind={drawSession.entityType}
           properties={properties}
           suggestedPropertyId={suggestedForLine}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewLine}
@@ -4799,6 +5094,7 @@ export default function MapView({
           properties={properties}
           suggestedPropertyId={suggestedForPoly}
           fixedType={drawSession.assetType}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewAssetOutline}
@@ -4810,6 +5106,7 @@ export default function MapView({
           properties={properties}
           suggestedPropertyId={suggestedForPoint}
           fixedType={placeAssetType}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewAsset}
@@ -4824,6 +5121,7 @@ export default function MapView({
             matchableProperties
           )}
           fixedType={circleEdit.assetType}
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewCircleAsset}
@@ -4838,6 +5136,7 @@ export default function MapView({
             matchableProperties
           )}
           fixedType="irrigation_pivot"
+          isAdmin={isAdmin}
           saving={saving}
           error={saveError}
           onSave={saveNewPivot}
@@ -4847,6 +5146,10 @@ export default function MapView({
 
       {selected && selectedRow && mode === "view" ? (
         <FeaturePanel
+          // A fresh panel per record: without the key an open Edit
+          // details form survives a tap on another shape and Save writes
+          // the typed values onto the newly selected record.
+          key={selected.entityType + ":" + selected.id}
           entityType={selected.entityType}
           row={selectedRow}
           propertyName={selectedPropertyName}
@@ -4883,6 +5186,7 @@ export default function MapView({
                 )?.name ?? null)
               : null
           }
+          isAdmin={isAdmin}
           onSelectAsset={(id) => setSelected({ entityType: "asset", id })}
           onSelectProperty={(id) => setSelected({ entityType: "property", id })}
           onAddBin={() => startAddBinToSite(selected.id)}

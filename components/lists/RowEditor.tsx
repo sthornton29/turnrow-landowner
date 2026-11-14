@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import {
   EDIT_FIELDS,
   ENTITY_TABLE,
@@ -26,7 +27,10 @@ export default function RowEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fields = EDIT_FIELDS[entityType];
+  // Only the columns this row was loaded with are shown and saved. A
+  // page that selected fewer columns than the form knows about would
+  // otherwise show them blank and write null over the stored values.
+  const fields = EDIT_FIELDS[entityType].filter((f) => f.key in row);
 
   async function save(formData: FormData) {
     setBusy(true);
@@ -42,7 +46,7 @@ export default function RowEditor({
       .eq("id", row.id);
     setBusy(false);
     if (err) {
-      setError("Could not save changes.");
+      setError(friendlyDbError(err, "Could not save changes. Please try again."));
       return;
     }
     setOpen(false);

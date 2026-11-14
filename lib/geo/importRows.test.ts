@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MultiPolygon } from "geojson";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildImportRows,
   defaultPolygonTypeFor,
   importValidationError,
+  saveImportRows,
   type ImportRow,
 } from "./importRows";
 import type { ParseResult } from "./parse";
@@ -100,5 +102,106 @@ describe("importValidationError", () => {
     expect(importValidationError([{ ...base, propertyRef: "" }])).toMatch(/assigned to a property/);
     expect(importValidationError([{ ...base, entityType: "property", propertyRef: "" }])).toBeNull();
     expect(importValidationError([{ ...base, entityType: "asset", propertyRef: "" }])).toBeNull();
+  });
+});
+
+// A stand-in for the Supabase client that records what the save does:
+// which rows went in, which shapes were set, and which rows were taken
+// back out. geometryFails names the rows whose shape is refused.
+function fakeSupabase(opts: { geometryFails?: string[]; deleteFails?: boolean } = {}) {
+  const inserted: Array<{ table: string; id: string; name: string }> = [];
+  const deleted: Array<{ table: string; id: string }> = [];
+  let nextId = 1;
+  const client = {
+    from(table: string) {
+      return {
+        insert(row: Record<string, unknown>) {
+          const id = `id-${nextId++}`;
+          inserted.push({ table, id, name: String(row.name ?? row.parcel_number) });
+          return { select: () => ({ single: async () => ({ data: { id }, error: null }) }) };
+        },
+        delete() {
+          return {
+            eq: async (_column: string, id: string) => {
+              if (opts.deleteFails) return { error: { message: "permission denied for table" } };
+              deleted.push({ table, id });
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+    async rpc(_fn: string, args: { p_entity_id: string }) {
+      const row = inserted.find((r) => r.id === args.p_entity_id);
+      return opts.geometryFails?.includes(row?.name ?? "")
+        ? { error: { code: "P0001", message: "Geometry contains no polygon" } }
+        : { error: null };
+    },
+  };
+  return { client: client as unknown as SupabaseClient, inserted, deleted };
+}
+
+describe("saveImportRows", () => {
+  const row = (localId: string, name: string, patch: Partial<ImportRow> = {}): ImportRow => ({
+    localId,
+    include: true,
+    kind: "polygon",
+    entityType: "field",
+    assetType: "other",
+    name,
+    propertyRef: "existing:p1",
+    suggestedRef: null,
+    geometry: fieldInside,
+    acres: 10,
+    sourceFile: "farm.kml",
+    ...patch,
+  });
+
+  it("saves every included row and reports them as saved", async () => {
+    const db = fakeSupabase();
+    const result = await saveImportRows(db.client, "org1", [
+      row("a", "North 80"),
+      row("b", "South 40"),
+      row("c", "Left out", { include: false }),
+    ]);
+    expect(result).toEqual({ saved: 2, failures: [], savedLocalIds: ["a", "b"] });
+    expect(db.inserted.map((r) => r.name)).toEqual(["North 80", "South 40"]);
+    expect(db.deleted).toEqual([]);
+  });
+
+  it("takes the row back out when its shape fails, so a retry starts clean", async () => {
+    const db = fakeSupabase({ geometryFails: ["South 40"] });
+    const result = await saveImportRows(db.client, "org1", [row("a", "North 80"), row("b", "South 40")]);
+    expect(result.savedLocalIds).toEqual(["a"]);
+    expect(result.saved).toBe(1);
+    const south = db.inserted.find((r) => r.name === "South 40")!;
+    expect(db.deleted).toEqual([{ table: "fields", id: south.id }]);
+    expect(result.failures).toEqual(["South 40: nothing was saved. Its shape could not be stored."]);
+    // No raw database text reaches the message.
+    expect(result.failures[0]).not.toMatch(/Geometry contains/);
+  });
+
+  it("removes a new property whose boundary fails, and skips what belonged to it", async () => {
+    const db = fakeSupabase({ geometryFails: ["Home Place"] });
+    const result = await saveImportRows(db.client, "org1", [
+      row("p", "Home Place", { entityType: "property", propertyRef: "" }),
+      row("f", "North 80", { propertyRef: "new:p" }),
+    ]);
+    expect(result.saved).toBe(0);
+    expect(db.deleted.map((d) => d.table)).toEqual(["properties"]);
+    expect(db.inserted.map((r) => r.table)).toEqual(["properties"]);
+    expect(result.failures).toEqual([
+      "Home Place: nothing was saved. Its shape could not be stored.",
+      "North 80: its property was not saved, skipped.",
+    ]);
+  });
+
+  it("says so when the leftover row could not be removed", async () => {
+    const db = fakeSupabase({ geometryFails: ["South 40"], deleteFails: true });
+    const result = await saveImportRows(db.client, "org1", [row("b", "South 40")]);
+    expect(result.saved).toBe(0);
+    expect(result.failures).toEqual([
+      'South 40: Its shape could not be stored. A record named "South 40" was left with no shape; delete it before trying again.',
+    ]);
   });
 });

@@ -23,7 +23,7 @@ const LAYERS: Array<{ key: keyof LayerVisibility; label: string }> = [
 ];
 
 // Name labels only, split from the layer toggles: "Property names" is
-// the property boundary labels; "Field names" covers EVERY sub-property
+// the property boundary labels; "Ag field names" covers EVERY sub-property
 // item's name label (ag fields, pastures, timber, wetlands, pollinator
 // habitats, cemeteries, roads, easements, parcels, asset names, issue
 // names). Polygons,
@@ -96,7 +96,7 @@ export default function LayerToggle({
       {labelRow("property", "Property names", "Show or hide property name labels")}
       {labelRow(
         "items",
-        "Field names",
+        "Ag field names",
         "Show or hide every other name label: ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets"
       )}
       <div className="mt-1 border-t border-gray-200 pt-1">

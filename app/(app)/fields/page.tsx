@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatNumber } from "@/lib/format";
+import { formatAcres, plural } from "@/lib/format";
 import RowEditor from "@/components/lists/RowEditor";
 
 export const metadata = { title: "Ag Fields" };
@@ -23,7 +23,7 @@ export default async function FieldsPage() {
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Ag Fields</h1>
         <p className="mt-0.5 text-sm text-gray-600">
-          {formatNumber((fields ?? []).length)} ag fields, {formatAcres(totalAcres)} total acres
+          {plural((fields ?? []).length, "ag field")}, {formatAcres(totalAcres)} total acres
         </p>
       </div>
 
@@ -54,7 +54,7 @@ export default async function FieldsPage() {
                     {p.name}
                   </Link>{" "}
                   <span className="text-sm font-normal text-gray-500">
-                    {formatNumber(propertyFields.length)} ag fields · {formatAcres(acres)} ac
+                    {plural(propertyFields.length, "ag field")} · {formatAcres(acres)} ac
                   </span>
                 </h2>
                 <ul className="space-y-2">
