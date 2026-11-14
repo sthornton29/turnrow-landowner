@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import {
   describeFsaFileSource,
   findBenchmarkFileLinks,
@@ -101,9 +101,9 @@ function bestCacheHit(cached: CacheRow[], q: { commodity: string; county: string
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase } = session;
   const body = await request.json().catch(() => null);
   const commodity = String(body?.commodity ?? "").replace(/_/g, " ").trim();
   const county = String(body?.county ?? "").trim();
@@ -111,6 +111,12 @@ export async function POST(request: Request) {
   const year = Number(body?.year);
   if (!commodity || !county || !state || !Number.isInteger(year)) {
     return NextResponse.json({ error: "commodity, county, state and year are required." }, { status: 400 });
+  }
+  // ARC-CO benchmark files exist from the 2014 farm bill on. Anything
+  // outside that is a typo, and each new year asked for costs a fetch
+  // from USDA and a row in the shared cache.
+  if (year < 2014 || year > new Date().getFullYear() + 1) {
+    return NextResponse.json({ error: `No benchmark file exists for ${year}.` }, { status: 400 });
   }
   const stateCode = normalizeStateCode(state);
   if (!stateCode) return NextResponse.json({ error: `Unrecognized state "${state}".` }, { status: 400 });

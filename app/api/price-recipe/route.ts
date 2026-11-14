@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
+import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
 import { validateExpression } from "@/lib/priceExpression";
 
 // Custom lease pricing: the AI designs a recipe ONCE from the lease's
@@ -56,21 +57,37 @@ const RECIPE_TOOL: Anthropic.Tool = {
   },
 };
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+const MAX_CLAUSE_CHARS = 6000;
 
-  const body = await request.json();
-  const clause = String(body.clause ?? "").trim();
+export async function POST(request: Request) {
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, user, orgId } = session;
+
+  const body = (await request.json().catch(() => null)) as { clause?: unknown } | null;
+  const clause = String(body?.clause ?? "").trim();
   if (clause.length < 10) {
     return NextResponse.json(
       { error: "Paste the lease's pricing clause first." },
       { status: 400 }
     );
   }
+  // A pricing clause is a paragraph or two. A cap keeps a pasted
+  // 40-page lease (or a script) from running up the AI bill.
+  if (clause.length > MAX_CLAUSE_CHARS) {
+    return NextResponse.json(
+      { error: "That is longer than a pricing clause. Paste only the paragraph that says how the price is set." },
+      { status: 400 }
+    );
+  }
+  // Shares the hourly budget of the other AI reads.
+  const limit = await checkRateLimit(supabase, {
+    userId: user.id,
+    orgId,
+    kind: "extract",
+    limitPerHour: 300,
+  });
+  if (!limit.allowed) return rateLimited429("extract");
 
   try {
     const client = new Anthropic();
@@ -104,10 +121,11 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ recipe, expression_error: check.ok ? null : check.error });
   } catch (err) {
-    const message =
-      err instanceof Anthropic.APIError
-        ? `Recipe design failed (${err.status}): ${err.message}`
-        : "Recipe design failed.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // The upstream detail goes to the server log, not to the screen.
+    console.error("price-recipe failed", err instanceof Anthropic.APIError ? `${err.status} ${err.message}` : err);
+    return NextResponse.json(
+      { error: "Could not design a recipe just now. Try again in a minute, or enter the price by hand." },
+      { status: 502 }
+    );
   }
 }

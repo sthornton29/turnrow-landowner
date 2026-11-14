@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import turfArea from "@turf/area";
 import turfIntersect from "@turf/intersect";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import {
   GisError,
   buildIdentifierLikeWhere,
@@ -52,11 +52,9 @@ const DEADLINE_MS = 40_000;
 const QUERY_TIMEOUT_MS = 15_000;
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase } = session;
   const body = (await request.json().catch(() => ({}))) as { county?: string; state?: string | null; lines?: LineIn[] };
   const county = String(body.county ?? "").trim();
   const state = String(body.state ?? "AL").trim().toUpperCase() || "AL";

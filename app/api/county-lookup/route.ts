@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import { GisError } from "@/lib/gisServer";
 import { lookupCounty } from "@/lib/countyLookup";
 
@@ -10,11 +10,8 @@ import { lookupCounty } from "@/lib/countyLookup";
 export const maxDuration = 30;
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
 
   const body = (await request.json().catch(() => ({}))) as { lon?: unknown; lat?: unknown };
   const lon = Number(body.lon);

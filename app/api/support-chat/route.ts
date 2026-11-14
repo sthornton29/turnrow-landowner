@@ -8,7 +8,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import { HELP_DIGEST, HELP_TOPICS } from "@/lib/helpContent.generated";
 import { topicForRoute } from "@/lib/help";
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
@@ -29,20 +29,13 @@ Rules, and these are absolute:
 - Never discuss other customers, pricing, or anything outside the software. Politely decline off-topic requests in one sentence.`;
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Please sign in." }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, user, orgId } = session;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .maybeSingle();
   const limit = await checkRateLimit(supabase, {
     userId: user.id,
-    orgId: (profile?.organization_id as string | null) ?? null,
+    orgId,
     kind: "support_chat",
     limitPerHour: 20,
   });

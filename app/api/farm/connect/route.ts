@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { adminOnly, requireOrgApi } from "@/lib/apiAuth";
 import { encryptSecret } from "@/lib/farmCrypto";
 import { FarmApiError, redeemShareCode } from "@/lib/farmApi";
 import { syncConnection } from "@/lib/farmSync";
@@ -9,22 +9,17 @@ export const maxDuration = 60;
 // Redeem a farmer's one-time share code, store the minted key encrypted,
 // and run the first sync (mapping suggestions included).
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .single();
-  if (!profile?.organization_id) {
-    return NextResponse.json({ error: "No organization" }, { status: 403 });
-  }
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, orgId } = session;
+  // The share code works exactly once, and only an admin may save a
+  // connection. Check BEFORE redeeming so a member without that right
+  // cannot burn the farmer's code.
+  const denied = adminOnly(session, "connect a farm");
+  if (denied) return denied;
 
-  const body = await request.json();
-  const code = String(body.code ?? "").trim();
+  const body = (await request.json().catch(() => null)) as { code?: unknown } | null;
+  const code = String(body?.code ?? "").trim();
   if (code.length < 8) {
     return NextResponse.json({ error: "Enter the share code from your farmer." }, { status: 400 });
   }
@@ -39,7 +34,7 @@ export async function POST(request: Request) {
     const { data: connection, error } = await supabase
       .from("farm_connections")
       .insert({
-        organization_id: profile.organization_id,
+        organization_id: orgId,
         label,
         api_key_encrypted: encryptSecret(token),
         status: "active",
@@ -52,8 +47,12 @@ export async function POST(request: Request) {
       .select("*")
       .single();
     if (error || !connection) {
+      console.error("farm connect: save failed after redeem", error?.message);
       return NextResponse.json(
-        { error: "Connected, but could not save the connection: " + (error?.message ?? "") },
+        {
+          error:
+            "The code was accepted, but the connection could not be saved here. Ask your farmer for a new code and try again; if it happens twice, use Contact support.",
+        },
         { status: 500 }
       );
     }

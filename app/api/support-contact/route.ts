@@ -11,7 +11,7 @@
 // defaults to a Turnrow sender that must be verified in Resend).
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import {
   MAX_SCREENSHOT_BYTES,
   base64Bytes,
@@ -24,18 +24,16 @@ const MAX_MESSAGE = 8000;
 const MAX_TRANSCRIPT = 20000;
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: "Please sign in." }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, user, orgId } = session;
+  if (!user.email) return NextResponse.json({ error: "Please sign in." }, { status: 401 });
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("organization_id, role, full_name")
     .eq("id", user.id)
     .maybeSingle();
-  const orgId = (profile?.organization_id as string | null) ?? null;
 
   const limit = await checkRateLimit(supabase, {
     userId: user.id,
@@ -51,7 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Support email is not set up on this server yet (RESEND_API_KEY and SUPPORT_EMAIL). Please email support directly.",
+          "Messages to support cannot be sent from here yet. Please reach the person who set up your account directly.",
       },
       { status: 503 }
     );

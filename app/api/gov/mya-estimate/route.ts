@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import { estimateMyaBlend, describeMyaComposition } from "@/lib/gov/myaEstimate";
 import { lookupMonthly, type CommodityRow } from "@/lib/gov/nassServer";
 
@@ -23,9 +23,9 @@ function serviceRole() {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, user } = session;
   const body = await request.json().catch(() => null);
   const programYear = Number(body?.program_year);
   const slugs: string[] = Array.isArray(body?.commodities) ? body.commodities.map(String) : [];

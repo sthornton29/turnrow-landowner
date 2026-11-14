@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import {
   collapseLoads,
   csvToRows,
@@ -10,6 +10,7 @@ import {
 import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
 import { MODEL_PDF_MAX_BYTES, UnsplittablePdfError, firstPages, pageCount, pageGroups, slicePages, splitPdf } from "./pdfChunks";
 import { TAX_SEGMENT_PROMPT, TAX_SEGMENT_TOOL, TAX_STATEMENT_PROMPT, TAX_STATEMENT_TOOL } from "./taxTools";
+import { mergeUnsureFields } from "./unsureIndex";
 import { mergeFsaExtractions } from "@/lib/gov/fsaImport";
 import { spatialEvidenceFor } from "@/lib/spatialEvidence";
 import {
@@ -450,33 +451,73 @@ const PAYMENT_TOOL: Anthropic.Tool = {
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 
-export async function POST(request: Request) {
-  // Only signed-in users may hit this (it spends API credits).
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+// The model API takes images up to 5 MB once encoded; base64 adds a
+// third, so the photo itself must stay under about 3.7 MB.
+const MODEL_IMAGE_MAX_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4);
+
+// A reply that ran out of room mid-answer. With a forced tool call the
+// cut-off arguments still parse, so without this check a half-read
+// document would be accepted as a complete extraction (the last lines
+// and the unsure list are what go missing first).
+class TruncatedReplyError extends Error {
+  constructor() {
+    super("The reply was cut off before the document was fully read.");
   }
+}
+function toolInput(response: Anthropic.Message): Record<string, unknown> {
+  if (response.stop_reason === "max_tokens") throw new TruncatedReplyError();
+  const toolUse = response.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+  );
+  if (!toolUse) throw new Error("no tool use");
+  return toolUse.input as Record<string, unknown>;
+}
+
+// What the person sees when a read fails. The upstream detail goes to
+// the server log; the screen gets a sentence they can act on.
+function extractionFailure(where: string, err: unknown): NextResponse {
+  const status = err instanceof Anthropic.APIError ? err.status : undefined;
+  console.error("extract failed:", where, status ?? "", err instanceof Error ? err.message : err);
+  if (err instanceof TruncatedReplyError) {
+    return NextResponse.json(
+      {
+        error:
+          "This document is too long to read in one pass, so nothing was filled in. Split it into smaller files and scan each one, or enter the details by hand.",
+      },
+      { status: 422 }
+    );
+  }
+  const error =
+    status === 413
+      ? "This file is too large to read in one piece. Split the PDF and try again."
+      : status === 429 || status === 529
+        ? "The document reader is busy right now. Wait a minute and try again."
+        : status === 400
+          ? "This file could not be read automatically. Check that it opens normally, or enter the details by hand."
+          : "Reading the document did not work this time. Try again, or enter the details by hand.";
+  return NextResponse.json({ error }, { status: 502 });
+}
+
+export async function POST(request: Request) {
+  // Only signed-in members of an organization may hit this (it spends
+  // API credits; signup is open, so a session alone is not enough).
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, user, orgId } = session;
 
   if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("extract: ANTHROPIC_API_KEY is not configured");
     return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY is not configured on the server." },
-      { status: 500 }
+      { error: "Document reading is not set up on this server yet. Enter the details by hand, or use Contact support." },
+      { status: 503 }
     );
   }
 
   // Per-user hourly limit across every extraction kind (session client;
   // the assistant_usage table is under the org's RLS).
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .single();
   const limit = await checkRateLimit(supabase, {
     userId: user.id,
-    orgId: profile?.organization_id ?? null,
+    orgId,
     kind: "extract",
     // Every statement in a multi-account tax PDF and every file in a bulk
     // document upload is one read, so a single year's county notices can
@@ -553,6 +594,15 @@ export async function POST(request: Request) {
   // PDFs may be long scans (a 156EZ packet, a deed book run); the vault
   // branch splits them into page chunks. Photos and spreadsheets stay
   // at 30 MB.
+  if (isImage && file.size > MODEL_IMAGE_MAX_BYTES) {
+    return NextResponse.json(
+      {
+        error:
+          "This photo is too large to read automatically (the limit is about 3.5 MB). Retake it at a lower resolution or scan it to a PDF, or enter the details by hand.",
+      },
+      { status: 413 }
+    );
+  }
   const sizeCap = isPdf && (isVaultKind || isTaxKind) ? 100 * 1024 * 1024 : 30 * 1024 * 1024;
   if (file.size > sizeCap) {
     return NextResponse.json(
@@ -613,12 +663,13 @@ export async function POST(request: Request) {
           },
         ],
       });
+      if (response.stop_reason === "max_tokens") throw new TruncatedReplyError();
       const toolUse = response.content.find(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
       );
       if (!toolUse) {
         return NextResponse.json(
-          { error: "The model could not map the spreadsheet. Enter the settlement manually." },
+          { error: "The spreadsheet's columns could not be worked out. Enter the settlement by hand." },
           { status: 502 }
         );
       }
@@ -672,11 +723,7 @@ export async function POST(request: Request) {
         },
       });
     } catch (err) {
-      const message =
-        err instanceof Anthropic.APIError
-          ? `Extraction failed (${err.status}): ${err.message}`
-          : "Extraction failed.";
-      return NextResponse.json({ error: message }, { status: 502 });
+      return extractionFailure("timber settlement spreadsheet", err);
     }
   }
 
@@ -701,9 +748,7 @@ export async function POST(request: Request) {
         tool_choice: { type: "tool", name: tool.name },
         messages: [{ role: "user", content: [imageBlock(bytes, pdf), { type: "text", text }] }],
       });
-      const toolUse = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-      if (!toolUse) throw new Error("no tool use");
-      return toolUse.input as Record<string, unknown>;
+      return toolInput(response);
     };
     try {
       if (kind === "tax_segment") {
@@ -771,7 +816,9 @@ export async function POST(request: Request) {
         }
         merged.lines = results.flatMap((r) => (Array.isArray(r.lines) ? (r.lines as unknown[]) : []));
         merged.header_identifiers = results.flatMap((r) => (Array.isArray(r.header_identifiers) ? (r.header_identifiers as unknown[]) : []));
-        merged.unsure_fields = [...new Set(results.flatMap((r) => (Array.isArray(r.unsure_fields) ? (r.unsure_fields as unknown[]).map(String) : [])))];
+        // Each part numbers its own lines from 0: shift the unsure paths
+        // so they point at the right line of the joined list.
+        merged.unsure_fields = mergeUnsureFields(results);
         merged.parts = parts.length;
         return NextResponse.json({ extraction: merged });
       }
@@ -781,12 +828,7 @@ export async function POST(request: Request) {
       if (err instanceof UnsplittablePdfError) {
         return NextResponse.json({ error: err.message }, { status: 422 });
       }
-      const status = err instanceof Anthropic.APIError ? err.status : undefined;
-      console.error("extract tax kind failed", kind, status, err instanceof Error ? err.message : err);
-      return NextResponse.json(
-        { error: status === 413 ? "This file is too large to read in one piece. Split the PDF and try again." : status ? `Extraction failed (${status}).` : "Extraction failed." },
-        { status: 502 }
-      );
+      return extractionFailure(kind, err);
     }
   }
 
@@ -879,11 +921,7 @@ export async function POST(request: Request) {
         tool_choice: { type: "tool", name: useTool.name },
         messages: [{ role: "user", content: [blockFor(bytes), { type: "text", text }] }],
       });
-      const toolUse = response.content.find(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
-      if (!toolUse) throw new Error("no tool use");
-      return toolUse.input as Record<string, unknown>;
+      return toolInput(response);
     };
     // Every 90-page chunk of a 156EZ packet, two at a time, merged by
     // farm number. Shared by the fsa_156ez kind and the intake pass.
@@ -970,23 +1008,11 @@ export async function POST(request: Request) {
       }
       if (err instanceof Error && err.message === "no tool use") {
         return NextResponse.json(
-          { error: "The model did not return an extraction. Try again or enter the details by hand." },
+          { error: "Nothing could be read from this document. Try again, or enter the details by hand." },
           { status: 502 }
         );
       }
-      const status = err instanceof Anthropic.APIError ? err.status : undefined;
-      console.error("extract vault kind failed", vaultKind, status, err instanceof Error ? err.message : err);
-      return NextResponse.json(
-        {
-          error:
-            status === 413
-              ? "This file is too large for the reader in one piece. Split the PDF into smaller parts, or enter the details by hand."
-              : status
-                ? `Extraction failed (${status}).`
-                : "Extraction failed.",
-        },
-        { status: 502 }
-      );
+      return extractionFailure(vaultKind, err);
     }
   }
 
@@ -1044,21 +1070,18 @@ export async function POST(request: Request) {
       ],
     });
 
+    if (response.stop_reason === "max_tokens") throw new TruncatedReplyError();
     const toolUse = response.content.find(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
     );
     if (!toolUse) {
       return NextResponse.json(
-        { error: "The model did not return an extraction. Try manual entry." },
+        { error: "Nothing could be read from this document. Try again, or enter the details by hand." },
         { status: 502 }
       );
     }
     return NextResponse.json({ extraction: toolUse.input });
   } catch (err) {
-    const message =
-      err instanceof Anthropic.APIError
-        ? `Extraction failed (${err.status}): ${err.message}`
-        : "Extraction failed.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return extractionFailure(kind, err);
   }
 }

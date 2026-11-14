@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import { spatialEvidenceFor } from "@/lib/spatialEvidence";
 
 export const maxDuration = 90;
@@ -9,11 +9,9 @@ export const maxDuration = 90;
 // description): no model call, just the reference resolution and the
 // overlap under the caller's RLS. Body: { extraction }.
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase } = session;
   let body: { extraction?: Record<string, unknown> };
   try {
     body = (await request.json()) as { extraction?: Record<string, unknown> };

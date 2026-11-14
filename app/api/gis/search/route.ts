@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import {
   GisError,
   buildEntityWheres,
@@ -20,11 +20,9 @@ const MAX_ENTITY_FEATURES = 1000;
 // the name). Runs server-side (CORS, pagination, format fallback) and
 // returns clean GeoJSON features with normalized attributes.
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase } = session;
 
   const body = await request.json();
   const serviceId = String(body.service_id ?? "");

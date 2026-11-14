@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
+import { checkRateLimit, rateLimited429 } from "@/lib/rateLimit";
 import { bboxOf } from "@/lib/geo/normalize";
 import type { MultiPolygon, Polygon } from "geojson";
 
@@ -28,17 +29,24 @@ const VISION_TOOL: Anthropic.Tool = {
 };
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase, user, orgId } = session;
 
-  const body = await request.json();
-  const geometry = body.geometry as Polygon | MultiPolygon | undefined;
+  const body = (await request.json().catch(() => null)) as { geometry?: unknown } | null;
+  const geometry = body?.geometry as Polygon | MultiPolygon | undefined;
   if (!geometry) {
     return NextResponse.json({ error: "Missing stand geometry." }, { status: 400 });
   }
+  // One image plus one AI call per stand: shares the hourly budget of
+  // the other AI reads so a loop cannot run it up.
+  const limit = await checkRateLimit(supabase, {
+    userId: user.id,
+    orgId,
+    kind: "extract",
+    limitPerHour: 300,
+  });
+  if (!limit.allowed) return rateLimited429("extract");
   const box = bboxOf([geometry]);
   if (!box) {
     return NextResponse.json({ error: "Empty stand geometry." }, { status: 400 });
@@ -59,9 +67,17 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
-    const imageBase64 = Buffer.from(await imageResponse.arrayBuffer()).toString(
-      "base64"
-    );
+    const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+    const imageBase64 = imageBytes.toString("base64");
+    // Satellite styles come back as JPEG, map styles as PNG. Label the
+    // image as what its first bytes say it is: the model API refuses an
+    // image whose bytes do not match its stated type.
+    const mediaType: "image/png" | "image/jpeg" | "image/webp" =
+      imageBytes[0] === 0x89 && imageBytes[1] === 0x50
+        ? "image/png"
+        : imageBytes.subarray(0, 4).toString("ascii") === "RIFF"
+          ? "image/webp"
+          : "image/jpeg";
 
     const client = new Anthropic();
     const message = await client.messages.create({
@@ -75,7 +91,7 @@ export async function POST(request: Request) {
           content: [
             {
               type: "image",
-              source: { type: "base64", media_type: "image/png", data: imageBase64 },
+              source: { type: "base64", media_type: mediaType, data: imageBase64 },
             },
             {
               type: "text",

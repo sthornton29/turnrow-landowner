@@ -4,7 +4,7 @@ import area from "@turf/area";
 import difference from "@turf/difference";
 import intersect from "@turf/intersect";
 import union from "@turf/union";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrgApi } from "@/lib/apiAuth";
 import { bboxOf, toMultiPolygon } from "@/lib/geo/normalize";
 import { pointInMultiPolygon } from "@/lib/geo/propertyMatch";
 import { CdlError, fetchCdlGrid, gridPointToLonLat, type CdlGrid } from "@/lib/timberScan/cdl";
@@ -46,11 +46,9 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 // both come from the raster (class separation happens at the pixel
 // level, before polygonization). Results cache per (property, year).
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const session = await requireOrgApi();
+  if (session instanceof NextResponse) return session;
+  const { supabase } = session;
 
   const body = await request.json();
   const propertyId = String(body.property_id ?? "");
