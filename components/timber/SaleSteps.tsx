@@ -25,6 +25,9 @@ import {
 export interface StepsSale {
   id: string;
   harvest_type: string | null;
+  // The sale's Status (active, completed, expired), set under Edit
+  // contract terms. The steps never change it; the Done step says so.
+  status?: string | null;
   stage: SaleStage;
   checklist: Record<string, string>;
   forester_name: string | null;
@@ -222,23 +225,45 @@ export default function SaleSteps({
     else router.refresh();
   }
 
-  async function removeBid(id: string) {
+  async function removeBid(b: StepsBid) {
+    if (
+      !window.confirm(
+        `Remove the ${formatDollars(Number(b.amount))} bid from ${b.bidder}${b.received_date ? `, received ${formatDate(b.received_date)}` : ""}?${
+          b.is_winner ? " It is marked as the winner." : ""
+        }`
+      )
+    )
+      return;
     setError(null);
-    const { error: err } = await supabase.from("timber_sale_bids").delete().eq("id", id);
+    const { error: err } = await supabase.from("timber_sale_bids").delete().eq("id", b.id);
     if (err) setError(friendlyDbError(err, "Could not remove the bid. Please try again."), "bids");
     else router.refresh();
   }
 
+  // A selling cost is filed under a property the sale covers, and a sale
+  // reaches its properties only through its linked stands: with no stand
+  // there is nowhere to file it. The property held in the form can be
+  // out of date (a stand linked or removed since the page opened), so
+  // the one used is always a property the sale covers now.
+  const noStands = properties.length === 0;
+  const costPropertyId = properties.some((p) => p.id === cost.property_id) ? cost.property_id : (properties[0]?.id ?? "");
+
   async function addCost() {
     if (locked) return;
     setError(null);
+    if (noStands) {
+      return setError(
+        "This sale has no timber stand linked yet, so the cost has no property to go under. Link a stand under Timber stands, further down this page, then add the cost.",
+        "costs"
+      );
+    }
     const amount = Number(cost.amount.replace(/[$,]/g, ""));
-    if (!(amount > 0) || !cost.property_id) return setError("Enter the amount (and the property).", "costs");
+    if (!(amount > 0)) return setError("Enter the amount.", "costs");
     if (!cost.date) return setError("Enter the date the cost was paid.", "costs");
     setBusy(true);
     const { error: err } = await supabase.from("timber_costs").insert({
       organization_id: orgId,
-      property_id: cost.property_id,
+      property_id: costPropertyId,
       timber_sale_id: sale.id,
       paid_date: cost.date,
       amount: Math.round(amount * 100) / 100,
@@ -252,9 +277,16 @@ export default function SaleSteps({
     startRefresh(() => router.refresh());
   }
 
-  async function removeCost(id: string) {
+  async function removeCost(c: StepsCost) {
+    const what = [c.description, c.vendor].filter(Boolean).join(", ");
+    if (
+      !window.confirm(
+        `Remove the ${formatDollars(Number(c.amount))} selling cost paid ${formatDate(c.paid_date)}${what ? ` (${what})` : ""}? It will no longer lower the taxable gain on this sale.`
+      )
+    )
+      return;
     setError(null);
-    const { error: err } = await supabase.from("timber_costs").delete().eq("id", id);
+    const { error: err } = await supabase.from("timber_costs").delete().eq("id", c.id);
     if (err) setError(friendlyDbError(err, "Could not remove the cost. Please try again."), "costs");
     else router.refresh();
   }
@@ -418,7 +450,7 @@ export default function SaleSteps({
                               Mark winner
                             </button>
                           )}
-                          <button onClick={() => removeBid(b.id)} className="ml-auto text-xs text-red-600 hover:underline">
+                          <button onClick={() => removeBid(b)} className="ml-auto text-xs text-red-600 hover:underline">
                             Remove
                           </button>
                         </li>
@@ -477,6 +509,12 @@ export default function SaleSteps({
           ) : null}
           {s === "complete" ? (
             <div className="space-y-2">
+              {sale.status && sale.status !== "completed" ? (
+                <p className="text-xs text-gray-600">
+                  The steps and the sale&apos;s Status are set separately. This sale&apos;s Status is not Completed yet:
+                  when the sale is finished, change it under Edit contract terms, below.
+                </p>
+              ) : null}
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <input
@@ -553,12 +591,18 @@ export default function SaleSteps({
                   <span className="text-gray-500">{properties.find((p) => p.id === c.property_id)?.name}</span>
                 ) : null}
                 <span className="ml-auto">{formatDollars(Number(c.amount))}</span>
-                <button onClick={() => removeCost(c.id)} className="text-xs text-red-600 hover:underline">
+                <button onClick={() => removeCost(c)} className="text-xs text-red-600 hover:underline">
                   Remove
                 </button>
               </li>
             ))}
           </ul>
+        ) : null}
+        {noStands ? (
+          <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            Link a timber stand to this sale before adding a selling cost: each cost goes under a property the sale
+            covers. Use + Link stand under Timber stands, further down this page.
+          </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
           <input value={cost.amount} onChange={(e) => setCost({ ...cost, amount: e.target.value })} placeholder="Amount $" inputMode="decimal" className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-sm" />
@@ -566,7 +610,7 @@ export default function SaleSteps({
           <input value={cost.vendor} onChange={(e) => setCost({ ...cost, vendor: e.target.value })} placeholder="Paid to" className="w-36 rounded-lg border border-gray-300 px-2 py-1 text-sm" />
           <input value={cost.description} onChange={(e) => setCost({ ...cost, description: e.target.value })} placeholder="For (forester fee)" className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2 py-1 text-sm" />
           {properties.length > 1 ? (
-            <select value={cost.property_id} onChange={(e) => setCost({ ...cost, property_id: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-1 text-sm">
+            <select value={costPropertyId} onChange={(e) => setCost({ ...cost, property_id: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-1 text-sm">
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -574,7 +618,7 @@ export default function SaleSteps({
               ))}
             </select>
           ) : null}
-          <button onClick={addCost} disabled={locked} className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50">
+          <button onClick={addCost} disabled={locked || noStands} className="rounded-lg bg-kelly-500 px-3 py-1 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50">
             Add
           </button>
         </div>

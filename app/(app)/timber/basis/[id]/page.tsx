@@ -75,10 +75,23 @@ export default async function TimberAccountPage({ params }: { params: Promise<{ 
       supabase.from("payments").select("timber_sale_id, amount, received_date").in("timber_sale_id", saleIds),
       supabase
         .from("timber_costs")
-        .select("timber_sale_id, amount, tax_category, property_id")
+        .select("timber_sale_id, amount, tax_category, property_id, activity_id")
         .in("timber_sale_id", saleIds)
         .eq("property_id", acct.property_id),
     ]);
+    // A cost entered on stand work that is only planned (or was marked
+    // not needed) has not been paid: it is left out here the same way
+    // the timber tax summary leaves it out (lib/timberTaxSummary.ts).
+    const activityIds = Array.from(new Set((costs ?? []).map((c) => c.activity_id).filter(Boolean))) as string[];
+    const { data: costActivities } =
+      activityIds.length > 0
+        ? await supabase.from("stand_activities").select("id, status").in("id", activityIds)
+        : { data: [] as Array<{ id: string; status: string }> };
+    const activityStatus = new Map((costActivities ?? []).map((a) => [a.id, a.status]));
+    const paidCosts = (costs ?? []).filter((c) => {
+      const status = c.activity_id ? activityStatus.get(c.activity_id) : undefined;
+      return status === undefined || status === "done";
+    });
     salesForBasis = (sales ?? []).map((sale) => {
       const saleStands = (saleLinks ?? [])
         .filter((l) => l.timber_sale_id === sale.id)
@@ -120,7 +133,7 @@ export default async function TimberAccountPage({ params }: { params: Promise<{ 
         proceeds += (Number(p.amount) || 0) * saleShare;
         if (p.received_date && (!lastDate || p.received_date > lastDate)) lastDate = p.received_date;
       }
-      const sellingExpenses = (costs ?? [])
+      const sellingExpenses = paidCosts
         .filter((c) => c.timber_sale_id === sale.id && c.tax_category === "selling_expense")
         .reduce((s, c) => s + Number(c.amount), 0);
       return {

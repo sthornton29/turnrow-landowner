@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars, todayISO } from "@/lib/format";
+import { formatAcres, formatDollars, plural, todayISO } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
 import { CU_STATUS_LABELS, buildTaxReport, deadlineText, type Finding, type ReportParcel } from "@/lib/taxReport";
 import { NoticeLog, ParcelFlags, ProtestPacketButton, TaxReportControls } from "@/components/taxes/TaxReportControls";
@@ -114,6 +114,10 @@ export default async function TaxReportPage({
   for (const l of lines ?? []) counts.set(l.tax_year, (counts.get(l.tax_year) ?? 0) + 1);
   const fullYears = years.filter((y) => (counts.get(y) ?? 0) >= 10);
   const year = Number(sp.year) || fullYears[0] || years[0] || Number(todayIso.slice(0, 4));
+  // The report picked the year itself (none in the link) and passed over
+  // a later year that has only a few lines: the page says so under the
+  // title, or the newest bills look like they are missing.
+  const skippedYear = !Number(sp.year) && years.length > 0 && years[0] > year ? years[0] : null;
   const entity = sp.entity ?? "";
   const property = sp.property ?? "";
   const county = sp.county ?? "";
@@ -222,6 +226,12 @@ export default async function TaxReportPage({
             /
           </p>
           <h1 className="text-xl font-semibold text-gray-900">Property tax report: {year}</h1>
+          {skippedYear !== null ? (
+            <p className="mt-0.5 max-w-2xl text-sm text-amber-800 print:hidden">
+              {skippedYear} has only {plural(counts.get(skippedYear) ?? 0, "bill line")} on file so far, so the report opened on{" "}
+              {year}. Pick {skippedYear} from the year list to see it.
+            </p>
+          ) : null}
           <p className="mt-0.5 text-sm text-gray-600">{scopeName}</p>
           <p className="mt-1 max-w-2xl text-sm text-gray-700">{WORKSHEET_NOTE}</p>
           <Link href="/taxes/reread" className="text-xs font-medium text-kelly-700 hover:underline print:hidden">

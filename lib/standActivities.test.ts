@@ -35,6 +35,15 @@ describe("activity types", () => {
     const used = new Set(Object.values(ACTIVITY_TYPES).map((d) => d.defaultTax));
     for (const c of used) expect(sqlCats).toContain(c);
   });
+
+  // The tax category list calls "a cruise for the sale" a selling cost,
+  // and a selling cost lowers a sale's gain only when the work it was
+  // entered on is tied to that sale. A Cruised entry with no sale picker
+  // left its selling cost out of the gain for good.
+  it("lets a cruise be tied to a timber sale, like a thinning or a harvest", () => {
+    const linkable = (Object.keys(ACTIVITY_TYPES) as ActivityType[]).filter((t) => ACTIVITY_TYPES[t].linksSale).sort();
+    expect(linkable).toEqual(["cruise", "harvest", "thinning"]);
+  });
 });
 
 describe("taxCategoryFor", () => {

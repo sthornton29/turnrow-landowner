@@ -52,7 +52,8 @@ export interface ActivityTypeDef {
   hint: string; // one plain line under the button
   defaultTax: TaxCategory;
   details: DetailField[];
-  // Activities that change the stand's age clock / "last" facts.
+  // Work that can belong to a timber sale: the form offers the Timber
+  // sale picker, and the sale picked goes on the work and its costs.
   linksSale?: boolean;
 }
 
@@ -269,6 +270,9 @@ export const ACTIVITY_TYPES: Record<ActivityType, ActivityTypeDef> = {
     button: "Cruised",
     hint: "A forester measured the timber",
     defaultTax: "operating_expense",
+    // A cruise done for a sale is a selling cost, and a selling cost only
+    // lowers the gain when its work is tied to the sale.
+    linksSale: true,
     details: [
       { key: "forester", label: "Forester", input: "text" },
       { key: "estimated_value", label: "Estimated timber value ($)", input: "number" },

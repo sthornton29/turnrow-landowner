@@ -545,7 +545,9 @@ export default function TaxUploadClient({
       } else if (res.reason === "no_service") {
         countyUnavailable.current.set(countyKey, null);
       } else if (res.reason === "no_mapping") {
-        const note = `${res.service?.display_name ?? "The county's GIS service"} has no identifier fields mapped yet, so the county could not be asked for these numbers (Settings > Admin > County GIS > Re-verify).`;
+        // Setting this up is platform administrator work, so the note says
+        // what to do here and who to ask, not where to click.
+        const note = `${res.service?.display_name ?? "This county's records"} cannot be searched by the numbers printed on a bill yet, so the county could not be asked for these numbers. Pick the parcel by hand or leave the line unmatched. To have that set up, use Contact support under the ? button.`;
         countyUnavailable.current.set(countyKey, note);
       } else {
         const byKey = new Map(res.results.map((r) => [r.key, r.hits]));

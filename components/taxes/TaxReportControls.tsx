@@ -126,7 +126,13 @@ export function ParcelFlags({
         <option value="enrolled">Enrolled in current use</option>
         <option value="not_enrolled">Not enrolled</option>
       </select>
-      <label className="flex items-center gap-1 text-xs text-gray-600">
+      {/* is_homestead is saved on the parcel, but nothing in
+          lib/taxReport.ts reads it yet, so the label says it is a note
+          (short, because it repeats on every parcel row). */}
+      <label
+        className="flex items-center gap-1 text-xs text-gray-600"
+        title="Kept as a note on the parcel. The findings do not use it yet."
+      >
         <input
           type="checkbox"
           checked={homestead}
@@ -134,7 +140,7 @@ export function ParcelFlags({
           onChange={(e) => save({ is_homestead: e.target.checked })}
           className="h-3.5 w-3.5 accent-kelly-500"
         />
-        Homestead
+        Homestead (note only)
       </label>
     </span>
   );

@@ -62,7 +62,8 @@ export default function TaxStatusClient({
   initialLines: TaxStatementLineRow[];
   initialPayments: TaxPaymentRow[];
   entities: Array<{ id: string; name: string }>;
-  // Cosmetic gate: statement creation is admin work (RLS enforces).
+  // The viewer is an admin. Cosmetic gate: statement creation is admin
+  // work (RLS enforces), and Delete statement is shown to admins only.
   canUpload?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -223,7 +224,9 @@ export default function TaxStatusClient({
         if (res.error || res.reason === "no_mapping") {
           const note = res.error
             ? `County GIS lookup unavailable (${res.error}); tried again next time.`
-            : `${res.service?.display_name ?? "The county's GIS service"} has no identifier fields mapped yet (Settings > Admin > County GIS > Re-verify).`;
+            : // Setting this up is platform administrator work, so the note
+              // says what to do here and who to ask, not where to click.
+              `${res.service?.display_name ?? "This county's records"} cannot be searched by the numbers printed on a bill yet, so match this line by hand. To have that set up, use Contact support under the ? button.`;
           setCountyNote((m) => ({ ...m, ...Object.fromEntries(g.lines.map((l) => [l.id, note])) }));
           if (res.error) for (const l of g.lines) lookedUp.current.delete(l.id);
           return;
@@ -1118,13 +1121,18 @@ export default function TaxStatusClient({
                         ) : null}
                         <EntityDocuments orgId={orgId} entityType="tax_statement" entityId={s.id} />
                       </div>
-                      <button
-                        onClick={() => deleteStatement(s)}
-                        disabled={deleting !== null}
-                        className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
-                      >
-                        {deleting === s.id ? "Deleting..." : "Delete statement"}
-                      </button>
+                      {/* Admins only: deleting takes the statement's payments
+                          with it, and only an admin can upload the bill
+                          again to replace it. */}
+                      {canUpload ? (
+                        <button
+                          onClick={() => deleteStatement(s)}
+                          disabled={deleting !== null}
+                          className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                        >
+                          {deleting === s.id ? "Deleting..." : "Delete statement"}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </li>

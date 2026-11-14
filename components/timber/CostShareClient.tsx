@@ -98,9 +98,15 @@ export function CostSharePayments({
     else router.refresh();
   }
 
-  async function remove(id: string) {
+  async function remove(p: CostSharePaymentRow) {
+    if (
+      !window.confirm(
+        `Remove the ${formatDollars(Number(p.amount))} payment received ${formatDate(p.received_date)}? It comes off this contract's total and the timber tax summary.`
+      )
+    )
+      return;
     setError(null);
-    const { error: err } = await supabase.from("cost_share_payments").delete().eq("id", id);
+    const { error: err } = await supabase.from("cost_share_payments").delete().eq("id", p.id);
     if (err) setError(friendlyDbError(err, "Could not remove the payment. Please try again."));
     else router.refresh();
   }
@@ -132,7 +138,7 @@ export function CostSharePayments({
                       </option>
                     ))}
                   </select>
-                  <button onClick={() => remove(p.id)} className="text-xs text-red-600 hover:underline">
+                  <button onClick={() => remove(p)} className="text-xs text-red-600 hover:underline">
                     Remove
                   </button>
                 </div>

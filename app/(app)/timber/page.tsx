@@ -195,7 +195,7 @@ export default async function TimberPage() {
             <Link href="/map" className="font-medium text-kelly-700 hover:underline">
               map
             </Link>{" "}
-            (Add, then Boundary, then Timber) or assign imported boundaries as
+            (+ Add, then Timber stand) or assign imported boundaries as
             timber stands on the{" "}
             <Link href="/import" className="font-medium text-kelly-700 hover:underline">
               import page

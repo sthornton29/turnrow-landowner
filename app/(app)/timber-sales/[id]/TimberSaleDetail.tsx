@@ -234,6 +234,9 @@ export default function TimberSaleDetail({
     setAddStandId("");
     await load();
     setWorking(false);
+    // The sale steps panel above (selling costs, depletion links) works
+    // from the stands the server sent; ask for them again.
+    router.refresh();
   }
 
   async function removeStand(link: StandLink) {
@@ -258,6 +261,7 @@ export default function TimberSaleDetail({
     }
     await load();
     setWorking(false);
+    router.refresh();
   }
 
   async function setAllocationMethod(method: AllocationMethod) {

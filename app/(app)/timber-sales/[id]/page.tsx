@@ -68,6 +68,7 @@ export default async function TimberSaleDetailPage({
       sale={{
         id: sale.id,
         harvest_type: sale.harvest_type ?? null,
+        status: sale.status ?? null,
         stage: effectiveStage(sale, (settlements ?? []).length > 0),
         checklist: (sale.checklist as Record<string, string>) ?? {},
         forester_name: sale.forester_name ?? null,
