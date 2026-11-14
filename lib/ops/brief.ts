@@ -7,8 +7,13 @@
 // stopped syncing. Every read is filtered by the organization; filters are
 // eq/neq/in/is only and dates are compared here, so the fake client in the
 // tests reads the same way the live one does.
+//
+// The rules Home shares are exported from here (addDaysISO,
+// isAfterEndedLease, unpaidTaxByYear, taxAlertText) and Home imports
+// them, so the two can never drift apart.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatDate, formatDollars, todayISO } from "@/lib/format";
 import { paymentStatus } from "@/lib/leaseLogic";
 import { OPS_APP, OPS_LABEL } from "./auth";
 
@@ -21,10 +26,94 @@ export interface OpsBrief {
   todos: OpsTodo[]; alerts: OpsAlert[]; metrics: OpsMetric[]; lists: OpsList[]; notes: string[];
 }
 
-const DAY = 86_400_000;
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+// ---------------------------------------------------------------- shared with Home
+
+// A calendar date (YYYY-MM-DD) moved by a number of days; negative goes back.
+export function addDaysISO(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+// An expected payment dated AFTER the end of a lease that is no longer
+// active (expired or terminated) is not owed: the schedule simply ran on
+// past the lease. Rent that came due during the lease's term still is,
+// however old. A lease with no end date on file is left alone.
+export function isAfterEndedLease(
+  dueDate: string,
+  lease: { status?: unknown; end_date?: unknown } | null | undefined
+): boolean {
+  if (!lease || (lease.status !== "expired" && lease.status !== "terminated")) return false;
+  return typeof lease.end_date === "string" && lease.end_date !== "" && dueDate > lease.end_date;
+}
+
+// Unpaid property tax for one tax year that needs a person now.
+// delinquent_date is the FIRST delinquent day, so the last day to pay is
+// the day before it.
+export interface TaxYearAlert {
+  taxYear: number;
+  delinquentOwed: number; // unpaid on statements already delinquent
+  delinquentStatements: number;
+  delinquentSince: string | null; // the earliest first-delinquent day among them
+  soonOwed: number; // unpaid on statements that go delinquent within the horizon
+  soonStatements: number;
+  payBy: string | null; // the last day to pay the soonest of those
+}
+
+// Every tax year (not only the current one) with a statement that still
+// has a balance and is past, or within the horizon of, its delinquent
+// date. Property tax for a year is due October 1 and goes delinquent
+// January 1 of the NEXT year, so last year's bills matter most in
+// January. Newest tax year first. A statement with no delinquent date on
+// file cannot be judged and is left out.
+export function unpaidTaxByYear(
+  statements: Array<{ id?: unknown; tax_year?: unknown; amount_due?: unknown; delinquent_date?: unknown }>,
+  paidByStatement: Map<string, number>,
+  today: string,
+  horizon: string
+): TaxYearAlert[] {
+  const byYear = new Map<number, TaxYearAlert>();
+  for (const s of statements) {
+    const owed = Number(s.amount_due ?? 0) - (paidByStatement.get(String(s.id)) ?? 0);
+    const date = typeof s.delinquent_date === "string" ? s.delinquent_date : "";
+    if (owed <= 0.005 || !date || date > horizon) continue;
+    const year = Number(s.tax_year);
+    const a = byYear.get(year) ?? { taxYear: year, delinquentOwed: 0, delinquentStatements: 0, delinquentSince: null, soonOwed: 0, soonStatements: 0, payBy: null };
+    if (date <= today) {
+      a.delinquentOwed += owed;
+      a.delinquentStatements += 1;
+      if (!a.delinquentSince || date < a.delinquentSince) a.delinquentSince = date;
+    } else {
+      a.soonOwed += owed;
+      a.soonStatements += 1;
+      const last = addDaysISO(date, -1);
+      if (!a.payBy || last < a.payBy) a.payBy = last;
+    }
+    byYear.set(year, a);
+  }
+  return Array.from(byYear.values())
+    .map((a) => ({ ...a, delinquentOwed: r2(a.delinquentOwed), soonOwed: r2(a.soonOwed) }))
+    .sort((a, b) => b.taxYear - a.taxYear);
+}
+
+// The sentence for one tax year's alert, the same on Home and in the brief.
+export function taxAlertText(a: TaxYearAlert): string {
+  const on = (n: number) => `on ${n.toLocaleString("en-US")} statement${n === 1 ? "" : "s"}`;
+  if (a.delinquentStatements > 0) {
+    return (
+      `${formatDollars(a.delinquentOwed)} unpaid ${on(a.delinquentStatements)}, delinquent since ${formatDate(a.delinquentSince)}.` +
+      (a.soonStatements > 0
+        ? ` Another ${formatDollars(a.soonOwed)} ${on(a.soonStatements)} must be paid by ${formatDate(a.payBy)}.`
+        : "")
+    );
+  }
+  return `${formatDollars(a.soonOwed)} unpaid ${on(a.soonStatements)}. Pay by ${formatDate(a.payBy)} to avoid going delinquent.`;
+}
+
+// ---------------------------------------------------------------- the brief
+
+const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 type Row = Record<string, unknown>;
 async function rows(q: PromiseLike<{ data: unknown; error: { message: string } | null }>, what: string): Promise<Row[]> {
@@ -34,11 +123,13 @@ async function rows(q: PromiseLike<{ data: unknown; error: { message: string } |
 }
 
 export async function buildBrief(client: SupabaseClient, orgId: string, base: string, now: Date = new Date()): Promise<OpsBrief> {
-  const today = iso(now);
-  const in30 = iso(new Date(now.getTime() + 30 * DAY));
-  const in60 = iso(new Date(now.getTime() + 60 * DAY));
-  const in90 = iso(new Date(now.getTime() + 90 * DAY));
-  const taxYear = now.getUTCFullYear();
+  // "Today" is the calendar day where the land is (US Central); the
+  // server runs in UTC and would call it tomorrow every evening.
+  const today = todayISO(now);
+  const todayStart = new Date(today + "T00:00:00");
+  const in30 = addDaysISO(today, 30);
+  const in60 = addDaysISO(today, 60);
+  const in90 = addDaysISO(today, 90);
   const url = (path: string) => `${base}${path}`;
 
   const [expected, payments, leases, sales, tenants, issues, statements, taxPaid, docs, connections, properties] = await Promise.all([
@@ -48,7 +139,8 @@ export async function buildBrief(client: SupabaseClient, orgId: string, base: st
     rows(client.from("timber_sales").select("id, sale_name").eq("organization_id", orgId), "timber sales"),
     rows(client.from("tenants").select("id, name, insurance_on_file, insurance_expires").eq("organization_id", orgId), "tenants"),
     rows(client.from("maintenance_issues").select("id, severity, issue_type, label").eq("organization_id", orgId).eq("status", "open"), "maintenance"),
-    rows(client.from("tax_statements").select("id, tax_year, county, authority_name, amount_due, delinquent_date").eq("organization_id", orgId).eq("tax_year", taxYear), "tax statements"),
+    // Every tax year: last year's bills go delinquent on January 1.
+    rows(client.from("tax_statements").select("id, tax_year, county, authority_name, amount_due, delinquent_date").eq("organization_id", orgId), "tax statements"),
     rows(client.from("tax_payments").select("tax_statement_id, amount").eq("organization_id", orgId), "tax payments"),
     rows(client.from("documents").select("id, title, file_name, title_reviewed").eq("organization_id", orgId).eq("title_reviewed", false), "documents"),
     rows(client.from("farm_connections").select("id, label, status, last_error, last_synced_at").eq("organization_id", orgId).neq("status", "revoked"), "farm connections"),
@@ -68,9 +160,11 @@ export async function buildBrief(client: SupabaseClient, orgId: string, base: st
   for (const e of expected.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))) {
     const amount = Number(e.expected_amount ?? 0);
     const got = received.get(String(e.id)) ?? 0;
-    const status = paymentStatus(amount, got, String(e.due_date), now);
+    const status = paymentStatus(amount, got, String(e.due_date), todayStart);
     if (status === "paid") continue;
     const lease = e.lease_id ? leaseById.get(String(e.lease_id)) : null;
+    // A schedule row past the end of an expired or terminated lease is not owed.
+    if (isAfterEndedLease(String(e.due_date), lease)) continue;
     const from = lease ? String(lease.name) : e.timber_sale_id ? saleName.get(String(e.timber_sale_id)) ?? "a timber sale" : "a lease";
     const page = e.lease_id ? `/leases/${e.lease_id}` : `/timber-sales/${e.timber_sale_id}`;
     const owed = r2(amount - got);
@@ -122,17 +216,28 @@ export async function buildBrief(client: SupabaseClient, orgId: string, base: st
   const high = issues.filter((i) => i.severity === "high").length;
   if (issues.length) alerts.push({ severity: high ? "high" : "medium", text: `${issues.length} open maintenance issue${issues.length === 1 ? "" : "s"} on the land${high ? ` (${high} high severity)` : ""}.`, amount: null, url: url("/maintenance") });
 
-  // This year's property taxes near or past delinquency.
+  // Property taxes near or past delinquency, for EVERY tax year with a
+  // balance (not only this calendar year's), each named by its tax year.
   const paidBy = new Map<string, number>();
   for (const p of taxPaid) paidBy.set(String(p.tax_statement_id), (paidBy.get(String(p.tax_statement_id)) ?? 0) + Number(p.amount ?? 0));
-  const unpaid = statements.map((s) => ({ s, owed: r2(Number(s.amount_due ?? 0) - (paidBy.get(String(s.id)) ?? 0)) })).filter((x) => x.owed > 0.005);
-  const taxOwed = r2(unpaid.reduce((sum, x) => sum + x.owed, 0));
-  const delinquent = unpaid.map((x) => x.s.delinquent_date).filter((d): d is string => typeof d === "string" && !!d).sort()[0] ?? null;
-  if (taxOwed > 0 && delinquent) {
-    if (delinquent < today) alerts.push({ severity: "high", text: `${taxYear} property taxes: ${money(taxOwed)} unpaid and delinquent since ${delinquent}.`, amount: taxOwed, url: url("/taxes") });
-    else if (delinquent <= in60) alerts.push({ severity: "medium", text: `${taxYear} property taxes: ${money(taxOwed)} unpaid, delinquent ${delinquent}.`, amount: taxOwed, url: url("/taxes") });
-    if (delinquent <= in60) todos.push({ id: `taxes-${taxYear}`, text: `Pay the ${money(taxOwed)} of ${taxYear} property taxes still unpaid (${unpaid.length} statement${unpaid.length === 1 ? "" : "s"}) and record the payments.`, due: delinquent, status: delinquent < today ? "overdue" : "open", owner: null, url: url("/taxes") });
+  for (const a of unpaidTaxByYear(statements, paidBy, today, in60)) {
+    const owed = r2(a.delinquentOwed + a.soonOwed);
+    const late = a.delinquentStatements > 0;
+    const count = a.delinquentStatements + a.soonStatements;
+    const page = url(`/taxes?year=${a.taxYear}`);
+    alerts.push({ severity: late ? "high" : "medium", text: `${a.taxYear} property taxes: ${taxAlertText(a)}`, amount: owed, url: page });
+    // Due = the last day to pay (the day before the first delinquent day).
+    const due = a.delinquentSince ? addDaysISO(a.delinquentSince, -1) : a.payBy;
+    todos.push({ id: `taxes-${a.taxYear}`, text: `Pay the ${money(owed)} of ${a.taxYear} property taxes still unpaid (${count} statement${count === 1 ? "" : "s"}) and record the payments.`, due, status: late ? "overdue" : "open", owner: null, url: page });
   }
+  // The headline figure follows Home's tax card: the latest tax year
+  // that has statements (this calendar year when there are none).
+  const taxYear = statements.reduce((latest, s) => Math.max(latest, Number(s.tax_year) || 0), 0) || Number(today.slice(0, 4));
+  const taxOwed = r2(
+    statements
+      .filter((s) => Number(s.tax_year) === taxYear)
+      .reduce((sum, s) => sum + Math.max(Number(s.amount_due ?? 0) - (paidBy.get(String(s.id)) ?? 0), 0), 0)
+  );
 
   // Documents whose title waits on a person.
   if (docs.length) todos.push({ id: "document-titles", text: `Check the title read from ${docs.length} document${docs.length === 1 ? "" : "s"}.`, due: null, status: "open", owner: null, url: url("/documents/titles") });

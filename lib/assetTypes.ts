@@ -357,6 +357,30 @@ export function cleanDetails(
   return out;
 }
 
+// The saved details a change of Type would drop. cleanDetails keeps only
+// the new type's fields, so saving after changing an asset's Type loses
+// everything the old type recorded that the new one has no place for
+// (a well's depth and pump, a pivot's coverage circle). The form warns
+// with these labels before it saves. Empty when nothing would be lost.
+export function detailsLostOnTypeChange(
+  fromType: AssetType,
+  toType: AssetType,
+  existing: Record<string, unknown> | null | undefined
+): string[] {
+  if (fromType === toType) return [];
+  const kept = new Set(ASSET_TYPES[toType].fields.map((f) => f.key));
+  const labelOf = new Map(ASSET_TYPES[fromType].fields.map((f) => [f.key, f.label]));
+  const lost: string[] = [];
+  for (const [key, value] of Object.entries(existing ?? {})) {
+    if (kept.has(key)) continue;
+    const empty =
+      value === null || value === undefined || value === "" || value === false ||
+      (Array.isArray(value) && value.length === 0);
+    if (!empty) lost.push(labelOf.get(key) ?? key);
+  }
+  return lost;
+}
+
 export const STAND_TYPE_LABELS: Record<string, string> = {
   planted_pine: "Planted pine",
   natural_pine: "Natural pine",

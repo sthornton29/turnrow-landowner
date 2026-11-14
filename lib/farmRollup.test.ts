@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FarmFieldDataRow, FieldMappingRow } from "./farmDisplay";
-import { NO_ENTITY_KEY, propertyRollups, rollups, scopedRollup, tenantKey, type RollupInput } from "./farmRollup";
+import { NO_ENTITY_KEY, distinctTenantOptions, propertyRollups, rollups, scopedRollup, tenantKey, type RollupInput } from "./farmRollup";
 
 function planting(p: Partial<FarmFieldDataRow> & { farm_connection_id: string; remote_field_id: string }): FarmFieldDataRow {
   return {
@@ -317,5 +317,46 @@ describe("harvest completion (migration 0033)", () => {
     // still reads complete, so pre-addendum data renders unchanged.
     const acme = rollups(base).byTenant.find((r) => r.key === tenantKey("acme", null))!;
     expect(acme.yieldByCrop.find((y) => y.crop === "Corn")!.yieldPerAcre).toBeCloseTo(24000 / 130, 6);
+  });
+});
+
+describe("tenant filter options", () => {
+  const conns = [
+    { id: "c1", label: "Celeste Farm, LLC / Martin Land LLC" },
+    { id: "c2", label: "Celeste Farm, LLC / Home Place Trust" },
+    { id: "c3", label: "Bravo" },
+  ];
+
+  it("adds the connection label when two tenants share a name, and leaves unique names alone", () => {
+    const out = distinctTenantOptions(
+      [
+        { key: tenantKey("c1", null), name: "Celeste Farm, LLC" },
+        { key: tenantKey("c2", null), name: "Celeste Farm, LLC" },
+        { key: tenantKey("c3", "e9"), name: "Bravo Brothers" },
+      ],
+      conns
+    );
+    expect(out).toEqual([
+      { key: tenantKey("c1", null), name: "Celeste Farm, LLC (Celeste Farm, LLC / Martin Land LLC)" },
+      { key: tenantKey("c2", null), name: "Celeste Farm, LLC (Celeste Farm, LLC / Home Place Trust)" },
+      { key: tenantKey("c3", "e9"), name: "Bravo Brothers" },
+    ]);
+    expect(new Set(out.map((o) => o.name)).size).toBe(3);
+  });
+
+  it("numbers the options when even the connection labels match", () => {
+    const same = [
+      { id: "c1", label: "Celeste Farm, LLC" },
+      { id: "c2", label: "Celeste Farm, LLC" },
+    ];
+    const out = distinctTenantOptions(
+      [
+        { key: tenantKey("c1", null), name: "Celeste Farm, LLC" },
+        { key: tenantKey("c2", null), name: "Celeste Farm, LLC" },
+      ],
+      same
+    );
+    expect(out.map((o) => o.name)).toEqual(["Celeste Farm, LLC (1)", "Celeste Farm, LLC (2)"]);
+    expect(out.map((o) => o.key)).toEqual([tenantKey("c1", null), tenantKey("c2", null)]);
   });
 });

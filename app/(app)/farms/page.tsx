@@ -4,7 +4,7 @@ import FarmsClient from "./FarmsClient";
 export const metadata = { title: "Farm data" };
 
 export default async function FarmsPage() {
-  const { supabase } = await requireOrg();
+  const { supabase, isAdmin } = await requireOrg();
   const { data: connections } = await supabase
     .from("farm_connections")
     .select(
@@ -12,5 +12,5 @@ export default async function FarmsPage() {
     )
     .order("created_at");
 
-  return <FarmsClient initialConnections={connections ?? []} />;
+  return <FarmsClient initialConnections={connections ?? []} isAdmin={isAdmin} />;
 }

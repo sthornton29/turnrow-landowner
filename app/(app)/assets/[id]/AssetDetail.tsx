@@ -9,7 +9,9 @@ import {
   ASSET_TYPE_ORDER,
   CONDITION_LABELS,
   cleanDetails,
+  detailsLostOnTypeChange,
 } from "@/lib/assetTypes";
+import { friendlyDbError, NO_ACCESS_MESSAGE } from "@/lib/dbErrors";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import { circleUpdateForDetails } from "@/lib/geo/circle";
 import { formatNumber } from "@/lib/format";
@@ -46,6 +48,8 @@ export default function AssetDetail({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Deactivate, reactivate, and delete report beside their own buttons.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const def = ASSET_TYPES[assetType];
 
@@ -83,16 +87,32 @@ export default function AssetDetail({
       .single();
     setBusy(false);
     if (err || !data) {
-      setError("Could not add the bin. " + (err?.message ?? ""));
+      setError(friendlyDbError(err, "Could not add the bin. Please try again."));
       return;
     }
     router.push(`/assets/${data.id}`);
   }
 
   async function save(formData: FormData) {
-    setBusy(true);
     setError(null);
     setMessage(null);
+
+    // A new Type keeps only its own details. Say what the old type's
+    // saved details are before they go, and let the person back out.
+    const lost = detailsLostOnTypeChange(asset.asset_type, assetType, asset.details);
+    if (
+      lost.length > 0 &&
+      !window.confirm(
+        [
+          `Changing the type from ${ASSET_TYPES[asset.asset_type].label} to ${def.label} removes these saved details:`,
+          lost.join(", "),
+          "Save anyway?",
+        ].join("\n\n")
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
 
     const raw = Object.fromEntries(formData.entries());
     const num = (key: string) => {
@@ -137,7 +157,7 @@ export default function AssetDetail({
 
     setBusy(false);
     if (err || gErr) {
-      setError("Could not save. " + (err?.message ?? gErr?.message ?? ""));
+      setError(friendlyDbError(err ?? gErr, "Could not save. Please try again."));
       return;
     }
     setMessage("Saved.");
@@ -146,20 +166,52 @@ export default function AssetDetail({
 
   async function setActive(active: boolean) {
     setBusy(true);
-    await supabase.from("assets").update({ is_active: active }).eq("id", asset.id);
+    setActionError(null);
+    // Asking for the row back tells a refusal apart from a success: row
+    // level security answers "no" with no error and no row.
+    const { data, error: err } = await supabase
+      .from("assets")
+      .update({ is_active: active })
+      .eq("id", asset.id)
+      .select("id");
     setBusy(false);
+    if (err || (data ?? []).length === 0) {
+      setActionError(
+        err
+          ? friendlyDbError(err, active ? "Could not reactivate this asset. Please try again." : "Could not deactivate this asset. Please try again.")
+          : NO_ACCESS_MESSAGE
+      );
+      return;
+    }
     router.refresh();
   }
 
+  // Deleting removes the asset row and its saved details. Photos and
+  // documents attached to it are separate records with no link the
+  // database follows, so they are NOT deleted: they stay in Documents.
+  // Assets that point here as their site or supply well are kept and
+  // detached (parent_asset_id is set null by the foreign key).
   async function remove() {
-    if (
-      !window.confirm(
-        "Permanently delete this asset and its records? Usually Deactivate is better; it keeps the history."
-      )
-    ) {
+    const attached = childAssets.length;
+    const message = [
+      `Permanently delete ${asset.name}? Its saved details go with it, and this cannot be undone.`,
+      "Photos and documents attached to it are not deleted. They stay in your Documents list; remove them there first if you do not want to keep them.",
+      attached > 0
+        ? `${formatNumber(attached)} asset${attached === 1 ? "" : "s"} linked to it ${attached === 1 ? "is" : "are"} kept and will no longer point to it.`
+        : null,
+      "Usually Deactivate is better; it keeps the history.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (!window.confirm(message)) return;
+    setBusy(true);
+    setActionError(null);
+    const { data, error: err } = await supabase.from("assets").delete().eq("id", asset.id).select("id");
+    if (err || (data ?? []).length === 0) {
+      setBusy(false);
+      setActionError(err ? friendlyDbError(err, "Could not delete this asset. Please try again.") : NO_ACCESS_MESSAGE);
       return;
     }
-    await supabase.from("assets").delete().eq("id", asset.id);
     router.push("/assets");
   }
 
@@ -253,7 +305,15 @@ export default function AssetDetail({
         </div>
       ) : null}
 
-      <form action={save} className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+      <form
+        // Submitted by hand rather than through the form's action, so a
+        // failed or cancelled save does not reset what was typed.
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(new FormData(e.currentTarget));
+        }}
+        className="space-y-4 rounded-xl border border-gray-200 bg-white p-4"
+      >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>
@@ -465,6 +525,7 @@ export default function AssetDetail({
         >
           Delete permanently
         </button>
+        {actionError ? <p className="basis-full text-sm text-red-600">{actionError}</p> : null}
       </section>
     </div>
   );

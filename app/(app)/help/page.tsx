@@ -10,6 +10,7 @@ import { HELP_GENERATED, HELP_TOPICS, type HelpTopic } from "@/lib/helpContent.g
 import { groupTopics, searchTopics } from "@/lib/help";
 import { renderHelpMarkdown } from "@/lib/helpMarkdown";
 import { openHelp } from "@/lib/helpBus";
+import { formatDate } from "@/lib/format";
 
 function HelpCenter() {
   const params = useSearchParams();
@@ -52,7 +53,7 @@ function HelpCenter() {
           </button>
           <div className="flex items-baseline justify-between gap-2">
             <h2 className="text-xl font-semibold text-pine-900">{open.title}</h2>
-            <span className="text-xs text-gray-400">updated {open.updated}</span>
+            <span className="text-xs text-gray-400">updated {formatDate(open.updated)}</span>
           </div>
           <div className="mt-2">{renderHelpMarkdown(open.body)}</div>
           <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3">
@@ -88,7 +89,7 @@ function HelpCenter() {
                     className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:bg-kelly-50"
                   >
                     <div className="font-semibold text-gray-900">{t.title}</div>
-                    <div className="mt-0.5 text-xs text-gray-400">updated {t.updated}</div>
+                    <div className="mt-0.5 text-xs text-gray-400">updated {formatDate(t.updated)}</div>
                   </button>
                 ))}
               </div>
@@ -102,7 +103,7 @@ function HelpCenter() {
         </>
       )}
 
-      <p className="text-center text-[11px] text-gray-400">Help content generated {HELP_GENERATED}.</p>
+      <p className="text-center text-[11px] text-gray-400">Help content generated {formatDate(HELP_GENERATED)}.</p>
     </div>
   );
 }

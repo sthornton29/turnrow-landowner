@@ -5,8 +5,15 @@
 // When the how-to chat escalates, its transcript arrives via the prop and
 // rides along in the email body.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MAX_SCREENSHOT_BYTES } from "@/lib/supportRequest";
+
+// The unsent message is kept for this browser tab, so closing the help
+// sheet (or a send that failed) does not throw away what was typed.
+const DRAFT_KEY = "turnrow.support.draft";
+// Long enough for a 2 MB screenshot on a weak signal, short enough that
+// "Sending..." cannot sit there forever.
+const SEND_TIMEOUT_MS = 60_000;
 
 export default function ContactSupportForm({
   pathname,
@@ -21,6 +28,31 @@ export default function ContactSupportForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+
+  // Bring back an unsent draft after mount, then keep it saved as it changes.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(DRAFT_KEY) ?? "null") as {
+        subject?: unknown;
+        message?: unknown;
+      } | null;
+      if (typeof saved?.subject === "string") setSubject(saved.subject);
+      if (typeof saved?.message === "string") setMessage(saved.message);
+    } catch {
+      // No saved draft, or storage is unavailable: start empty.
+    }
+    setDraftLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!draftLoaded) return;
+    try {
+      if (subject || message) window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ subject, message }));
+      else window.sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // Storage is unavailable: the draft still lives while the form is open.
+    }
+  }, [draftLoaded, subject, message]);
 
   function pickShot(file: File | undefined) {
     setErr(null);
@@ -49,25 +81,45 @@ export default function ContactSupportForm({
       return;
     }
     setBusy(true);
-    const res = await fetch("/api/support-contact", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        subject: subject.trim() || "Support request",
-        message: message.trim(),
-        pathname,
-        transcript: transcript || undefined,
-        screenshot: shot?.dataUrl,
-        screenshotName: shot?.name,
-      }),
-    });
-    const json = await res.json().catch(() => null);
-    setBusy(false);
-    if (!res.ok) {
-      setErr(json?.error ?? "Could not send. Try again in a minute.");
-      return;
+    // With no signal the request fails or never answers. Either way the
+    // form says so in plain words and keeps the message.
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+    try {
+      const res = await fetch("/api/support-contact", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: subject.trim() || "Support request",
+          message: message.trim(),
+          pathname,
+          transcript: transcript || undefined,
+          screenshot: shot?.dataUrl,
+          screenshotName: shot?.name,
+        }),
+        signal: controller.signal,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setErr(json?.error ?? "Could not send. Try again in a minute.");
+        return;
+      }
+      try {
+        window.sessionStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // Nothing to clear.
+      }
+      setSubject("");
+      setMessage("");
+      setSent(true);
+    } catch {
+      setErr(
+        "Your message was not sent. Check your connection and try Send to support again. What you wrote is still here."
+      );
+    } finally {
+      window.clearTimeout(timer);
+      setBusy(false);
     }
-    setSent(true);
   }
 
   if (sent) {

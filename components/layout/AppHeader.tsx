@@ -113,19 +113,23 @@ export default function AppHeader() {
         {/* Brand: the horizontal logo stands alone (T mark on mobile).
             Tapping it goes home, which is the map. */}
         <Link href="/map" className="flex shrink-0 items-center">
+          {/* width and height are each file's own proportions (its
+              viewBox), not the size on screen: the class sets the height
+              and width follows. A square 32 by 32 here made the browser
+              report "width or height modified, but not the other". */}
           <Image
             src="/brand/turnrow_horizontal_green.svg"
             alt="Turnrow"
-            width={150}
-            height={32}
+            width={680}
+            height={125}
             priority
             className="hidden h-8 w-auto md:block"
           />
           <Image
             src="/brand/turnrow_t_green.svg"
             alt="Turnrow"
-            width={32}
-            height={32}
+            width={312}
+            height={281}
             priority
             className="h-8 w-auto md:hidden"
           />

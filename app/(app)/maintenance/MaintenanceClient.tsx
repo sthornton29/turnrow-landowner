@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatDate } from "@/lib/format";
 import {
   GEOMETRY_KIND_LABELS,
   SEVERITY_LABELS,
@@ -52,7 +53,7 @@ export default function MaintenanceClient({
     const { error: err } = await supabase.from("maintenance_issues").update(patch).eq("id", issue.id);
     setBusy(null);
     if (err) {
-      setError("Could not update the issue. " + err.message);
+      setError(friendlyDbError(err, "Could not update the issue. Please try again."));
       return;
     }
     setIssues((list) => list.map((i) => (i.id === issue.id ? { ...i, ...patch } : i)));
@@ -87,8 +88,8 @@ export default function MaintenanceClient({
           </div>
           <p className="text-xs text-gray-500">
             {resolvedRow && issue.resolved_at
-              ? `Resolved ${new Date(issue.resolved_at).toLocaleDateString()}`
-              : `Noted ${new Date(issue.created_at).toLocaleDateString()}`}
+              ? `Resolved ${formatDate(issue.resolved_at)}`
+              : `Noted ${formatDate(issue.created_at)}`}
             {propertyFilter === "" && issue.property_id ? ` · ${propName.get(issue.property_id) ?? ""}` : ""}
             {issue.notes ? ` · ${issue.notes}` : ""}
           </p>

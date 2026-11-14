@@ -12,9 +12,16 @@
 //
 // NOTHING FAILS SILENTLY: every database write goes through must() (a
 // rejected cache write is a bug and fails the sync into last_error), and
-// the prices/yields areas record their outcome in
+// the production/prices/yields areas record their outcome in
 // farm_connections.sync_detail (ok | off | scope_off | error) so a quiet
 // fetch failure is visible on the connection card instead of vanishing.
+//
+// TWO CROP YEARS, EVERY RUN: the prior crop year syncs alongside the
+// current one. Harvest often finishes in January and the farm software
+// only reports FINAL prices once sales complete the following spring, so
+// a year must keep syncing after December 31. Each year runs on its own:
+// a failed fetch for the prior year is recorded under sync_detail.prior
+// and never blocks the current year, and the other way around.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
@@ -28,10 +35,12 @@ import {
   getPlantings,
   getProduction,
   getProjectedYields,
+  type FarmHandshake,
   type RemotePlanting,
   type RemoteProduction,
 } from "@/lib/farmApi";
 import { suggestLocalField } from "@/lib/farmDisplay";
+import { todayISO } from "@/lib/format";
 import { normalizeOwnerName } from "@/lib/ownerNames";
 import { autoFillTenantAssumptions } from "@/lib/tenantAutoFill";
 
@@ -42,7 +51,8 @@ interface ConnectionRow {
   status: string;
 }
 
-// Outcome of one optional sync area (prices, yields) on the last run.
+// Outcome of one optional sync area (production, prices, yields) on the
+// last run.
 // "off" = the handshake says the scope is not shared (a quiet non-event);
 // "scope_off" = the handshake said shared but the endpoint answered a
 // scope 403 (the display cache is corrected to off and the card notes it);
@@ -55,9 +65,25 @@ export interface SyncAreaDetail {
   at: string;
 }
 
-export interface SyncDetail {
+// The optional areas of ONE crop year's sync.
+export interface SyncYearAreas {
+  // /production: harvest status, harvested acres, and production. On
+  // "error" the harvest columns already cached were left untouched.
+  production?: SyncAreaDetail;
   prices?: SyncAreaDetail;
   yields?: SyncAreaDetail;
+}
+
+// The top-level areas describe the CURRENT crop year (`year`); `prior`
+// is the crop year before it, synced on every run as well.
+export interface SyncDetail extends SyncYearAreas {
+  year?: number;
+  prior?: SyncYearAreas & {
+    year: number;
+    // Set only when the prior year's plantings could not be fetched (the
+    // whole prior year was skipped this run; its cached rows stay).
+    plantings?: SyncAreaDetail;
+  };
 }
 
 export interface SyncResult {
@@ -252,12 +278,227 @@ export function buildFarmFieldRow(
   };
 }
 
+// The columns that come from /production. When that fetch FAILS they are
+// left out of the upsert: an upsert only writes the columns it is given,
+// so what is cached stays. (Sending null here is how one timeout used to
+// blank harvest data for every field.)
+const PRODUCTION_COLUMNS = [
+  "harvested_acres",
+  "harvest_status",
+  "production_units",
+  "production_unit",
+  "payload",
+] as const;
+
+// The synced columns for one planting when the production pull failed:
+// the planting snapshot only. The farming entity is written only when
+// the planting itself names it, so an entity learned from an earlier
+// production row is not blanked either.
+export function buildPlantingOnlyRow(planting: RemotePlanting, yieldShared: boolean) {
+  const row: Record<string, unknown> = buildFarmFieldRow(planting, null, yieldShared);
+  for (const column of PRODUCTION_COLUMNS) delete row[column];
+  if (planting.entity_id == null && planting.entity == null) {
+    delete row.remote_entity_id;
+    delete row.remote_entity_name;
+  }
+  return row;
+}
+
+// One crop year: plantings with their production, then the tenant's
+// projected prices and yields. Each optional area writes its outcome
+// into `areas` as it finishes, so a later failure still leaves the
+// earlier outcomes on the connection card. Returns the plantings count.
+// A failed plantings fetch throws (the caller decides whether that is
+// fatal); a rejected DATABASE write always throws.
+async function syncCropYear(
+  supabase: AnyClient,
+  connection: ConnectionRow,
+  token: string,
+  handshake: FarmHandshake,
+  year: number,
+  areas: SyncYearAreas,
+  displayScopes: Record<string, boolean | undefined>,
+  scopesCheckedAt: string
+): Promise<number> {
+  // Harvest/production may legitimately be unavailable (a share without
+  // it answers a scope 403); plantings alone still sync. production
+  // stays null when the pull FAILED, so the harvest columns already
+  // cached are left alone below. An empty list from a pull that worked
+  // still clears them: the farm software really has no production for
+  // those fields. Revocation must still surface.
+  const [plantings, pulled] = await Promise.all([
+    getPlantings(token, year),
+    getProduction(token, year).then(
+      (rows) => ({ rows, failure: null }),
+      (failure: unknown) => ({ rows: null, failure })
+    ),
+  ]);
+  const production: RemoteProduction[] | null = pulled.rows;
+  if (production !== null) {
+    areas.production = { state: "ok", rows: production.length, at: new Date().toISOString() };
+  } else {
+    const err = pulled.failure;
+    if (err instanceof FarmApiError && err.isRevoked) throw err;
+    areas.production =
+      err instanceof FarmApiError && err.isScopeOff
+        ? { state: "off", at: new Date().toISOString() }
+        : {
+            state: "error",
+            message: err instanceof Error ? err.message : "The harvest data could not be fetched.",
+            at: new Date().toISOString(),
+          };
+  }
+
+  const productionByKey = new Map(
+    (production ?? []).map((p) => [`${p.field_id}|${(p.crop ?? "").toLowerCase()}`, p])
+  );
+  const yieldShared = Boolean(handshake.scopes?.yields);
+
+  for (const planting of plantings) {
+    const crop = planting.crop ?? "";
+    const prod = productionByKey.get(`${planting.field_id}|${crop.toLowerCase()}`);
+    must(
+      await supabase.from("farm_field_data").upsert(
+        {
+          organization_id: connection.organization_id,
+          farm_connection_id: connection.id,
+          ...(production === null
+            ? buildPlantingOnlyRow(planting, yieldShared)
+            : buildFarmFieldRow(planting, prod ?? null, yieldShared)),
+          crop_year: year,
+          synced_at: new Date().toISOString(),
+        },
+        { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
+      ),
+      "Saving farm field data"
+    );
+  }
+
+  // Tenant projected prices and yields, per the LIVE scopes. A scope
+  // the farmer has off is a quiet non-event ("off"); an endpoint 403
+  // that contradicts the handshake corrects the display cache
+  // ("scope_off"); any other fetch failure is recorded ("error") and
+  // never fails the sync (cached data keeps serving). A rejected
+  // DATABASE write is a real bug and always fails the sync loudly.
+  if (!handshake.scopes?.projected_prices) {
+    areas.prices = { state: "off", at: scopesCheckedAt };
+  } else {
+    try {
+      const prices = await getMarketingPrices(token, year);
+      // Whole-operation rows (remote_entity_id null) and per-entity
+      // rows side by side; the unique index keys on the entity too.
+      const rows = [
+        ...prices.data.map((price) => ({ price, entityId: null as string | null, entityName: null as string | null })),
+        ...prices.by_entity.map((price) => ({ price, entityId: price.entity_id, entityName: price.entity_name ?? null })),
+      ];
+      for (const { price, entityId, entityName } of rows) {
+        const base = {
+          organization_id: connection.organization_id,
+          farm_connection_id: connection.id,
+          crop_year: price.crop_year,
+          crop: price.crop ?? "",
+          projected_avg_price: price.projected_avg_price,
+          unit: price.unit,
+          is_final: Boolean(price.is_final),
+          as_of: price.as_of ?? null,
+          remote_entity_id: entityId,
+          remote_entity_name: entityName,
+          synced_at: new Date().toISOString(),
+        };
+        // Upsert by hand: the coalesce unique index is not an upsert target.
+        let q = supabase
+          .from("farm_marketing_prices")
+          .select("id")
+          .eq("farm_connection_id", connection.id)
+          .eq("crop_year", price.crop_year)
+          .eq("crop", price.crop ?? "");
+        q = entityId ? q.eq("remote_entity_id", entityId) : q.is("remote_entity_id", null);
+        const { data: existing } = must(await q.limit(1), "Reading a cached price row");
+        const hit = (existing as Array<{ id: string }> | null)?.[0];
+        if (hit)
+          must(
+            await supabase.from("farm_marketing_prices").update(base).eq("id", hit.id),
+            "Updating a cached price"
+          );
+        else
+          must(
+            await supabase.from("farm_marketing_prices").insert(base),
+            "Saving a cached price"
+          );
+      }
+      areas.prices = { state: "ok", rows: rows.length, at: new Date().toISOString() };
+    } catch (err) {
+      if (!(err instanceof FarmApiError)) throw err;
+      if (err.isRevoked) throw err;
+      if (err.isScopeOff) {
+        displayScopes.projected_prices = false;
+        areas.prices = {
+          state: "scope_off",
+          message: "The handshake reports projected prices shared, but the prices endpoint answered a scope 403.",
+          at: new Date().toISOString(),
+        };
+      } else {
+        areas.prices = { state: "error", message: err.message, at: new Date().toISOString() };
+      }
+    }
+  }
+
+  if (!handshake.scopes?.projected_yields) {
+    areas.yields = { state: "off", at: scopesCheckedAt };
+  } else {
+    try {
+      const projectedYields = await getProjectedYields(token, year);
+      for (const row of projectedYields) {
+        must(
+          await supabase.from("farm_projected_yields").upsert(
+            {
+              organization_id: connection.organization_id,
+              farm_connection_id: connection.id,
+              remote_field_id: row.field_id,
+              crop_year: row.crop_year,
+              crop: row.crop ?? "",
+              planted_acres: row.planted_acres,
+              yield_per_acre: row.yield_per_acre,
+              unit: row.unit,
+              basis: row.basis,
+              practices: row.practices,
+              remote_entity_id: row.entity_id ?? null,
+              synced_at: new Date().toISOString(),
+            },
+            { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
+          ),
+          "Saving a projected yield"
+        );
+      }
+      areas.yields = { state: "ok", rows: projectedYields.length, at: new Date().toISOString() };
+    } catch (err) {
+      if (!(err instanceof FarmApiError)) throw err;
+      if (err.isRevoked) throw err;
+      if (err.isScopeOff) {
+        displayScopes.projected_yields = false;
+        areas.yields = {
+          state: "scope_off",
+          message: "The handshake reports projected yields shared, but the yields endpoint answered a scope 403.",
+          at: new Date().toISOString(),
+        };
+      } else {
+        areas.yields = { state: "error", message: err.message, at: new Date().toISOString() };
+      }
+    }
+  }
+
+  return plantings.length;
+}
+
 export async function syncConnection(
   supabase: AnyClient,
-  connection: ConnectionRow
+  connection: ConnectionRow,
+  now: Date = new Date()
 ): Promise<SyncResult> {
-  const year = new Date().getFullYear();
-  const detail: SyncDetail = {};
+  // The crop year is the calendar year where the land is (the server
+  // runs in UTC and would turn the year over six hours early).
+  const year = Number(todayISO(now).slice(0, 4));
+  const detail: SyncDetail = { year };
   try {
     const token = decryptSecret(connection.api_key_encrypted);
 
@@ -284,150 +525,31 @@ export async function syncConnection(
 
     const fieldCount = await refreshMappings(supabase, connection, token);
 
-    const [plantings, production] = await Promise.all([
-      getPlantings(token, year),
-      getProduction(token, year).catch((err) => {
-        // Harvest/production may legitimately be unavailable; plantings
-        // alone still sync. Revocation must still surface.
-        if (err instanceof FarmApiError && err.isRevoked) throw err;
-        return [];
-      }),
-    ]);
-
-    const productionByKey = new Map(
-      production.map((p) => [`${p.field_id}|${(p.crop ?? "").toLowerCase()}`, p])
-    );
-
-    for (const planting of plantings) {
-      const crop = planting.crop ?? "";
-      const prod = productionByKey.get(`${planting.field_id}|${crop.toLowerCase()}`);
-      must(
-        await supabase.from("farm_field_data").upsert(
-          {
-            organization_id: connection.organization_id,
-            farm_connection_id: connection.id,
-            ...buildFarmFieldRow(planting, prod ?? null, Boolean(handshake.scopes?.yields)),
-            crop_year: year,
-            synced_at: new Date().toISOString(),
-          },
-          { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
-        ),
-        "Saving farm field data"
-      );
+    // The current crop year first (it matters most if a run is cut
+    // short), then the prior year. Neither blocks the other: a fetch
+    // that fails for the prior year is noted on the card; one that fails
+    // for the current year still fails the sync loudly, but only after
+    // the prior year has had its turn. (Revocation and a rejected
+    // database write end the run at once.)
+    let plantingCount = 0;
+    let currentYearError: FarmApiError | null = null;
+    try {
+      plantingCount = await syncCropYear(supabase, connection, token, handshake, year, detail, displayScopes, scopesCheckedAt);
+    } catch (err) {
+      if (!(err instanceof FarmApiError) || err.isRevoked) throw err;
+      currentYearError = err;
     }
 
-    // Tenant projected prices and yields, per the LIVE scopes. A scope
-    // the farmer has off is a quiet non-event ("off"); an endpoint 403
-    // that contradicts the handshake corrects the display cache
-    // ("scope_off"); any other fetch failure is recorded ("error") and
-    // never fails the sync (cached data keeps serving). A rejected
-    // DATABASE write is a real bug and always fails the sync loudly.
-    if (!handshake.scopes?.projected_prices) {
-      detail.prices = { state: "off", at: scopesCheckedAt };
-    } else {
-      try {
-        const prices = await getMarketingPrices(token, year);
-        // Whole-operation rows (remote_entity_id null) and per-entity
-        // rows side by side; the unique index keys on the entity too.
-        const rows = [
-          ...prices.data.map((price) => ({ price, entityId: null as string | null, entityName: null as string | null })),
-          ...prices.by_entity.map((price) => ({ price, entityId: price.entity_id, entityName: price.entity_name ?? null })),
-        ];
-        for (const { price, entityId, entityName } of rows) {
-          const base = {
-            organization_id: connection.organization_id,
-            farm_connection_id: connection.id,
-            crop_year: price.crop_year,
-            crop: price.crop ?? "",
-            projected_avg_price: price.projected_avg_price,
-            unit: price.unit,
-            is_final: Boolean(price.is_final),
-            as_of: price.as_of ?? null,
-            remote_entity_id: entityId,
-            remote_entity_name: entityName,
-            synced_at: new Date().toISOString(),
-          };
-          // Upsert by hand: the coalesce unique index is not an upsert target.
-          let q = supabase
-            .from("farm_marketing_prices")
-            .select("id")
-            .eq("farm_connection_id", connection.id)
-            .eq("crop_year", price.crop_year)
-            .eq("crop", price.crop ?? "");
-          q = entityId ? q.eq("remote_entity_id", entityId) : q.is("remote_entity_id", null);
-          const { data: existing } = must(await q.limit(1), "Reading a cached price row");
-          const hit = (existing as Array<{ id: string }> | null)?.[0];
-          if (hit)
-            must(
-              await supabase.from("farm_marketing_prices").update(base).eq("id", hit.id),
-              "Updating a cached price"
-            );
-          else
-            must(
-              await supabase.from("farm_marketing_prices").insert(base),
-              "Saving a cached price"
-            );
-        }
-        detail.prices = { state: "ok", rows: rows.length, at: new Date().toISOString() };
-      } catch (err) {
-        if (!(err instanceof FarmApiError)) throw err;
-        if (err.isRevoked) throw err;
-        if (err.isScopeOff) {
-          displayScopes.projected_prices = false;
-          detail.prices = {
-            state: "scope_off",
-            message: "The handshake reports projected prices shared, but the prices endpoint answered a scope 403.",
-            at: new Date().toISOString(),
-          };
-        } else {
-          detail.prices = { state: "error", message: err.message, at: new Date().toISOString() };
-        }
-      }
+    const prior: NonNullable<SyncDetail["prior"]> = { year: year - 1 };
+    detail.prior = prior;
+    try {
+      await syncCropYear(supabase, connection, token, handshake, year - 1, prior, displayScopes, scopesCheckedAt);
+    } catch (err) {
+      if (!(err instanceof FarmApiError) || err.isRevoked) throw err;
+      prior.plantings = { state: "error", message: err.message, at: new Date().toISOString() };
     }
 
-    if (!handshake.scopes?.projected_yields) {
-      detail.yields = { state: "off", at: scopesCheckedAt };
-    } else {
-      try {
-        const projectedYields = await getProjectedYields(token, year);
-        for (const row of projectedYields) {
-          must(
-            await supabase.from("farm_projected_yields").upsert(
-              {
-                organization_id: connection.organization_id,
-                farm_connection_id: connection.id,
-                remote_field_id: row.field_id,
-                crop_year: row.crop_year,
-                crop: row.crop ?? "",
-                planted_acres: row.planted_acres,
-                yield_per_acre: row.yield_per_acre,
-                unit: row.unit,
-                basis: row.basis,
-                practices: row.practices,
-                remote_entity_id: row.entity_id ?? null,
-                synced_at: new Date().toISOString(),
-              },
-              { onConflict: "farm_connection_id,remote_field_id,crop_year,crop" }
-            ),
-            "Saving a projected yield"
-          );
-        }
-        detail.yields = { state: "ok", rows: projectedYields.length, at: new Date().toISOString() };
-      } catch (err) {
-        if (!(err instanceof FarmApiError)) throw err;
-        if (err.isRevoked) throw err;
-        if (err.isScopeOff) {
-          displayScopes.projected_yields = false;
-          detail.yields = {
-            state: "scope_off",
-            message: "The handshake reports projected yields shared, but the yields endpoint answered a scope 403.",
-            at: new Date().toISOString(),
-          };
-        } else {
-          detail.yields = { state: "error", message: err.message, at: new Date().toISOString() };
-        }
-      }
-    }
+    if (currentYearError) throw currentYearError;
 
     must(
       await supabase
@@ -457,7 +579,7 @@ export async function syncConnection(
       console.error("[farm-sync] assumption auto-fill failed:", err instanceof Error ? err.message : err);
     }
 
-    return { connectionId: connection.id, ok: true, fields: fieldCount, plantings: plantings.length, tenants, autofill };
+    return { connectionId: connection.id, ok: true, fields: fieldCount, plantings: plantingCount, tenants, autofill };
   } catch (err) {
     const revoked = err instanceof FarmApiError && err.isRevoked;
     const message =

@@ -142,7 +142,7 @@ export default function MobileNav() {
                   className={"block rounded-lg px-2 py-2.5 " + (pathname.startsWith("/settings") ? "bg-kelly-50" : "active:bg-gray-50")}
                 >
                   <span className="block text-sm font-medium text-gray-900">Settings</span>
-                  <span className="block text-xs text-gray-500">Members, invitations, and farm connections.</span>
+                  <span className="block text-xs text-gray-500">Members, their access, and sign out.</span>
                 </Link>
               </section>
             </div>

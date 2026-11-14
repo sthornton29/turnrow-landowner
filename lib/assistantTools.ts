@@ -25,6 +25,8 @@ import {
   type IncomeType,
 } from "@/lib/income";
 import { taxStatus, type TaxStatus } from "@/lib/tax";
+import { withoutIgnoredFields } from "@/lib/farmDisplay";
+import { INCOME_RECORD_TYPE_LABELS, recordCountsAsReceived, type IncomeRecordType } from "@/lib/incomeRecords";
 import { STAND_TYPE_LABELS, ASSET_TYPES } from "@/lib/assetTypes";
 import {
   EASEMENT_CATEGORY_LABELS,
@@ -87,6 +89,46 @@ export function statusCounts(
     out[taxStatus(s, paidByStatement.get(s.id) ?? 0, today)] += 1;
   }
   return out;
+}
+
+// Income records (migration 0051): income received outside a lease
+// payment or a timber settlement (the rent, solar, tower, building, and
+// timber history from the old books, plus one-off receipts). The Income
+// page counts them, so the assistant lists them as their own labeled
+// lines, one per record type. A record marked Received is money in; one
+// marked owed or calculated is reported apart, never as received. Pure;
+// unit-tested.
+export interface IncomeRecordLine {
+  type: string;
+  label: string;
+  records: number;
+  received: number;
+  owed_or_not_confirmed: number;
+}
+
+export function incomeRecordLines(
+  records: Array<{ year: number; income_type: string; amount: number | string; basis?: string | null }>,
+  year: number | null
+): IncomeRecordLine[] {
+  const byType = new Map<string, IncomeRecordLine>();
+  for (const r of records) {
+    if (year !== null && r.year !== year) continue;
+    const line = byType.get(r.income_type) ?? {
+      type: r.income_type,
+      label: INCOME_RECORD_TYPE_LABELS[r.income_type as IncomeRecordType] ?? r.income_type,
+      records: 0,
+      received: 0,
+      owed_or_not_confirmed: 0,
+    };
+    line.records += 1;
+    // The Income page's own rule for what counts as money received.
+    if (recordCountsAsReceived(r.basis)) line.received += num(r.amount);
+    else line.owed_or_not_confirmed += num(r.amount);
+    byType.set(r.income_type, line);
+  }
+  return Array.from(byType.values())
+    .map((l) => ({ ...l, received: r2(l.received), owed_or_not_confirmed: r2(l.owed_or_not_confirmed) }))
+    .sort((a, b) => b.received - a.received || a.label.localeCompare(b.label));
 }
 
 type PropertyRow = {
@@ -270,6 +312,7 @@ const incomeSummary: ToolImpl = async (supabase, input) => {
   }));
   const grossExpected = lineItems.reduce((a, l) => a + l.expected, 0);
   const grossReceived = lineItems.reduce((a, l) => a + l.received, 0);
+  const recordLines = incomeRecordLines(inputs.records ?? [], year);
   return {
     sources: [
       `${inputs.leases.length} lease${inputs.leases.length === 1 ? "" : "s"}, ${inputs.settlements.length} timber settlement${inputs.settlements.length === 1 ? "" : "s"}, ${(inputs.records ?? []).filter((r) => r.year === year).length} income records, and tax statements for ${year}`,
@@ -282,6 +325,12 @@ const incomeSummary: ToolImpl = async (supabase, input) => {
       ? "Some expected amounts are projections from lease terms and assumptions; they change as prices and yields update."
       : null,
     by_type: lineItems,
+    income_records: {
+      note: "Income records for the year by kind (rent, solar, tower, building rent, and timber income recorded outside a lease or a timber sale, including history from the old books). Their received amounts are ALREADY inside the received figures in by_type; this is the detail, not extra money. Amounts marked owed or calculated (not confirmed paid) are listed apart and are in no received figure.",
+      by_kind: recordLines,
+      received_total: r2(recordLines.reduce((a, l) => a + l.received, 0)),
+      owed_or_not_confirmed_total: r2(recordLines.reduce((a, l) => a + l.owed_or_not_confirmed, 0)),
+    },
     gross_expected: r2(grossExpected),
     gross_received: r2(grossReceived),
     taxes_due: r2(totals?.taxesDue ?? 0),
@@ -361,7 +410,7 @@ const taxesStatus: ToolImpl = async (supabase, input) => {
 
 const timberSalesSummary: ToolImpl = async (supabase, input) => {
   const year = input.year ? Number(input.year) : null;
-  const [sales, settlements, payments, saleStands, stands, props] = await Promise.all([
+  const [sales, settlements, payments, saleStands, stands, props, records] = await Promise.all([
     all<{
       id: string; sale_name: string; buyer_name: string | null; sale_type: string; status: string;
       harvest_type: string | null; contract_date: string | null; harvest_deadline: string | null;
@@ -380,6 +429,17 @@ const timberSalesSummary: ToolImpl = async (supabase, input) => {
       supabase.from("timber_stands").select("id, name, property_id, acres")
     ),
     fetchProperties(supabase),
+    // Timber income recorded outside a timber sale (migration 0051): the
+    // Income page counts it as timber income, so this tool does too.
+    all<{
+      year: number; received_date: string | null; payer: string | null; property_id: string | null;
+      income_type: string; amount: number; basis: string | null;
+    }>(
+      supabase
+        .from("income_records")
+        .select("year, received_date, payer, property_id, income_type, amount, basis")
+        .eq("income_type", "timber")
+    ),
   ]);
   const propName = new Map(props.map((p) => [p.id, p.name]));
   const standById = new Map(stands.map((s) => [s.id, s]));
@@ -404,21 +464,40 @@ const timberSalesSummary: ToolImpl = async (supabase, input) => {
       stands: linked.map((st) => ({ name: st!.name, property: propName.get(st!.property_id) ?? null, acres: r1(num(st!.acres)) })),
     };
   });
-  const totalReceived = rows.reduce((a, r) => a + r.settlements_total + r.lump_sum_payments_received, 0);
+  const salesReceived = rows.reduce((a, r) => a + r.settlements_total + r.lump_sum_payments_received, 0);
+  const yearRecords = records.filter((r) => year === null || r.year === year);
+  const recordLine = incomeRecordLines(yearRecords, null)[0] ?? null;
+  const recordsReceived = recordLine?.received ?? 0;
   return {
     sources: [
       `${sales.length} timber sale${sales.length === 1 ? "" : "s"}, ${settlements.length} settlement${settlements.length === 1 ? "" : "s"}, and lump sum payments${year ? ` dated in ${year}` : ""}`,
+      `${yearRecords.length} timber income record${yearRecords.length === 1 ? "" : "s"}${year ? ` for ${year}` : ""}`,
     ],
     year,
     sales: rows,
-    total_received: r2(totalReceived),
-    note: "Pay-as-cut settlements count directly as received timber income; lump sum receipts are recorded payments against the sale.",
+    received_from_timber_sales: r2(salesReceived),
+    timber_income_records: {
+      label: "Timber income from income records (older sales from the books and receipts with no timber sale here)",
+      records: yearRecords.length,
+      received: r2(recordsReceived),
+      owed_or_not_confirmed: recordLine?.owed_or_not_confirmed ?? 0,
+      items: yearRecords.map((r) => ({
+        year: r.year,
+        received_date: r.received_date,
+        payer: r.payer,
+        property: r.property_id ? (propName.get(r.property_id) ?? null) : null,
+        amount: r2(num(r.amount)),
+        basis: r.basis ?? "received",
+      })),
+    },
+    total_received: r2(salesReceived + recordsReceived),
+    note: "Pay-as-cut settlements count directly as received timber income; lump sum receipts are recorded payments against the sale. total_received adds the timber income records to what the timber sales brought in, the same way the Income page does.",
   };
 };
 
 const farmActivity: ToolImpl = async (supabase, input) => {
   const year = Number(input.year) || new Date().getFullYear();
-  const [data, mappings, fields, props, connections] = await Promise.all([
+  const [allData, mappings, ignoredMappings, fields, props, connections] = await Promise.all([
     all<{
       farm_connection_id: string; remote_field_id: string; crop_year: number; crop: string;
       planted_acres: number | null; irrigated_acres: number | null; dryland_acres: number | null;
@@ -430,12 +509,18 @@ const farmActivity: ToolImpl = async (supabase, input) => {
     all<{ farm_connection_id: string; remote_field_id: string; remote_name: string | null; local_field_id: string | null; local_property_id: string | null; status: string }>(
       supabase.from("field_mappings").select("farm_connection_id, remote_field_id, remote_name, local_field_id, local_property_id, status").eq("status", "confirmed")
     ),
+    all<{ farm_connection_id: string; remote_field_id: string; status: string }>(
+      supabase.from("field_mappings").select("farm_connection_id, remote_field_id, status").eq("status", "ignored")
+    ),
     all<{ id: string; name: string; property_id: string }>(supabase.from("fields").select("id, name, property_id")),
     fetchProperties(supabase),
     all<{ id: string; label: string; operation_name: string | null; status: string; last_synced_at: string | null }>(
       supabase.from("farm_connections").select("id, label, operation_name, status, last_synced_at")
     ),
   ]);
+  // Fields the owner marked "Ignore this field" are left out, as on the
+  // Farm Data page.
+  const data = withoutIgnoredFields(allData, ignoredMappings);
   const propName = new Map(props.map((p) => [p.id, p.name]));
   const fieldById = new Map(fields.map((f) => [f.id, f]));
   const mapKey = (c: string, r: string) => `${c}|${r}`;
@@ -488,7 +573,7 @@ const farmActivity: ToolImpl = async (supabase, input) => {
     connections: connections.map((c) => ({ name: c.operation_name ?? c.label, status: c.status, last_synced_at: c.last_synced_at })),
     by_crop: byCrop,
     fields: rows,
-    note: "Yields show only when the farmer chose to share them, and yield_per_acre is an ACTUAL only when harvest_status is complete; in-progress fields report production to date but no yield. Unmapped fields are shared by the tenant but not yet matched to your land.",
+    note: "Yields show only when the farmer chose to share them, and yield_per_acre is an ACTUAL only when harvest_status is complete; in-progress fields report production to date but no yield. Unmapped fields are shared by the tenant but not yet matched to your land. Fields marked Ignore on the field mapping screen are left out.",
   };
 };
 
@@ -676,7 +761,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "income_summary",
-    description: "Income for a year: expected and received by type (agricultural leases, hunting leases, timber sales, government payment share), property taxes due and paid, net, and the per-property split. The same engine as the Income page.",
+    description: "Income for a year: expected and received by type (agricultural leases, hunting leases, timber sales, government payment share, and solar, tower, building, and other land income), property taxes due and paid, net, and the per-property split. Includes income records (rent, solar, tower, building rent, and timber income from the old books or with no lease here) with a line per kind, so use it for questions like tower or solar rent in a past year. The same engine as the Income page.",
     input_schema: { type: "object", properties: { year: yearProp }, required: ["year"] },
   },
   {
@@ -686,7 +771,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "timber_sales_summary",
-    description: "Timber sales with buyers, type, status, acres, settlements and lump sum receipts (optionally limited to a year), and the linked stands.",
+    description: "Timber sales with buyers, type, status, acres, settlements and lump sum receipts (optionally limited to a year), and the linked stands, plus timber income kept as income records (older sales from the books) as its own line. The total matches the Income page.",
     input_schema: { type: "object", properties: { year: { type: "number", description: "Optional year to limit receipts to" } } },
   },
   {

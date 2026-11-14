@@ -7,14 +7,21 @@
 // Content ships with the app (lib/helpContent.generated.ts, built by
 // `npm run help:build`). Right drawer on desktop, bottom sheet on phones.
 // Kept visibly separate from Ask (the data assistant).
+//
+// The sheet is rendered through a portal to document.body. The "?" button
+// lives inside the sticky header, and a sheet rendered there is trapped in
+// the header's stacking layer: the phone's bottom tab bar painted over the
+// sheet's bottom strip and hid the chat box, Send, and "Send to support".
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { HELP_TOPICS, type HelpTopic } from "@/lib/helpContent.generated";
 import { searchTopics, topicForRoute, topicsForRoute } from "@/lib/help";
 import { renderHelpMarkdown } from "@/lib/helpMarkdown";
 import { HELP_OPEN_EVENT, type HelpOpenDetail } from "@/lib/helpBus";
+import { formatDate } from "@/lib/format";
 import SupportChat from "./SupportChat";
 import ContactSupportForm from "./ContactSupportForm";
 
@@ -34,10 +41,18 @@ export default function HelpDrawer() {
   const [topic, setTopic] = useState<HelpTopic | null>(null);
   const [query, setQuery] = useState("");
   const [transcript, setTranscript] = useState<string | undefined>(undefined);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // document.body exists only in the browser; the portal waits for mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Deep-open requests from anywhere in the app.
   useEffect(() => {
     const onOpen = (e: Event) => {
+      // The header renders this component twice (desktop bar and phone
+      // bar) and hides one with CSS. Only the one whose "?" is on screen
+      // answers, or the portal would stack two sheets.
+      if (!buttonRef.current || buttonRef.current.offsetParent === null) return;
       const detail = (e as CustomEvent<HelpOpenDetail>).detail ?? {};
       setTopic(topicForRoute(HELP_TOPICS, detail.route ?? pathname));
       setTab(detail.tab ?? "topic");
@@ -73,6 +88,7 @@ export default function HelpDrawer() {
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={openFromButton}
         title="Help and support"
@@ -81,10 +97,12 @@ export default function HelpDrawer() {
       >
         ?
       </button>
-      {open ? (
+      {open && mounted ? createPortal(
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} />
-          <div className="absolute inset-x-0 bottom-0 flex max-h-[88%] flex-col rounded-t-2xl bg-white text-gray-800 shadow-2xl md:inset-x-auto md:bottom-0 md:right-0 md:top-0 md:h-full md:max-h-none md:w-full md:max-w-md md:rounded-none">
+          {/* The bottom padding keeps the last row of controls above the
+              phone's home indicator, as the tab bar and the More sheet do. */}
+          <div className="absolute inset-x-0 bottom-0 flex max-h-[88%] flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] text-gray-800 shadow-2xl md:inset-x-auto md:bottom-0 md:right-0 md:top-0 md:h-full md:max-h-none md:w-full md:max-w-md md:rounded-none md:pb-0">
             <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
               <h2 className="flex-1 text-lg font-semibold text-pine-900">Help</h2>
               <Link
@@ -129,7 +147,7 @@ export default function HelpDrawer() {
                     <div className="flex items-baseline justify-between gap-2">
                       <h3 className="text-lg font-semibold text-pine-900">{current.title}</h3>
                       <span className="whitespace-nowrap text-[11px] text-gray-400">
-                        updated {current.updated}
+                        updated {formatDate(current.updated)}
                       </span>
                     </div>
                     <div className="mt-1">{renderHelpMarkdown(current.body)}</div>
@@ -226,7 +244,8 @@ export default function HelpDrawer() {
               </div>
             ) : null}
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

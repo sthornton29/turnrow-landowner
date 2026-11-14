@@ -125,10 +125,12 @@ describe("syncConnection live scope gating", () => {
     // reconnect: the fetches run and the cache fills.
     state.scopes.projected_prices = true;
     state.scopes.projected_yields = true;
+    // One fetch per crop year: the prior year syncs alongside the
+    // current one on every run (final prices arrive the next spring).
     r = await syncConnection(db.client, connection);
     expect(r.ok).toBe(true);
-    expect(state.priceCalls).toBe(1);
-    expect(state.yieldCalls).toBe(1);
+    expect(state.priceCalls).toBe(2);
+    expect(state.yieldCalls).toBe(2);
     expect(conn().scopes.projected_prices).toBe(true);
     expect(conn().sync_detail.prices).toMatchObject({ state: "ok", rows: 1 });
     expect(db.tables.farm_marketing_prices).toHaveLength(1);
@@ -145,7 +147,7 @@ describe("syncConnection live scope gating", () => {
     state.scopes.projected_yields = false;
     r = await syncConnection(db.client, connection);
     expect(r.ok).toBe(true);
-    expect(state.priceCalls).toBe(1); // no new fetch
+    expect(state.priceCalls).toBe(2); // no new fetch
     expect(conn().scopes.projected_prices).toBe(false);
     expect(db.tables.farm_marketing_prices).toHaveLength(1);
   });

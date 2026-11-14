@@ -4,12 +4,12 @@ import { formatAcres, formatNumber } from "@/lib/format";
 import { ENTITY_TYPE_LABELS } from "@/lib/entities";
 import PropertySectionTabs from "@/components/entities/PropertySectionTabs";
 import type { LandEntity } from "@/types/db";
-import { createEntity } from "./actions";
+import NewEntityForm from "./NewEntityForm";
 
 export const metadata = { title: "Entities" };
 
 export default async function EntitiesPage() {
-  const { supabase } = await requireOrg();
+  const { supabase, isAdmin } = await requireOrg();
 
   const [{ data: entities }, { data: properties }] = await Promise.all([
     supabase.from("entities").select("*").order("name"),
@@ -39,42 +39,28 @@ export default async function EntitiesPage() {
         </p>
       </div>
 
-      <details className="rounded-xl border border-gray-200 bg-white">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-kelly-700">
-          + New entity
-        </summary>
-        <form action={createEntity} className="flex flex-wrap gap-2 px-4 pb-4">
-          <input
-            name="name"
-            required
-            placeholder="Entity name (e.g. Thornton Family Farms LLC)"
-            className="min-w-56 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <select
-            name="entity_type"
-            defaultValue="llc"
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          >
-            {Object.entries(ENTITY_TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-          >
-            Create
-          </button>
-        </form>
-      </details>
+      {/* Creating an entity is admin work (row level security refuses
+          anyone else), so only admins see the form. */}
+      {isAdmin ? (
+        <details className="rounded-xl border border-gray-200 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-kelly-700">
+            + New entity
+          </summary>
+          <NewEntityForm />
+        </details>
+      ) : null}
 
       {entityList.length === 0 ? (
         <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-          No entities yet. Create one above, or import parcels with the county
-          import{"'"}s owner search: confirmed owner groupings become entities
-          automatically.
+          {isAdmin ? (
+            <>
+              No entities yet. Create one above, or import parcels with the county
+              import{"'"}s owner search: confirmed owner groupings become entities
+              automatically.
+            </>
+          ) : (
+            "You have not been given access to any entities yet. Ask an admin on your account to add you in Settings."
+          )}
         </p>
       ) : (
         <ul className="space-y-2">

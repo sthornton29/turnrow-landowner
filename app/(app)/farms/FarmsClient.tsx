@@ -4,8 +4,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatNumber } from "@/lib/format";
-import type { FarmConnectionRow } from "@/lib/farmDisplay";
+import { friendlyDbError, NO_ACCESS_MESSAGE } from "@/lib/dbErrors";
+import { formatDateTime, formatNumber } from "@/lib/format";
+import {
+  describeSyncReply,
+  readJsonBody,
+  type FarmConnectionRow,
+  type SyncReply,
+} from "@/lib/farmDisplay";
 
 const STATUS_CLASSES: Record<string, string> = {
   active: "bg-kelly-50 text-pine-900",
@@ -21,33 +27,62 @@ interface Connection extends FarmConnectionRow {
   // When the live handshake last answered (the scope chips show the
   // LIVE state as of this moment; migration 0040).
   scopes_checked_at?: string | null;
-  // Per-area outcome of the last sync run, written by lib/farmSync.ts.
-  sync_detail?: {
-    prices?: { state: string; message?: string; rows?: number; at: string };
-    yields?: { state: string; message?: string; rows?: number; at: string };
-  } | null;
+  // Per-area outcome of the last sync run, written by lib/farmSync.ts:
+  // the current crop year at the top level, the prior one under `prior`.
+  sync_detail?: (YearAreas & { year?: number; prior?: YearAreas & { year: number; plantings?: AreaDetail } }) | null;
 }
 
-// A fetch problem on one optional area (prices/yields) worth an amber
-// line on the card. Scope-off is quiet (the chip already reads off).
+type AreaDetail = { state: string; message?: string; rows?: number; at: string };
+type YearAreas = { production?: AreaDetail; prices?: AreaDetail; yields?: AreaDetail };
+
+const AREAS = [
+  ["production", "Harvest data"],
+  ["prices", "Projected prices"],
+  ["yields", "Projected yields"],
+] as const;
+
+// A fetch problem on one optional area (harvest data, prices, yields)
+// worth an amber line on the card, for the current crop year and the one
+// before it. Scope-off is quiet (the chip already reads off).
 function areaProblems(c: Connection): string[] {
   const out: string[] = [];
-  for (const [area, label] of [
-    ["prices", "Projected prices"],
-    ["yields", "Projected yields"],
-  ] as const) {
-    const d = c.sync_detail?.[area];
-    if (d?.state === "error") out.push(`${label}: ${d.message ?? "the last fetch failed"}`);
-    if (d?.state === "scope_off")
-      out.push(`${label}: the farm's endpoints report this scope off (the handshake disagreed; it will settle on the next sync).`);
+  const detail = c.sync_detail;
+  if (!detail) return out;
+  const years: Array<{ areas: YearAreas; suffix: string }> = [{ areas: detail, suffix: "" }];
+  if (detail.prior) {
+    years.push({ areas: detail.prior, suffix: ` (${detail.prior.year})` });
+    if (detail.prior.plantings?.state === "error") {
+      out.push(
+        `The ${detail.prior.year} crop year could not be refreshed, so its numbers are from the last sync that worked. (${detail.prior.plantings.message ?? "the last fetch failed"})`
+      );
+    }
+  }
+  for (const { areas, suffix } of years) {
+    for (const [area, label] of AREAS) {
+      const d = areas[area];
+      if (d?.state === "error") {
+        out.push(
+          area === "production"
+            ? `${label}${suffix} could not be refreshed, so the harvest numbers shown are from the last sync that worked. (${d.message ?? "the last fetch failed"})`
+            : `${label}${suffix}: ${d.message ?? "the last fetch failed"}`
+        );
+      }
+      if (d?.state === "scope_off")
+        out.push(`${label}${suffix}: the farm's endpoints report this scope off (the handshake disagreed; it will settle on the next sync).`);
+    }
   }
   return out;
 }
 
 export default function FarmsClient({
   initialConnections,
+  isAdmin,
 }: {
   initialConnections: Connection[];
+  // Connecting and disconnecting a farm are admin-only (row level
+  // security refuses anyone else, and a member typing the farmer's
+  // one-time code would only burn it).
+  isAdmin: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -55,8 +90,10 @@ export default function FarmsClient({
   const [code, setCode] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [syncNote, setSyncNote] = useState<string | null>(null);
+  // The outcome of Refresh now or Disconnect, shown on that connection's card.
+  const [rowNote, setRowNote] = useState<{ id: string; ok: boolean; text: string } | null>(null);
   const [connectedInfo, setConnectedInfo] = useState<{
     operation: string;
     fields: number;
@@ -83,18 +120,33 @@ export default function FarmsClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Could not connect.");
+      // Read as text first: a timeout answers with a web page, and
+      // res.json() would show a raw parse error.
+      const body = await readJsonBody<{
+        connection_id?: string;
+        handshake?: { operation_name?: string; field_count?: number; scopes?: { yields?: boolean } };
+        error?: string;
+      }>(res);
+      if (!res.ok || !body?.connection_id) {
+        // A share code works once. When no answer came back the
+        // connection may still have been saved, so show the list.
+        setError(
+          body?.error ??
+            "The connection did not finish. Look at the list below: if the farm is there, it worked. If it is not, ask your farmer for a new code, because each code works only once."
+        );
+        await reload();
+        return;
+      }
       setConnectedInfo({
-        operation: body.handshake.operation_name,
-        fields: body.handshake.field_count,
-        yields: Boolean(body.handshake.scopes?.yields),
+        operation: body.handshake?.operation_name ?? "the farm",
+        fields: body.handshake?.field_count ?? 0,
+        yields: Boolean(body.handshake?.scopes?.yields),
       });
       setCode("");
       await reload();
       router.push(`/farms/${body.connection_id}/mapping`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect.");
+      setError(friendlyDbError(err as Error, "Could not connect. Please try again."));
     } finally {
       setConnecting(false);
     }
@@ -102,27 +154,23 @@ export default function FarmsClient({
 
   async function refresh(connectionId: string) {
     setSyncing(connectionId);
-    setError(null);
-    setSyncNote(null);
+    setRowNote(null);
     try {
       const res = await fetch("/api/farm/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connection_id: connectionId }),
       });
-      const body = (await res.json().catch(() => ({}))) as {
-        results?: Array<{ ok: boolean; fields?: number; plantings?: number; tenants?: { created: number; linked: number }; error?: string }>;
-      };
-      const r = body.results?.[0];
-      if (r?.ok) {
-        const t = r.tenants;
-        const tenantText = t && (t.created > 0 || t.linked > 0)
-          ? `; ${[t.created > 0 ? `${t.created} tenant${t.created === 1 ? "" : "s"} created` : null, t.linked > 0 ? `${t.linked} linked` : null].filter(Boolean).join(", ")} from the farm's entities`
-          : "";
-        setSyncNote(`Synced ${formatNumber(r.fields ?? 0)} fields and ${formatNumber(r.plantings ?? 0)} plantings${tenantText}.`);
-      } else if (r?.error) {
-        setError(r.error);
-      }
+      // Every reply ends in a sentence on the card: success, the farm
+      // software's reason, or a plain "it did not go through".
+      const body = await readJsonBody<SyncReply>(res);
+      setRowNote({ id: connectionId, ...describeSyncReply(res.status, body) });
+    } catch (err) {
+      setRowNote({
+        id: connectionId,
+        ok: false,
+        text: friendlyDbError(err as Error, "The sync did not go through. Try again in a few minutes."),
+      });
     } finally {
       setSyncing(null);
       reload();
@@ -130,16 +178,39 @@ export default function FarmsClient({
     }
   }
 
+  // Deleting the connection also deletes, by foreign key, its field
+  // mappings, every synced planting and harvest row, and the tenant's
+  // cached prices and projected yields (migrations 0006 and 0012).
+  // Tenants and leases stay. The confirmation says exactly that.
   async function disconnect(connection: Connection) {
-    if (
-      !window.confirm(
-        `Disconnect ${connection.label}? The stored key is removed; synced history stays until you delete it.`
-      )
-    ) {
+    const message = [
+      `Disconnect ${connection.label}?`,
+      "This permanently removes everything synced from this farm: every year of plantings, harvest, and yields, the tenant's projected prices and yields, and the field matches you confirmed. Your tenants and leases are kept.",
+      connection.status === "revoked"
+        ? "Your farmer has already ended this share, so this history cannot be pulled again."
+        : "To see it again you would need a new share code from your farmer, and you would match the fields again. If the farmer ends the share first, the history cannot be pulled again.",
+      "This cannot be undone.",
+    ].join("\n\n");
+    if (!window.confirm(message)) return;
+    setDisconnecting(connection.id);
+    setRowNote(null);
+    const { data, error: err } = await supabase
+      .from("farm_connections")
+      .delete()
+      .eq("id", connection.id)
+      .select("id");
+    setDisconnecting(null);
+    if (err || (data ?? []).length === 0) {
+      // No error and no row removed is row level security saying no.
+      setRowNote({
+        id: connection.id,
+        ok: false,
+        text: err ? friendlyDbError(err, "Could not disconnect this farm. Please try again.") : NO_ACCESS_MESSAGE,
+      });
       return;
     }
-    await supabase.from("farm_connections").delete().eq("id", connection.id);
     reload();
+    router.refresh();
   }
 
   return (
@@ -157,37 +228,42 @@ export default function FarmsClient({
         </p>
       </div>
 
-      {/* Connect a Farm */}
-      <section className="space-y-2 rounded-xl border border-kelly-100 bg-kelly-50 p-4">
-        <h2 className="text-base font-semibold text-pine-900">Connect a Farm</h2>
-        <p className="text-sm text-gray-600">
-          Your farmer creates a share in their Turnrow farm software and gives
-          you a one-time code (looks like TRW-XXXX-XXXX-XXXX). Enter it here.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="TRW-XXXX-XXXX-XXXX"
-            className="min-w-56 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
-          />
-          <button
-            onClick={connect}
-            disabled={connecting || code.trim().length < 8}
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
-          >
-            {connecting ? "Connecting..." : "Connect"}
-          </button>
-        </div>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        {syncNote ? <p className="text-sm font-medium text-pine-900">{syncNote}</p> : null}
-        {connectedInfo ? (
-          <p className="text-sm font-medium text-pine-900">
-            Connected to {connectedInfo.operation}: {formatNumber(connectedInfo.fields)}{" "}
-            fields shared, yields {connectedInfo.yields ? "included" : "not included"}.
+      {/* Connect a Farm (admins only; see isAdmin above) */}
+      {isAdmin ? (
+        <section className="space-y-2 rounded-xl border border-kelly-100 bg-kelly-50 p-4">
+          <h2 className="text-base font-semibold text-pine-900">Connect a Farm</h2>
+          <p className="text-sm text-gray-600">
+            Your farmer creates a share in their Turnrow farm software and gives
+            you a one-time code (looks like TRW-XXXX-XXXX-XXXX). Enter it here.
           </p>
-        ) : null}
-      </section>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              placeholder="TRW-XXXX-XXXX-XXXX"
+              className="min-w-56 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
+            />
+            <button
+              onClick={connect}
+              disabled={connecting || code.trim().length < 8}
+              className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
+            >
+              {connecting ? "Connecting..." : "Connect"}
+            </button>
+          </div>
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {connectedInfo ? (
+            <p className="text-sm font-medium text-pine-900">
+              Connected to {connectedInfo.operation}: {formatNumber(connectedInfo.fields)}{" "}
+              fields shared, yields {connectedInfo.yields ? "included" : "not included"}.
+            </p>
+          ) : null}
+        </section>
+      ) : (
+        <p className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+          Only an admin on your account can connect or disconnect a farm.
+        </p>
+      )}
 
       {/* Connections */}
       <section className="space-y-2">
@@ -241,7 +317,7 @@ export default function FarmsClient({
                       className="self-center text-[10px] text-gray-400"
                       title="Scopes are re-read from the farm software on every sync; granting or revoking there takes effect on the next sync with nothing to do here."
                     >
-                      checked {new Date(c.scopes_checked_at).toLocaleString()}
+                      checked {formatDateTime(c.scopes_checked_at)}
                     </span>
                   ) : null}
                 </span>
@@ -255,7 +331,7 @@ export default function FarmsClient({
                 ) : null}
                 <span className="ml-auto text-xs text-gray-400">
                   {c.last_synced_at
-                    ? `Last synced ${new Date(c.last_synced_at).toLocaleString()}`
+                    ? `Last synced ${formatDateTime(c.last_synced_at)}`
                     : "Never synced"}
                 </span>
               </div>
@@ -272,22 +348,29 @@ export default function FarmsClient({
                   {p}
                 </p>
               ))}
-              {c.sync_detail && (c.sync_detail.prices || c.sync_detail.yields) ? (
+              {c.sync_detail &&
+              (c.sync_detail.production || c.sync_detail.prices || c.sync_detail.yields || c.sync_detail.prior) ? (
                 <details className="mt-2 text-xs text-gray-500">
                   <summary className="cursor-pointer select-none">Sync detail</summary>
                   <div className="mt-1 space-y-0.5 font-mono text-[11px]">
-                    {(["prices", "yields"] as const).map((area) => {
-                      const d = c.sync_detail?.[area];
-                      if (!d) return null;
-                      return (
-                        <p key={area}>
-                          {area}: {d.state}
-                          {typeof d.rows === "number" ? ` (${d.rows} rows)` : ""}
-                          {d.message ? ` - ${d.message}` : ""}
-                          {d.at ? ` @ ${new Date(d.at).toLocaleString()}` : ""}
-                        </p>
-                      );
-                    })}
+                    {[
+                      { areas: c.sync_detail as YearAreas & { plantings?: AreaDetail }, year: c.sync_detail.year ?? null },
+                      ...(c.sync_detail.prior ? [{ areas: c.sync_detail.prior, year: c.sync_detail.prior.year as number | null }] : []),
+                    ].map(({ areas, year }) =>
+                      (["plantings", "production", "prices", "yields"] as const).map((area) => {
+                        const d = areas[area];
+                        if (!d) return null;
+                        return (
+                          <p key={`${year ?? "current"}-${area}`}>
+                            {year ? `${year} ` : ""}
+                            {area}: {d.state}
+                            {typeof d.rows === "number" ? ` (${formatNumber(d.rows)} rows)` : ""}
+                            {d.message ? ` - ${d.message}` : ""}
+                            {d.at ? ` @ ${formatDateTime(d.at)}` : ""}
+                          </p>
+                        );
+                      })
+                    )}
                   </div>
                 </details>
               ) : null}
@@ -310,13 +393,21 @@ export default function FarmsClient({
                     {syncing === c.id ? "Refreshing..." : "Refresh now"}
                   </button>
                 ) : null}
-                <button
-                  onClick={() => disconnect(c)}
-                  className="ml-auto font-medium text-red-600 hover:underline"
-                >
-                  Disconnect
-                </button>
+                {isAdmin ? (
+                  <button
+                    onClick={() => disconnect(c)}
+                    disabled={disconnecting === c.id}
+                    className="ml-auto font-medium text-red-600 hover:underline disabled:opacity-60"
+                  >
+                    {disconnecting === c.id ? "Disconnecting..." : "Disconnect"}
+                  </button>
+                ) : null}
               </div>
+              {rowNote?.id === c.id ? (
+                <p className={"mt-2 text-sm " + (rowNote.ok ? "font-medium text-pine-900" : "text-red-600")}>
+                  {rowNote.text}
+                </p>
+              ) : null}
             </div>
           ))
         )}

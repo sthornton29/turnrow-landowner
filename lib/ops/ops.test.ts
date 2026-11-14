@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fakeDb } from "@/lib/testUtils/fakeDb";
 import { checkOpsToken, opsContext } from "./auth";
-import { buildBrief } from "./brief";
+import { addDaysISO, buildBrief, isAfterEndedLease, taxAlertText, unpaidTaxByYear } from "./brief";
 import { DATASETS, datasetIndex, ParamError, runDataset } from "./data";
 
 const req = (auth?: string) => new Request("https://turnrowland.com/api/ops/brief", { headers: auth ? { authorization: auth } : {} });
@@ -105,6 +105,137 @@ describe("buildBrief", () => {
     const b = await buildBrief(fakeDb({}).client as SupabaseClient, ORG, BASE, NOW);
     expect(b.todos).toEqual([]);
     expect(b.notes).toEqual(["Nothing needs attention on the land today."]);
+  });
+});
+
+// Property tax for a year is due October 1 and goes delinquent January 1
+// of the NEXT year. Reading only "this calendar year's" statements made
+// the tax alert vanish on January 1, the very day last year's unpaid
+// bills turned delinquent.
+describe("property tax alerts cover every tax year with a balance", () => {
+  const statement = (id: string, taxYear: number, amount: number, delinquent: string | null, org = ORG) => ({
+    id, organization_id: org, tax_year: taxYear, county: "Lawrence", authority_name: "Lawrence County", amount_due: amount, delinquent_date: delinquent,
+  });
+  const taxDb = (statements: unknown[], payments: unknown[] = []) =>
+    fakeDb({ tax_statements: statements as never[], tax_payments: payments as never[] });
+
+  it("on January 1 last year's unpaid bills are delinquent, not gone", async () => {
+    const db = taxDb([statement("s1", 2026, 4000, "2027-01-01"), statement("s2", 2026, 1500.5, "2027-01-01")]);
+    const b = await buildBrief(db.client as SupabaseClient, ORG, BASE, new Date("2027-01-01T15:00:00Z"));
+    const alert = b.alerts.find((a) => a.text.startsWith("2026 property taxes"))!;
+    expect(alert).toMatchObject({
+      severity: "high",
+      amount: 5500.5,
+      text: "2026 property taxes: $5,500.50 unpaid on 2 statements, delinquent since Jan 1, 2027.",
+      url: "https://turnrowland.com/taxes?year=2026",
+    });
+    expect(b.todos.find((t) => t.id === "taxes-2026")).toMatchObject({ status: "overdue", due: "2026-12-31" });
+    // The headline figure follows the latest tax year that has statements.
+    expect(b.metrics.find((m) => m.key === "taxes_unpaid")).toMatchObject({ value: 5500.5, period: "2026" });
+    expect(b.notes).toEqual([]);
+  });
+
+  it("before the delinquent date it says the last day to pay (the day before)", async () => {
+    const db = taxDb([statement("s1", 2026, 4000, "2027-01-01")]);
+    const b = await buildBrief(db.client as SupabaseClient, ORG, BASE, NOW);
+    const alert = b.alerts.find((a) => a.text.startsWith("2026 property taxes"))!;
+    expect(alert.severity).toBe("medium");
+    expect(alert.text).toBe("2026 property taxes: $4,000.00 unpaid on 1 statement. Pay by Dec 31, 2026 to avoid going delinquent.");
+    expect(b.todos.find((t) => t.id === "taxes-2026")).toMatchObject({ status: "open", due: "2026-12-31" });
+  });
+
+  it("the evening of December 31 in Alabama is still December 31, though UTC says January 1", async () => {
+    const db = taxDb([statement("s1", 2026, 4000, "2027-01-01")]);
+    // 9 pm Central on Dec 31, 2026.
+    const b = await buildBrief(db.client as SupabaseClient, ORG, BASE, new Date("2027-01-01T03:00:00Z"));
+    const alert = b.alerts.find((a) => a.text.startsWith("2026 property taxes"))!;
+    expect(alert.severity).toBe("medium");
+    expect(alert.text).toContain("Pay by Dec 31, 2026");
+  });
+
+  it("names each tax year, skips paid statements, counts part payments, and stays inside the organization", async () => {
+    const db = taxDb(
+      [
+        statement("old", 2024, 900, "2025-01-01"), // part paid, long delinquent
+        statement("paid", 2025, 1200, "2026-01-01"), // paid in full
+        statement("cur", 2026, 4000, "2027-01-01"), // coming up
+        statement("far", 2026, 700, "2027-06-01"), // more than 60 days off
+        statement("nodate", 2026, 50, null), // no delinquent date on file
+        statement("theirs", 2023, 9999, "2024-01-01", OTHER),
+      ],
+      [
+        { organization_id: ORG, tax_statement_id: "old", amount: 400 },
+        { organization_id: ORG, tax_statement_id: "paid", amount: 1200 },
+      ]
+    );
+    const b = await buildBrief(db.client as SupabaseClient, ORG, BASE, NOW);
+    const tax = b.alerts.filter((a) => a.text.includes("property taxes"));
+    expect(tax.map((a) => a.text)).toEqual([
+      "2024 property taxes: $500.00 unpaid on 1 statement, delinquent since Jan 1, 2025.",
+      "2026 property taxes: $4,000.00 unpaid on 1 statement. Pay by Dec 31, 2026 to avoid going delinquent.",
+    ]);
+    expect(tax.map((a) => a.severity)).toEqual(["high", "medium"]);
+    expect(b.todos.filter((t) => t.id.startsWith("taxes-")).map((t) => [t.id, t.status])).toEqual([
+      ["taxes-2024", "overdue"],
+      ["taxes-2026", "open"],
+    ]);
+    // 2026 is the latest tax year on file: all of its unpaid balance.
+    expect(b.metrics.find((m) => m.key === "taxes_unpaid")).toMatchObject({ value: 4750, period: "2026" });
+  });
+
+  it("unpaidTaxByYear splits a year that is partly delinquent and partly still payable", () => {
+    const out = unpaidTaxByYear(
+      [
+        { id: "a", tax_year: 2026, amount_due: 100, delinquent_date: "2027-01-01" },
+        { id: "b", tax_year: 2026, amount_due: 250, delinquent_date: "2027-03-01" },
+        { id: "c", tax_year: 2026, amount_due: 80, delinquent_date: "2027-02-15" },
+      ],
+      new Map([["b", 50]]),
+      "2027-01-01",
+      "2027-03-02"
+    );
+    expect(out).toEqual([
+      { taxYear: 2026, delinquentOwed: 100, delinquentStatements: 1, delinquentSince: "2027-01-01", soonOwed: 280, soonStatements: 2, payBy: "2027-02-14" },
+    ]);
+    expect(taxAlertText(out[0])).toBe(
+      "$100.00 unpaid on 1 statement, delinquent since Jan 1, 2027. Another $280.00 on 2 statements must be paid by Feb 14, 2027."
+    );
+  });
+
+  it("addDaysISO moves a calendar date across month and year ends", () => {
+    expect(addDaysISO("2027-01-01", -1)).toBe("2026-12-31");
+    expect(addDaysISO("2026-11-08", 60)).toBe("2027-01-07");
+    expect(addDaysISO("2028-02-28", 2)).toBe("2028-03-01");
+  });
+});
+
+describe("payments past the end of a lease that is over", () => {
+  it("isAfterEndedLease is true only for an expired or terminated lease, after its end date", () => {
+    expect(isAfterEndedLease("2027-03-01", { status: "expired", end_date: "2026-12-31" })).toBe(true);
+    expect(isAfterEndedLease("2027-03-01", { status: "terminated", end_date: "2026-12-31" })).toBe(true);
+    expect(isAfterEndedLease("2026-12-31", { status: "expired", end_date: "2026-12-31" })).toBe(false);
+    expect(isAfterEndedLease("2026-10-15", { status: "expired", end_date: "2026-12-31" })).toBe(false);
+    expect(isAfterEndedLease("2027-03-01", { status: "active", end_date: "2026-12-31" })).toBe(false);
+    expect(isAfterEndedLease("2027-03-01", { status: "expired", end_date: null })).toBe(false);
+    expect(isAfterEndedLease("2027-03-01", null)).toBe(false);
+  });
+
+  it("drops schedule rows dated after an expired lease ended and keeps rent that came due during its term", async () => {
+    const db = fakeDb({
+      leases: [{ id: "old", organization_id: ORG, name: "Old cropland", status: "expired", lease_type: "agricultural", end_date: "2025-12-31", auto_renew: false, tenant_id: "t1", terms: {} }],
+      tenants: [{ id: "t1", organization_id: ORG, name: "Smith Farms", insurance_on_file: false, insurance_expires: null }],
+      expected_payments: [
+        { id: "term", organization_id: ORG, lease_id: "old", timber_sale_id: null, label: "Fall rent 2025", due_date: "2025-10-15", expected_amount: 8000 },
+        { id: "after1", organization_id: ORG, lease_id: "old", timber_sale_id: null, label: "Fall rent 2026", due_date: "2026-10-15", expected_amount: 8000 },
+        { id: "after2", organization_id: ORG, lease_id: "old", timber_sale_id: null, label: "Spring rent 2027", due_date: "2026-11-30", expected_amount: 8000 },
+      ],
+      payments: [],
+    });
+    const b = await buildBrief(db.client as SupabaseClient, ORG, BASE, NOW);
+    expect(b.todos.map((t) => t.id)).toEqual(["payment-term"]);
+    expect(b.alerts.find((a) => a.text.includes("past due"))).toMatchObject({ amount: 8000, text: "1 payment past due, $8,000.00 in all." });
+    expect(b.metrics.find((m) => m.key === "due_30")!.value).toBe(0);
+    expect(b.lists[0].rows).toHaveLength(1);
   });
 });
 

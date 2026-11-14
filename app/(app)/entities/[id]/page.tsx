@@ -54,6 +54,30 @@ export default async function EntityDetailPage({
   const totalAcres = (properties ?? []).reduce((s, p) => s + (p.acres ?? 0), 0);
   const isOwner = profile.role === "admin";
 
+  // Everything else that hangs on this entity by foreign key, counted so
+  // the merge and delete confirmations can say exactly what will move,
+  // be unlinked, or be removed. Admins only, like the danger zone itself.
+  // A count that could not be read hides the danger zone rather than
+  // letting it understate what a delete would do.
+  const LINKED_TABLES = [
+    "tax_statements",
+    "entity_accounts",
+    "entity_access",
+    "timber_accounts",
+    "cost_share_awards",
+    "income_records",
+  ] as const;
+  const linkedCounts = isOwner
+    ? await Promise.all(
+        LINKED_TABLES.map((table) =>
+          supabase.from(table).select("id", { count: "exact", head: true }).eq("entity_id", id)
+        )
+      )
+    : [];
+  const linkedFailed = linkedCounts.some((r) => r.error || r.count === null);
+  const [taxStatements, taxAccounts, members, timberAccounts, costShareAwards, incomeRecords] =
+    linkedCounts.map((r) => r.count ?? 0);
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div>
@@ -161,7 +185,12 @@ export default async function EntityDetailPage({
         />
       </section>
 
-      {isOwner ? (
+      {isOwner && linkedFailed ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Merge and delete are not offered right now because some of this entity{"'"}s records
+          could not be counted. Reload to try again.
+        </p>
+      ) : isOwner ? (
         <EntityDangerZone
           entityId={landEntity.id}
           entityName={landEntity.name}
@@ -169,6 +198,7 @@ export default async function EntityDetailPage({
           propertyCount={(properties ?? []).length}
           aliasCount={(aliases ?? []).length}
           documentCount={documentCount ?? 0}
+          linked={{ taxStatements, taxAccounts, members, timberAccounts, costShareAwards, incomeRecords }}
         />
       ) : null}
     </div>

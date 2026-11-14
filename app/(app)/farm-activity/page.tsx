@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars, formatNumber, plural } from "@/lib/format";
 import {
   cropColor,
   harvestState,
   harvestStateLabel,
+  withoutIgnoredFields,
   yieldPerAcre,
   yieldUnitLabel,
   type FarmFieldDataRow,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/farmDisplay";
 import {
   NO_ENTITY_KEY,
+  distinctTenantOptions,
   propertyRollups,
   rollups,
   scopedRollup,
@@ -45,6 +47,7 @@ export default async function FarmActivityPage({
   const [
     { data: connections },
     { data: mappings },
+    { data: ignoredMappings },
     { data: farmData },
     { data: fields },
     { data: properties },
@@ -56,6 +59,12 @@ export default async function FarmActivityPage({
     // Confirmed only, like every other surface: a suggested (unreviewed)
     // mapping must never attribute farm data to a property.
     supabase.from("field_mappings").select("*").eq("status", "confirmed"),
+    // "Ignore this field" on the mapping screen: those fields are left
+    // out of everything on this page.
+    supabase
+      .from("field_mappings")
+      .select("farm_connection_id, remote_field_id, status")
+      .eq("status", "ignored"),
     supabase.from("farm_field_data").select("*").order("crop_year", { ascending: false }),
     supabase.from("fields").select("id, name, property_id"),
     supabase.from("properties").select("id, name, entity_id").order("name"),
@@ -72,7 +81,8 @@ export default async function FarmActivityPage({
     .from("tenants")
     .select("id, name, farm_connection_id, farm_entity_id");
 
-  const allData = (farmData ?? []) as FarmFieldDataRow[];
+  const syncedData = (farmData ?? []) as FarmFieldDataRow[];
+  const allData = withoutIgnoredFields(syncedData, ignoredMappings ?? []);
   const years = Array.from(new Set(allData.map((d) => d.crop_year))).sort((a, b) => b - a);
   const currentYear = new Date().getFullYear();
   const year = Number(params.year) || years[0] || currentYear;
@@ -91,7 +101,7 @@ export default async function FarmActivityPage({
   const [{ data: marketingPrices }, { data: projectedYields }] = await Promise.all([
     supabase
       .from("farm_marketing_prices")
-      .select("farm_connection_id, crop, crop_year, projected_avg_price, unit, is_final, as_of, remote_entity_id")
+      .select("farm_connection_id, crop, crop_year, projected_avg_price, unit, is_final, as_of, remote_entity_id, remote_entity_name")
       .eq("crop_year", year),
     supabase
       .from("farm_projected_yields")
@@ -114,6 +124,7 @@ export default async function FarmActivityPage({
   );
 
   const yearData = allData.filter((d) => d.crop_year === year);
+  const ignoredThisYear = syncedData.filter((d) => d.crop_year === year).length - yearData.length;
   const rollupInput: RollupInput = {
     plantings: yearData,
     mappings: (mappings ?? []) as FieldMappingRow[],
@@ -277,6 +288,9 @@ export default async function FarmActivityPage({
   if (connectionFilter && !tenantOptions.some((t) => t.key === tenantKey(connectionFilter, entityScoped ?? null))) {
     tenantOptions.push({ key: tenantKey(connectionFilter, entityScoped ?? null), name: drillConnection?.name ?? "Tenant" });
   }
+  // Two connections to the same operation give two tenants with one
+  // name; add the connection label so the options can be told apart.
+  const tenantOptionList = distinctTenantOptions(tenantOptions, conns);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
@@ -317,7 +331,7 @@ export default async function FarmActivityPage({
             className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
           >
             <option value="">All tenants</option>
-            {tenantOptions.map((t) => (
+            {tenantOptionList.map((t) => (
               <option key={t.key} value={t.key}>
                 {t.name}
               </option>
@@ -359,7 +373,7 @@ export default async function FarmActivityPage({
             />
             <span className="font-medium text-gray-800">{c.label}</span>
             {c.last_synced_at ? (
-              <span>synced {new Date(c.last_synced_at).toLocaleDateString()}</span>
+              <span>synced {formatDate(c.last_synced_at)}</span>
             ) : null}
           </span>
         ))}
@@ -510,16 +524,42 @@ export default async function FarmActivityPage({
             Tenant prices ({year})
           </h2>
           <div className="flex flex-wrap gap-x-6 gap-y-1 px-4 py-2.5 text-sm">
-            {(marketingPrices ?? []).map((p) => (
-              <span key={`${p.farm_connection_id}-${p.crop}`} className="flex items-center gap-1.5">
-                <span className="font-medium text-gray-900">{p.crop}</span>
-                <span className="tabular-nums text-gray-700">{priceText(Number(p.projected_avg_price ?? 0), p.unit)}</span>
-                <PriceBadge isFinal={Boolean(p.is_final)} />
-                {connectionById.get(p.farm_connection_id) ? (
-                  <span className="text-xs text-gray-500">{tenantName(connectionById.get(p.farm_connection_id)!)}</span>
-                ) : null}
-              </span>
-            ))}
+            {(marketingPrices ?? []).map((p, i) => {
+              // One row per connection, crop, AND farming entity (the
+              // whole-operation row has no entity), so the key carries
+              // all three. A price the farm software cannot work out yet
+              // arrives as null: say so, never "$0.00".
+              const connection = connectionById.get(p.farm_connection_id);
+              // An entity's row is named like its tenant card: the linked
+              // tenant first, else the name the farm software sent.
+              const entity = p.remote_entity_id
+                ? tenantDisplayName(rollupInput, p.farm_connection_id, p.remote_entity_id)
+                : null;
+              const who = entity
+                ? entity.tenantId
+                  ? entity.name
+                  : (p.remote_entity_name ?? entity.name)
+                : connection
+                  ? tenantName(connection)
+                  : null;
+              return (
+                <span
+                  key={`${p.farm_connection_id}-${p.remote_entity_id ?? "all"}-${p.crop}-${i}`}
+                  className="flex items-center gap-1.5"
+                >
+                  <span className="font-medium text-gray-900">{p.crop}</span>
+                  {p.projected_avg_price === null ? (
+                    <span className="text-gray-500">not available</span>
+                  ) : (
+                    <>
+                      <span className="tabular-nums text-gray-700">{priceText(Number(p.projected_avg_price), p.unit)}</span>
+                      <PriceBadge isFinal={Boolean(p.is_final)} />
+                    </>
+                  )}
+                  {who ? <span className="text-xs text-gray-500">{who}</span> : null}
+                </span>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -528,6 +568,12 @@ export default async function FarmActivityPage({
         <p className="text-sm text-gray-600">
           {formatNumber(rows.length)} plantings · {formatAcres(totalPlanted)} acres
           planted · {formatAcres(totalHarvested)} harvested
+        </p>
+      ) : null}
+      {ignoredThisYear > 0 ? (
+        <p className="text-xs text-gray-500">
+          {plural(ignoredThisYear, "planting")} on fields you marked Ignore{" "}
+          {ignoredThisYear === 1 ? "is" : "are"} left out. Change that under Manage connections, Field mapping.
         </p>
       ) : null}
 
@@ -601,7 +647,7 @@ export default async function FarmActivityPage({
                         <td className="px-4 py-2 text-right tabular-nums">
                           {formatAcres(r.data.planted_acres)}
                         </td>
-                        <td className="px-4 py-2">{r.data.planting_date ?? ""}</td>
+                        <td className="px-4 py-2">{formatDate(r.data.planting_date)}</td>
                         <td className="px-4 py-2">
                           <span
                             className={
@@ -711,8 +757,8 @@ function Chips({ rollup, compact = false }: { rollup: Rollup; compact?: boolean 
         <span className="text-gray-400">{rollup.sharedYields ? "No yields yet" : "Yields not shared"}</span>
       )}
       {rollup.prices.length > 0 ? (
-        rollup.prices.map((p) => (
-          <span key={`${p.tenant}-${p.crop}`} className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-gray-800">
+        rollup.prices.map((p, i) => (
+          <span key={`${p.tenant}-${p.crop}-${i}`} className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-gray-800">
             <span className="font-medium">{p.crop}</span>
             <span className="tabular-nums">{priceText(p.price, p.unit)}</span>
             <PriceBadge isFinal={p.isFinal} />

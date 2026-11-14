@@ -6,11 +6,17 @@
 // support with the conversation carried along.
 
 import { useRef, useState } from "react";
+import { friendlyDbError } from "@/lib/dbErrors";
 
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+// A message written for the person (ours or the server's). Anything else
+// that lands in the catch below is the browser's own text for a dropped
+// connection ("Load failed", "Failed to fetch") and is never shown as is.
+class PlainError extends Error {}
 
 export default function SupportChat({
   pathname,
@@ -48,7 +54,7 @@ export default function SupportChat({
       });
       if (!res.ok || !res.body) {
         const json = await res.json().catch(() => null);
-        throw new Error(json?.error ?? "The help chat is unavailable right now.");
+        throw new PlainError(json?.error ?? "The help chat is unavailable right now.");
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -61,10 +67,14 @@ export default function SupportChat({
         setMessages([...next, { role: "assistant", content: current }]);
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
       }
-      if (!acc.trim()) throw new Error("No answer came back. Try again, or contact support.");
+      if (!acc.trim()) throw new PlainError("No answer came back. Try again, or contact support.");
     } catch (error) {
       setMessages(next);
-      setErr(error instanceof Error ? error.message : "The help chat is unavailable right now.");
+      setErr(
+        error instanceof PlainError
+          ? error.message
+          : friendlyDbError(error as Error, "The answer was cut off. Check your connection and ask again.")
+      );
     } finally {
       setBusy(false);
     }

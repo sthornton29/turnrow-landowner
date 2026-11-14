@@ -1,8 +1,10 @@
 "use client";
 
-// "Ask about your land": the data assistant thread. Session-only: the
-// conversation array is resent each turn and nothing persists beyond the
-// page. The server does the tool work; this component renders the stream.
+// "Ask about your land": the data assistant thread. The conversation
+// array is resent each turn. It is kept for this browser tab only
+// (sessionStorage), so going to another page and coming back does not
+// lose it; nothing is stored on the server. The server does the tool
+// work; this component renders the stream.
 //
 // Stream protocol (newline-delimited JSON from /api/data-assistant):
 //   {"t":"..."}   text delta
@@ -12,16 +14,29 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { TOOL_PAGE_LINKS } from "@/lib/assistantTools";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDateTime } from "@/lib/format";
 
 export type AssistantMessage = { role: "user" | "assistant"; content: string };
 type TurnMeta = { tools: string[]; at: string };
 
+// Where the thread is kept between pages (this tab only).
+const THREAD_KEY = "turnrow.ask.thread";
+
+// A message written for the person (ours or the server's). Anything else
+// that lands in the catch below is the browser's own text for a dropped
+// connection ("Load failed", "Failed to fetch") and is never shown as is.
+class PlainError extends Error {}
+
+// Worded to fit any account in any year: no county, place, or year that
+// may not be yours.
 export const STARTER_QUESTIONS = [
-  "How many acres do I own in Lawrence County?",
-  "Which parcels have unpaid 2025 taxes?",
+  "How many acres do I own in each county?",
+  "Which parcels have unpaid taxes from last year?",
   "What did timber sales bring in last year?",
-  "What easements cross the Smith place?",
+  "What easements cross my land?",
 ];
 
 // Markdown-light: **bold**, bullet lists, numbered lists, paragraphs.
@@ -83,6 +98,49 @@ export default function AssistantChat({
   const [err, setErr] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const startedRef = useRef(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  // True once the saved thread has been read. Restoring happens in an
+  // effect, never during the first render, so the server and the browser
+  // render the same (empty) thread first.
+  const [restored, setRestored] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(THREAD_KEY) ?? "null") as {
+        messages?: AssistantMessage[];
+        meta?: Record<number, TurnMeta>;
+      } | null;
+      if (saved && Array.isArray(saved.messages) && saved.messages.length > 0) {
+        setMessages(saved.messages);
+        setMetaByIndex(saved.meta ?? {});
+      }
+    } catch {
+      // Nothing saved, or storage is unavailable: start with an empty thread.
+    }
+    setRestored(true);
+  }, []);
+
+  // Save the thread whenever a turn has finished (not mid-answer, so a
+  // half-streamed reply is never what comes back).
+  useEffect(() => {
+    if (!restored || busy) return;
+    try {
+      if (messages.length > 0) {
+        window.sessionStorage.setItem(THREAD_KEY, JSON.stringify({ messages, meta: metaByIndex }));
+      } else {
+        window.sessionStorage.removeItem(THREAD_KEY);
+      }
+    } catch {
+      // Storage is unavailable: the thread still lives while the page is open.
+    }
+  }, [restored, busy, messages, metaByIndex]);
+
+  function startOver() {
+    setMessages([]);
+    setMetaByIndex({});
+    setErr(null);
+  }
 
   async function ask(text: string) {
     if (!text.trim() || busy) return;
@@ -100,7 +158,7 @@ export default function AssistantChat({
       });
       if (!res.ok || !res.body) {
         const json = await res.json().catch(() => null);
-        throw new Error(json?.error ?? "The assistant is unavailable right now.");
+        throw new PlainError(json?.error ?? "The assistant is unavailable right now.");
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -139,31 +197,41 @@ export default function AssistantChat({
         for (const line of lines) handleLine(line);
       }
       if (buffer.trim()) handleLine(buffer);
-      if (streamError) throw new Error(streamError);
-      if (!acc.trim()) throw new Error("The assistant did not answer. Try again.");
+      if (streamError) throw new PlainError(streamError);
+      if (!acc.trim()) throw new PlainError("The assistant did not answer. Try again.");
     } catch (error) {
       setMessages(next);
-      setErr(error instanceof Error ? error.message : "The assistant is unavailable right now.");
+      setErr(
+        error instanceof PlainError
+          ? error.message
+          : friendlyDbError(error as Error, "The answer was cut off. Check your connection and ask again.")
+      );
     } finally {
       setBusy(false);
       setStatus(null);
     }
   }
 
+  // A question handed over in the URL (/ask?q=...) is asked ONCE, after
+  // the saved thread is back, and then taken out of the URL: reloading,
+  // or coming back to the page later, must not send it (and pay for it)
+  // again.
   useEffect(() => {
+    if (!restored) return;
     if (initialQuestion && !startedRef.current) {
       startedRef.current = true;
+      router.replace(pathname);
       void ask(initialQuestion);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialQuestion]);
+  }, [initialQuestion, restored]);
 
   function footer(meta: TurnMeta) {
     const links = meta.tools.map((t) => TOOL_PAGE_LINKS[t]).filter(Boolean);
     const seen = new Set<string>();
     const unique = links.filter((l) => (seen.has(l.href) ? false : (seen.add(l.href), true)));
-    const at = new Date(meta.at);
-    const stamp = isNaN(at.getTime()) ? "" : ` as of ${at.toLocaleString()}`;
+    const when = formatDateTime(meta.at);
+    const stamp = when ? ` as of ${when}` : "";
     return (
       <p className="mt-1 text-[11px] text-gray-400">
         From your Turnrow records{stamp}
@@ -189,6 +257,14 @@ export default function AssistantChat({
       <p className="border-b border-gray-100 pb-2 text-xs text-gray-500">
         Answers come from <b>your own records</b>, the same numbers as your pages.
         Nothing here is visible to anyone outside your organization.
+        {messages.length > 0 && !busy ? (
+          <>
+            {" "}
+            <button type="button" onClick={startOver} className="font-medium text-kelly-700 hover:underline">
+              Start a new conversation
+            </button>
+          </>
+        ) : null}
       </p>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3">
         {messages.length === 0 ? (

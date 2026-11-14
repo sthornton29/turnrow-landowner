@@ -171,6 +171,37 @@ export function tenantDisplayName(
   return { name: c ? tenantName(c) : "Tenant", tenantId: null };
 }
 
+// The tenant filter's options, told apart. Each farm connection makes its
+// own tenant, so two connections to the same operation give two options
+// with the same name. When a name is shared, each of those options adds
+// its connection's label in parentheses (and a number when even that
+// matches). Names that are already unique are left as they are.
+export function distinctTenantOptions(
+  options: Array<{ key: string; name: string }>,
+  connections: Array<Pick<RollupConnection, "id" | "label">>
+): Array<{ key: string; name: string }> {
+  const labelOf = new Map(connections.map((c) => [c.id, c.label]));
+  const times = (names: string[]) => {
+    const n = new Map<string, number>();
+    for (const name of names) n.set(name, (n.get(name) ?? 0) + 1);
+    return n;
+  };
+  const shared = times(options.map((o) => o.name));
+  const labeled = options.map((o) => {
+    if ((shared.get(o.name) ?? 0) < 2) return o;
+    const label = (labelOf.get(parseTenantKey(o.key)?.connectionId ?? "") ?? "").trim();
+    return label && label !== o.name ? { key: o.key, name: `${o.name} (${label})` } : o;
+  });
+  const still = times(labeled.map((o) => o.name));
+  const seen = new Map<string, number>();
+  return labeled.map((o) => {
+    if ((still.get(o.name) ?? 0) < 2) return o;
+    const n = (seen.get(o.name) ?? 0) + 1;
+    seen.set(o.name, n);
+    return { key: o.key, name: `${o.name} (${n})` };
+  });
+}
+
 // Resolve each planting to its property (mapping -> local field ->
 // property, else the mapping's whole-property target) and entity.
 export function resolvePlantings(input: RollupInput): ResolvedPlanting[] {

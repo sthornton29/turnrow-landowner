@@ -1,7 +1,9 @@
 import Link from "next/link";
 import AskEntryCard from "@/components/assistant/AskEntryCard";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars, formatNumber, todayISO } from "@/lib/format";
+import { seasonYear, withoutIgnoredFields } from "@/lib/farmDisplay";
+import { addDaysISO, isAfterEndedLease, taxAlertText, unpaidTaxByYear } from "@/lib/ops/brief";
 import { NO_ENTITY, parseEntityParam } from "@/lib/entities";
 import EntityFilterChips from "@/components/entities/EntityFilterChips";
 import { bboxOf } from "@/lib/geo/normalize";
@@ -31,31 +33,18 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ entity?: string }>;
 }) {
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
   const { entity: entityParam } = await searchParams;
 
-  const [
-    { data: org },
-    { data: properties },
-    { data: parcels },
-    { data: fields },
-    { data: pastures },
-    { data: wetlands },
-    { data: habitats },
-    { data: timber },
-    { data: assets },
-    { data: entities },
-    { data: expectedPayments },
-    { data: paymentRows },
-    { data: leases },
-    { data: timberSales },
-    { data: taxStatements },
-    { data: taxPayments },
-    { data: taxLines },
-    { data: farmData },
-    { data: tenants },
-    { data: openIssues },
-  ] = await Promise.all([
+  // "Today" is the calendar day where the land is (US Central). The
+  // server runs in UTC and would call it tomorrow every evening.
+  const today = todayISO();
+  const todayStart = new Date(today + "T00:00:00");
+  const in60 = addDaysISO(today, 60);
+  const in90 = addDaysISO(today, 90);
+  const currentYear = Number(today.slice(0, 4));
+
+  const results = await Promise.all([
     supabase
       .from("organizations")
       .select("name")
@@ -82,26 +71,69 @@ export default async function DashboardPage({
       .from("leases")
       .select("id, name, status, lease_type, end_date, auto_renew, tenant_id, terms"),
     supabase.from("timber_sales").select("id, sale_name"),
+    // Every tax year, newest first: last year's bills go delinquent on
+    // January 1, so "this calendar year only" hid them the day it mattered.
     supabase
       .from("tax_statements")
       .select("id, tax_year, amount_due, delinquent_date")
-      .eq("tax_year", new Date().getFullYear()),
+      .order("tax_year", { ascending: false }),
     supabase.from("tax_payments").select("tax_statement_id, amount"),
-    supabase
-      .from("tax_statement_lines")
-      .select("parcel_id, line_type")
-      .eq("tax_year", new Date().getFullYear())
-      .not("parcel_id", "is", null),
+    // This crop year and the one before: harvest often finishes in January.
     supabase
       .from("farm_field_data")
-      .select("planted_acres, harvested_acres, harvest_status")
-      .eq("crop_year", new Date().getFullYear()),
+      .select("farm_connection_id, remote_field_id, crop_year, planted_acres, harvested_acres, harvest_status")
+      .in("crop_year", [currentYear - 1, currentYear])
+      .order("crop_year", { ascending: false }),
+    supabase
+      .from("field_mappings")
+      .select("farm_connection_id, remote_field_id, status")
+      .eq("status", "ignored"),
     supabase.from("tenants").select("id, name, insurance_on_file, insurance_expires"),
     supabase
       .from("maintenance_issues")
       .select("id, severity")
       .eq("status", "open"),
   ]);
+  const [
+    { data: org },
+    { data: properties },
+    { data: parcels },
+    { data: fields },
+    { data: pastures },
+    { data: wetlands },
+    { data: habitats },
+    { data: timber },
+    { data: assets },
+    { data: entities },
+    { data: expectedPayments },
+    { data: paymentRows },
+    { data: leases },
+    { data: timberSales },
+    { data: taxStatements },
+    { data: taxPayments },
+    { data: farmData },
+    { data: ignoredMappings },
+    { data: tenants },
+    { data: openIssues },
+  ] = results;
+
+  // Property tax card: the latest tax year that has statements (this
+  // calendar year when there are none yet). Its parcel coverage needs
+  // that year's statement lines.
+  const allStatements = taxStatements ?? [];
+  const taxYear = allStatements.reduce((latest, s) => Math.max(latest, s.tax_year), 0) || currentYear;
+  const { data: taxLines, error: taxLinesError } =
+    allStatements.length > 0
+      ? await supabase
+          .from("tax_statement_lines")
+          .select("parcel_id, line_type")
+          .eq("tax_year", taxYear)
+          .not("parcel_id", "is", null)
+      : { data: [], error: null };
+
+  // A read that failed must never look like an empty or a healthy
+  // account: no all-clear line and no setup steps when anything is missing.
+  const loadFailed = results.some((r) => r.error) || Boolean(taxLinesError);
 
   // Payments needing attention: past due, or due within 60 days, not yet paid.
   const receivedByExpected = new Map<string, number>();
@@ -114,32 +146,37 @@ export default async function DashboardPage({
     }
   }
   const leaseName = new Map((leases ?? []).map((l) => [l.id, l.name]));
+  const leaseById = new Map((leases ?? []).map((l) => [l.id, l]));
   const saleName = new Map((timberSales ?? []).map((s) => [s.id, s.sale_name]));
-  const now = new Date();
-  const horizon = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
-  const attention = (expectedPayments ?? [])
+  const owed = (expectedPayments ?? [])
     .map((e) => {
       const received = receivedByExpected.get(e.id) ?? 0;
-      const status = paymentStatus(e.expected_amount, received, e.due_date, now);
+      const status = paymentStatus(e.expected_amount, received, e.due_date, todayStart);
       return { ...e, received, status };
     })
     .filter(
       (e) =>
         e.status !== "paid" &&
-        (e.status === "past_due" ||
-          e.status === "partial" ||
-          new Date(e.due_date + "T00:00:00") <= horizon)
-    )
-    .slice(0, 8);
+        // A schedule row dated after an expired or terminated lease
+        // ended is not owed; rent from the lease's own term still is.
+        !isAfterEndedLease(e.due_date, e.lease_id ? leaseById.get(e.lease_id) : null) &&
+        (e.status === "past_due" || e.status === "partial" || e.due_date <= in60)
+    );
+  // Overdue first, the most recently due at the top (oldest-first let
+  // years-old rows fill the list and hide this season's), then what is
+  // coming due, soonest first. The rest are one tap away on Income.
+  const attentionAll = [
+    ...owed.filter((e) => e.due_date < today).sort((a, b) => b.due_date.localeCompare(a.due_date)),
+    ...owed.filter((e) => e.due_date >= today).sort((a, b) => a.due_date.localeCompare(b.due_date)),
+  ];
+  const attention = attentionAll.slice(0, 8);
+  const attentionMore = attentionAll.length - attention.length;
 
   // Everything else an absentee owner would want flagged without opening
   // each page: leases running out, tenant insurance lapsing, and open
   // problems on the ground. Each alert links to the page that fixes it.
   type Alert = { key: string; href: string; title: string; detail: string; tone: "red" | "amber" };
   const alerts: Alert[] = [];
-  const today = now.toISOString().slice(0, 10);
-  const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const in60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const activeLeases = (leases ?? []).filter((l) => l.status === "active");
   for (const l of activeLeases) {
     if (!l.end_date || l.auto_renew) continue;
@@ -148,7 +185,7 @@ export default async function DashboardPage({
         key: `lease-ended-${l.id}`,
         href: `/leases/${l.id}`,
         title: l.name,
-        detail: `Lease ended ${l.end_date} and is still marked active. Renew it or mark it expired.`,
+        detail: `Lease ended ${formatDate(l.end_date)} and is still marked active. Renew it or mark it expired.`,
         tone: "red",
       });
     } else if (l.end_date <= in90) {
@@ -156,7 +193,7 @@ export default async function DashboardPage({
         key: `lease-ending-${l.id}`,
         href: `/leases/${l.id}`,
         title: l.name,
-        detail: `Lease ends ${l.end_date}. Time to talk renewal with your tenant.`,
+        detail: `Lease ends ${formatDate(l.end_date)}. Time to talk renewal with your tenant.`,
         tone: "amber",
       });
     }
@@ -183,7 +220,7 @@ export default async function DashboardPage({
         key: `ins-expired-${t.id}`,
         href: `/tenants/${t.id}`,
         title: t.name,
-        detail: `Insurance certificate expired ${t.insurance_expires}. Ask for a current one.`,
+        detail: `Insurance certificate expired ${formatDate(t.insurance_expires)}. Ask for a current one.`,
         tone: required ? "red" : "amber",
       });
     } else if (t.insurance_on_file && t.insurance_expires && t.insurance_expires <= in60) {
@@ -192,7 +229,7 @@ export default async function DashboardPage({
         key: `ins-soon-${t.id}`,
         href: `/tenants/${t.id}`,
         title: t.name,
-        detail: `Insurance certificate expires ${t.insurance_expires}.`,
+        detail: `Insurance certificate expires ${formatDate(t.insurance_expires)}.`,
         tone: "amber",
       });
     }
@@ -212,7 +249,22 @@ export default async function DashboardPage({
     });
   }
   alerts.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === "red" ? -1 : 1));
-  const setupStage = (properties ?? []).length === 0;
+  // No land in view means two different things. An admin has setup to
+  // do. A member who has not been granted an entity yet can do none of
+  // it (row level security refuses), so they are told whom to ask.
+  const noLand = (properties ?? []).length === 0;
+  const setupStage = noLand && isAdmin && !loadFailed;
+  const noAccess = noLand && !isAdmin && !loadFailed;
+  let askWhom = "the person who invited you";
+  if (noAccess) {
+    const [{ data: admins }, { data: invite }] = await Promise.all([
+      supabase.from("profiles").select("id, full_name").eq("role", "admin"),
+      supabase.from("invites").select("invited_by").ilike("email", profile.email).limit(1),
+    ]);
+    const named = (admins ?? []).filter((a) => (a.full_name ?? "").trim() !== "");
+    const inviter = named.find((a) => a.id === invite?.[0]?.invited_by);
+    askWhom = inviter?.full_name ?? (named.length === 1 ? named[0].full_name : null) ?? askWhom;
+  }
 
   // Entity filter for the stat tiles (only shown when the org holds land
   // in more than one entity). Alerts and cards below stay org-wide.
@@ -255,8 +307,8 @@ export default async function DashboardPage({
     (properties ?? []).map((p) => p.boundary_geojson as MultiPolygon | null)
   );
 
-  // Property tax card for the current year (only once statements exist).
-  const taxYear = new Date().getFullYear();
+  // Property tax card for the latest tax year on file (only once
+  // statements exist).
   const taxPaidByStatement = new Map<string, number>();
   for (const p of taxPayments ?? []) {
     taxPaidByStatement.set(
@@ -264,7 +316,7 @@ export default async function DashboardPage({
       (taxPaidByStatement.get(p.tax_statement_id) ?? 0) + p.amount
     );
   }
-  const yearStatements = taxStatements ?? [];
+  const yearStatements = allStatements.filter((s) => s.tax_year === taxYear);
   // Covered = a real-property LINE for the year links to the parcel.
   const coveredParcels = new Set(
     (taxLines ?? []).filter((l) => l.line_type === "real_property").map((l) => l.parcel_id)
@@ -280,26 +332,27 @@ export default async function DashboardPage({
     .map((s) => s.delinquent_date)
     .filter((d): d is string => !!d)
     .sort()[0];
+  // delinquent_date is the FIRST delinquent day: the bill is delinquent
+  // from that morning, and the last day to pay is the day before.
   let taxTier: "ok" | "warn" | "danger" = "ok";
   if (taxUnpaidTotal > 0 && nearestDelinquent) {
-    const delinquent = new Date(nearestDelinquent + "T00:00:00");
-    const daysLeft = Math.ceil((delinquent.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-    taxTier = daysLeft < 0 ? "danger" : daysLeft <= 60 ? "warn" : "ok";
+    taxTier = nearestDelinquent <= today ? "danger" : nearestDelinquent <= in60 ? "warn" : "ok";
   }
-  // Taxes near or past delinquency join the attention list too (the
-  // card below carries the detail); otherwise the all-clear line could
-  // sit above a red tax card.
-  if (taxTier !== "ok" && nearestDelinquent) {
+  // Taxes near or past delinquency join the attention list too, for
+  // EVERY tax year that still has a balance (not only the card's year),
+  // each named by its own tax year. Property tax for a year is due
+  // October 1 and goes delinquent January 1 of the NEXT year.
+  const taxAlerts = unpaidTaxByYear(allStatements, taxPaidByStatement, today, in60);
+  for (const a of taxAlerts) {
     alerts.push({
-      key: "taxes",
-      href: "/taxes",
-      title: `${taxYear} property taxes`,
-      detail:
-        taxTier === "danger"
-          ? `${formatDollars(taxUnpaidTotal)} unpaid and delinquent since ${nearestDelinquent}.`
-          : `${formatDollars(taxUnpaidTotal)} unpaid, delinquent ${nearestDelinquent}.`,
-      tone: taxTier === "danger" ? "red" : "amber",
+      key: `taxes-${a.taxYear}`,
+      href: `/taxes?year=${a.taxYear}`,
+      title: `${a.taxYear} property taxes`,
+      detail: taxAlertText(a),
+      tone: a.delinquentStatements > 0 ? "red" : "amber",
     });
+  }
+  if (taxAlerts.length > 0) {
     alerts.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === "red" ? -1 : 1));
   }
   const taxCardBorder =
@@ -319,9 +372,15 @@ export default async function DashboardPage({
   // Harvested counts only harvest-COMPLETE fields; fields mid-harvest
   // (harvest_status in_progress) show as their own acres line. Rows
   // synced before the farm API sent statuses fall back to the old
-  // harvested-acres inference.
-  const farmPlanted = (farmData ?? []).reduce((s, d) => s + (d.planted_acres ?? 0), 0);
-  const farmHarvested = (farmData ?? []).reduce(
+  // harvested-acres inference. Shows this crop year once it has
+  // plantings, otherwise the year before (harvest often finishes in
+  // January), and says which. Fields marked "Ignore this field" on the
+  // mapping screen are left out.
+  const farmRows = withoutIgnoredFields(farmData ?? [], ignoredMappings ?? []);
+  const harvestYear = seasonYear(farmRows, currentYear);
+  const harvestRows = farmRows.filter((d) => d.crop_year === harvestYear);
+  const farmPlanted = harvestRows.reduce((s, d) => s + (d.planted_acres ?? 0), 0);
+  const farmHarvested = harvestRows.reduce(
     (s, d) =>
       s +
       ((d.harvest_status ?? ((d.harvested_acres ?? 0) > 0 ? "complete" : null)) === "complete"
@@ -329,7 +388,7 @@ export default async function DashboardPage({
         : 0),
     0
   );
-  const farmInProgress = (farmData ?? []).reduce(
+  const farmInProgress = harvestRows.reduce(
     (s, d) => s + (d.harvest_status === "in_progress" ? (d.planted_acres ?? 0) : 0),
     0
   );
@@ -378,6 +437,19 @@ export default async function DashboardPage({
         </p>
       </div>
 
+      {loadFailed ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+          Some of your records could not be loaded just now. Reload to try again.
+        </p>
+      ) : null}
+
+      {noAccess ? (
+        <p className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700">
+          You have not been given access to any land yet. Ask {askWhom} to add you to an entity
+          in Settings.
+        </p>
+      ) : null}
+
       {attention.length > 0 || alerts.length > 0 ? (
         <section className="rounded-xl border border-amber-200 bg-white">
           <h2 className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-base font-semibold text-amber-900">
@@ -410,7 +482,7 @@ export default async function DashboardPage({
                     : saleName.get(e.timber_sale_id!) ?? "Timber sale"}
                 </Link>
                 <span className="text-gray-500">
-                  {e.label} · due {e.due_date}
+                  {e.label} · due {formatDate(e.due_date)}
                 </span>
                 <span className="ml-auto flex items-center gap-2">
                   <span className="font-medium tabular-nums text-gray-900">
@@ -424,9 +496,16 @@ export default async function DashboardPage({
                 </span>
               </li>
             ))}
+            {attentionMore > 0 ? (
+              <li className="px-4 py-2.5 text-sm">
+                <Link href="/income" className="font-medium text-kelly-700 hover:underline">
+                  and {formatNumber(attentionMore)} more on the Income page
+                </Link>
+              </li>
+            ) : null}
           </ul>
         </section>
-      ) : !setupStage ? (
+      ) : !noLand && !loadFailed ? (
         <p className="rounded-xl border border-kelly-100 bg-kelly-50 px-4 py-3 text-sm font-medium text-pine-900">
           Nothing needs your attention right now. Payments, leases, tenant insurance, taxes, and
           maintenance are all in order.
@@ -434,9 +513,12 @@ export default async function DashboardPage({
       ) : null}
 
       {showHarvestCard ? (
-        <Link href="/farm-activity" className="block rounded-xl border border-kelly-100 bg-white">
+        <Link
+          href={`/farm-activity?year=${harvestYear}`}
+          className="block rounded-xl border border-kelly-100 bg-white"
+        >
           <h2 className="rounded-t-xl border-b border-kelly-100 bg-kelly-50 px-4 py-3 text-base font-semibold text-pine-900">
-            Harvest progress
+            {harvestYear} harvest progress
           </h2>
           <div className="space-y-2 px-4 py-3">
             <p className="text-sm text-gray-700">
@@ -466,7 +548,7 @@ export default async function DashboardPage({
 
       {yearStatements.length > 0 ? (
         <Link
-          href="/taxes"
+          href={`/taxes?year=${taxYear}`}
           className={`block rounded-xl border bg-white ${taxCardBorder}`}
         >
           <h2
@@ -498,8 +580,8 @@ export default async function DashboardPage({
                 }
               >
                 {taxTier === "danger"
-                  ? `Delinquent since ${nearestDelinquent}`
-                  : `Delinquent ${nearestDelinquent}`}
+                  ? `Delinquent since ${formatDate(nearestDelinquent)}`
+                  : `Pay by ${formatDate(addDaysISO(nearestDelinquent, -1))}`}
               </span>
             ) : null}
             <span className="ml-auto text-kelly-600">&rarr;</span>
@@ -535,8 +617,9 @@ export default async function DashboardPage({
         ) : (
           <div className="flex h-48 items-center justify-center bg-pine-900 md:h-64">
             <p className="px-6 text-center text-sm text-white/80">
-              No boundaries yet. Open the map to draw your first one, or import
-              your files.
+              {isAdmin
+                ? "No boundaries yet. Open the map to draw your first one, or import your files."
+                : "No boundaries to show yet."}
             </p>
           </div>
         )}
@@ -592,16 +675,20 @@ export default async function DashboardPage({
 
       <AskEntryCard />
 
+      {/* Importing and inviting are admin work; a member sees only what
+          they can use. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Link
-          href="/import"
-          className="rounded-xl border border-gray-200 bg-white p-4 transition hover:border-kelly-500"
-        >
-          <p className="font-medium text-gray-900">Import boundaries</p>
-          <p className="mt-0.5 text-sm text-gray-500">
-            GeoJSON, KML, KMZ, or shapefiles
-          </p>
-        </Link>
+        {isAdmin ? (
+          <Link
+            href="/import"
+            className="rounded-xl border border-gray-200 bg-white p-4 transition hover:border-kelly-500"
+          >
+            <p className="font-medium text-gray-900">Import boundaries</p>
+            <p className="mt-0.5 text-sm text-gray-500">
+              GeoJSON, KML, KMZ, or shapefiles
+            </p>
+          </Link>
+        ) : null}
         <Link
           href="/properties"
           className="rounded-xl border border-gray-200 bg-white p-4 transition hover:border-kelly-500"
@@ -611,13 +698,15 @@ export default async function DashboardPage({
             Browse and edit without the map
           </p>
         </Link>
-        <Link
-          href="/settings/members"
-          className="rounded-xl border border-gray-200 bg-white p-4 transition hover:border-kelly-500"
-        >
-          <p className="font-medium text-gray-900">Members</p>
-          <p className="mt-0.5 text-sm text-gray-500">Invite family or your manager</p>
-        </Link>
+        {isAdmin ? (
+          <Link
+            href="/settings/members"
+            className="rounded-xl border border-gray-200 bg-white p-4 transition hover:border-kelly-500"
+          >
+            <p className="font-medium text-gray-900">Members</p>
+            <p className="mt-0.5 text-sm text-gray-500">Invite family or your manager</p>
+          </Link>
+        ) : null}
       </div>
     </div>
   );
