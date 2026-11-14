@@ -52,6 +52,17 @@ export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
 
+  // An email link (confirm your address, reset your password) is meant
+  // to open /auth/callback. When the sign-in service does not have that
+  // address on its allow list it sends the person to the site's front
+  // page instead, with the one-time code still attached. Pass it along
+  // so the link works either way instead of dead-ending at Sign in.
+  if (path === "/" && (request.nextUrl.searchParams.has("code") || request.nextUrl.searchParams.has("error_code"))) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/callback";
+    return NextResponse.redirect(url);
+  }
+
   if (!user && !isPublic) {
     // A signed-out request to the API gets a plain 401 the caller can
     // read, not a redirect to an HTML page it would try to parse.

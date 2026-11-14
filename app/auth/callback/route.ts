@@ -26,8 +26,19 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // A password reset link must end on the new-password page even if
+      // the "next" in its address was dropped on the way (the sign-in
+      // service only keeps a redirect address it has on its allow list,
+      // and falls back to a plainer one otherwise). The exchange itself
+      // says what kind of link this was.
+      const kind = (data as { redirectType?: string | null } | null)?.redirectType;
+      // ("recovery" in the sign-in library this app ships with; older
+      // releases reported "PASSWORD_RECOVERY".)
+      if (kind === "recovery" || kind === "PASSWORD_RECOVERY") {
+        return NextResponse.redirect(`${origin}/reset-password`);
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
     console.error("auth callback: code exchange failed", error.code ?? "", error.message);
