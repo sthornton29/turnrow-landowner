@@ -111,6 +111,35 @@ export function groupPages(
   return groups;
 }
 
+// Pages of the file that ended up in no statement: pages the reader
+// marked as not a statement (cover letters, envelopes) and pages it
+// returned nothing for. The upload screen lists them for the user to
+// check, so a skipped page never just vanishes.
+export function pagesNotRead(totalPages: number, groups: Array<{ pages: number[] }>): number[] {
+  const covered = new Set(groups.flatMap((g) => g.pages));
+  const out: number[] = [];
+  for (let p = 1; p <= totalPages; p++) if (!covered.has(p)) out.push(p);
+  return out;
+}
+
+// "Pages 2 and 4 were not read as statements. Check them." Runs of pages
+// read "5 to 9" so a long file stays one short line.
+export function pagesNotReadText(pages: number[]): string {
+  const sorted = [...new Set(pages)].sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+  if (sorted.length === 1) return `Page ${sorted[0]} was not read as a statement. Check it.`;
+  const runs: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    if (j - i >= 2) runs.push(`${sorted[i]} to ${sorted[j]}`);
+    else for (let k = i; k <= j; k++) runs.push(String(sorted[k]));
+    i = j;
+  }
+  const list = runs.length > 2 ? `${runs.slice(0, -1).join(", ")}, and ${runs[runs.length - 1]}` : runs.join(" and ");
+  return `Pages ${list} were not read as statements. Check them.`;
+}
+
 // Lines must sum to the header total within a cent.
 export function reconcile(lineTotals: Array<number | null | undefined>, headerTotal: number | null | undefined): {
   lineTotal: number;

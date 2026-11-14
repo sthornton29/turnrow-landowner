@@ -20,7 +20,10 @@ describe("matchLine", () => {
     const m = matchLine(line, base, parcels);
     expect(m.parcelId).toBe("m1");
     expect(m.evidence).toContain("Parcel number 02-04-18-0-000-007.005 matches parcel 02 04 18 0 000 007.005 on Morgan County");
-    expect(identifiersToLearn("m1", line.identifiers, base).map((x) => x.kind)).toEqual(["key_number", "receipt_number"]);
+    // All three stay on the line as printed; the key number is learned,
+    // the receipt number is not (it names this year's bill, not the parcel).
+    expect(line.identifiers.map((x) => x.kind)).toEqual(["parcel_number", "key_number", "receipt_number"]);
+    expect(identifiersToLearn("m1", line.identifiers, base).map((x) => x.kind)).toEqual(["key_number"]);
   });
   it("does not match a PPIN-only Colbert line until the PPIN is learned, then matches by PPIN", () => {
     const line = { line_type: "real_property", identifiers: ids(["PPIN", "ppin", "44521"]) };
@@ -169,5 +172,93 @@ describe("county tier: compact spellings and weak account hits", () => {
     const alone = matchLineViaCounty({ line_type: "real_property" }, [hit("account_number", "1234", "1107260000001000"), hit("account_number", "1234", "1107260000001001")], two);
     expect(alone.parcelId).toBeNull();
     expect(alone.candidates).toHaveLength(2);
+  });
+});
+
+describe("matching stays inside the statement's county", () => {
+  // A Colbert bill line "PPIN 1066" and a Morgan parcel whose key number
+  // is 1066: the same digits, two different counties.
+  const twoCounties = [
+    { id: "mor", parcel_number: "02 05 21 0 200 013.003", property_id: "morgan", property_name: "Morgan County", county: "Morgan" },
+    { id: "col", parcel_number: "11 07 26 0 000 001.000", property_id: "cotton", property_name: "Cottontown", county: "Colbert" },
+  ];
+  const store: StoredIdentifier[] = [{ parcel_id: "mor", kind: "key_number", value: "1066", normalized: "1066" }];
+  const line = { line_type: "real_property", identifiers: ids(["PPIN", "ppin", "1066"]) };
+
+  it("does not match a parcel in another county when the statement's county is known", () => {
+    expect(matchLine(line, store, twoCounties, "Colbert").parcelId).toBeNull();
+    expect(matchLine(line, store, twoCounties, "Colbert").candidates).toEqual([]);
+    // The same line on a Morgan statement does match ("Morgan County" and "morgan" are the same county).
+    expect(matchLine(line, store, twoCounties, "Morgan").parcelId).toBe("mor");
+    expect(matchLine(line, store, twoCounties, " morgan county ").parcelId).toBe("mor");
+  });
+  it("matches as before when the statement's county was not read, or the parcel has no county recorded", () => {
+    expect(matchLine(line, store, twoCounties).parcelId).toBe("mor");
+    expect(matchLine(line, store, twoCounties, "").parcelId).toBe("mor");
+    const noCounty = [{ ...twoCounties[0], county: null }];
+    expect(matchLine(line, store, noCounty, "Colbert").parcelId).toBe("mor");
+  });
+  it("keeps the county tier inside the county too", () => {
+    const hit = { kind: "ppin" as const, value: "2661", parcel_number: "11 07 26 0 000 001.000", service_label: "Colbert County GIS", service_id: "svc", identifiers: [], attributes: {}, overlaps: [] };
+    const sameNumberElsewhere = [{ id: "law", parcel_number: "11 07 26 0 000 001.000", property_id: "x", property_name: "Elsewhere", county: "Lawrence" }, ...twoCounties];
+    expect(matchLineViaCounty({ line_type: "real_property" }, [hit], sameNumberElsewhere, "Colbert").parcelId).toBe("col");
+  });
+});
+
+describe("per-bill numbers (receipt, bill, duplicate) name the bill, not the parcel", () => {
+  it("never learns them", () => {
+    const printed = ids(["Key Number", "key_number", "55021"], ["Receipt Number", "receipt_number", "2024-118877"], ["Bill No", "bill_number", "9917"], ["Duplicate No", "duplicate_number", "44"]);
+    expect(identifiersToLearn("m1", printed, base).map((x) => x.kind)).toEqual(["key_number"]);
+  });
+  it("never lets a printed receipt number decide a match, kind-aware or relabeled", () => {
+    // Last year's receipt number was learned onto p3 (before this rule);
+    // this year the county reuses 48042 as another bill's receipt, and a
+    // different parcel's key number happens to be 48042 too.
+    const store: StoredIdentifier[] = [
+      ...base,
+      { parcel_id: "p3", kind: "receipt_number", value: "48042", normalized: "48042" },
+      { parcel_id: "c1", kind: "key_number", value: "48042", normalized: "48042" },
+    ];
+    const receiptOnly = matchLine({ line_type: "real_property", identifiers: ids(["RECEIPT #", "receipt_number", "48042"]) }, store, parcels);
+    expect(receiptOnly.parcelId).toBeNull();
+    expect(receiptOnly.candidates).toEqual([]);
+    // A stored receipt number never answers for a printed key or PPIN either.
+    const key = matchLine({ line_type: "real_property", identifiers: ids(["KEY #", "key_number", "48042"]) }, store, parcels);
+    expect(key.parcelId).toBe("c1");
+  });
+  it("ignores a county hit that came from a per-bill number", () => {
+    const hit = { kind: "receipt_number" as const, value: "48042", parcel_number: "11 07 26 0 000 001.000", service_label: "Colbert County GIS", service_id: "svc", identifiers: [], attributes: {}, overlaps: [] };
+    expect(matchLineViaCounty({ line_type: "real_property" }, [hit], parcels).parcelId).toBeNull();
+  });
+});
+
+describe("matchEntity does not guess between entities", () => {
+  const siblings = [
+    { id: "s1", name: "Sykes Martin", aliases: [] },
+    { id: "s2", name: "Stuart Martin", aliases: [] },
+  ];
+  it("leaves the entity blank on a tie, whatever the list order, and says who tied", () => {
+    const a = matchEntity({ taxpayer_name: "MARTIN S", care_of: null }, siblings);
+    const b = matchEntity({ taxpayer_name: "MARTIN S", care_of: null }, [...siblings].reverse());
+    expect(a.entityId).toBeNull();
+    expect(b.entityId).toBeNull();
+    expect(a.pick).toMatch(/could be Sykes Martin or Stuart Martin/);
+    expect(a.comparedName).toBe("MARTIN S");
+  });
+  it("leaves the entity blank when only an initial ties the name to one entity", () => {
+    const m = matchEntity({ taxpayer_name: "MARTIN S", care_of: null }, [siblings[0]]);
+    expect(m.entityId).toBeNull();
+    expect(m.pick).toMatch(/only by an initial/);
+  });
+  it("still matches exact names, typos, and names that share two or more whole words", () => {
+    const entities = [
+      { id: "alb", name: "Albemarle Corporation", aliases: ["THE ALBEMARLE CORPORATION"] },
+      { id: "trusts", name: "Martin Trusts", aliases: ["VIRGINIA LARKIN MARTIN TRUST 25 % AND EL"] },
+    ];
+    expect(matchEntity({ taxpayer_name: "THE AMBEMARLE CORPORATION", care_of: null }, entities).entityId).toBe("alb");
+    expect(matchEntity({ taxpayer_name: "ALBEMARLE", care_of: null }, entities).entityId).toBe("alb");
+    const viaInitial = matchEntity({ taxpayer_name: "MARTIN VIRGINIA L", care_of: null }, entities);
+    expect(viaInitial.entityId).toBe("trusts");
+    expect(viaInitial.pick ?? null).toBeNull();
   });
 });

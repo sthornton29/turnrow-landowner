@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupPages, reconcile, type PageHeader } from "./taxSegment";
+import { groupPages, pagesNotRead, pagesNotReadText, reconcile, type PageHeader } from "./taxSegment";
 
 const page = (p: Partial<PageHeader> & { page: number }): PageHeader => ({
   county: "Lawrence",
@@ -82,5 +82,25 @@ describe("account registry pre-labeling (a recurring account)", () => {
     // A different county's 1234 is a different account.
     const [other] = groupPages([page({ page: 1, county: "Lawrence", billing_key: "1234", billing_kind: "account_number" })], registry);
     expect(other.entity_id).toBeNull();
+  });
+});
+
+describe("pages that were not read as statements", () => {
+  it("lists every page of the file that is in no statement", () => {
+    // A cover letter on page 2 and a page the reader returned nothing for (4).
+    const groups = groupPages([
+      page({ page: 1, billing_key: "100" }),
+      page({ page: 2, is_statement: false }),
+      page({ page: 3, billing_key: "200" }),
+      page({ page: 5, billing_key: "300" }),
+    ]);
+    expect(pagesNotRead(5, groups)).toEqual([2, 4]);
+    expect(pagesNotRead(3, [{ pages: [1, 2, 3] }])).toEqual([]);
+  });
+  it("says so in a sentence", () => {
+    expect(pagesNotReadText([2, 4])).toBe("Pages 2 and 4 were not read as statements. Check them.");
+    expect(pagesNotReadText([7])).toBe("Page 7 was not read as a statement. Check it.");
+    expect(pagesNotReadText([2, 4, 5, 6, 7, 11])).toBe("Pages 2, 4 to 7, and 11 were not read as statements. Check them.");
+    expect(pagesNotReadText([])).toBe("");
   });
 });

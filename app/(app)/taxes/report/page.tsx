@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDollars, todayISO } from "@/lib/format";
 import { allocateToProperties, loadIncomeInputs } from "@/lib/income";
-import { CU_STATUS_LABELS, buildTaxReport, type Finding, type ReportParcel } from "@/lib/taxReport";
+import { CU_STATUS_LABELS, buildTaxReport, deadlineText, type Finding, type ReportParcel } from "@/lib/taxReport";
 import { NoticeLog, ParcelFlags, ProtestPacketButton, TaxReportControls } from "@/components/taxes/TaxReportControls";
-import { buildProtestPacket } from "@/lib/protestPacket";
+import { WORKSHEET_NOTE, buildProtestPacket } from "@/lib/protestPacket";
 
 export const metadata = { title: "Property tax report" };
 
@@ -44,25 +44,25 @@ export default async function TaxReportPage({
   const { supabase, profile } = await requireOrg();
 
   const [
-    { data: lines },
-    { data: statements },
-    { data: payments },
-    { data: parcels },
-    { data: properties },
-    { data: entities },
-    { data: aliases },
-    { data: stands },
-    { data: fields },
-    { data: pastures },
-    { data: leaseLands },
-    { data: cuValues },
-    { data: millage },
-    { data: notices },
+    { data: lines, error: linesErr },
+    { data: statements, error: statementsErr },
+    { data: payments, error: paymentsErr },
+    { data: parcels, error: parcelsErr },
+    { data: properties, error: propertiesErr },
+    { data: entities, error: entitiesErr },
+    { data: aliases, error: aliasesErr },
+    { data: stands, error: standsErr },
+    { data: fields, error: fieldsErr },
+    { data: pastures, error: pasturesErr },
+    { data: leaseLands, error: leaseLandsErr },
+    { data: cuValues, error: cuValuesErr },
+    { data: millage, error: millageErr },
+    { data: notices, error: noticesErr },
   ] = await Promise.all([
     supabase
       .from("tax_statement_lines")
       .select("id, tax_statement_id, tax_year, tax_due, parcel_id, line_type, appraised_value, market_value, current_use_value"),
-    supabase.from("tax_statements").select("id, tax_year, county, amount_due, delinquent_date, entity_id"),
+    supabase.from("tax_statements").select("id, tax_year, county, amount_due, line_total, delinquent_date, entity_id"),
     supabase.from("tax_payments").select("tax_statement_id, amount, paid_date"),
     supabase.from("parcels").select("id, parcel_number, county, property_id, acres, deeded_acres, attributes, current_use_status, is_homestead"),
     supabase.from("properties").select("id, name, entity_id").order("name"),
@@ -77,12 +77,43 @@ export default async function TaxReportPage({
     supabase.from("tax_valuation_notices").select("id, county, tax_year, notice_date, parcel_id").order("notice_date", { ascending: false }),
   ]);
 
+  // The bills, payments, and parcels are the report: if any of them did
+  // not load, say so. An empty result here would otherwise read as
+  // "$0.00, Paid in full".
+  if (linesErr || statementsErr || paymentsErr || parcelsErr || propertiesErr) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-3 p-4 md:p-6">
+        <h1 className="text-xl font-semibold text-gray-900">Property tax report</h1>
+        <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          Could not load the tax records, so the report is not shown. Reload the page to try again. Nothing was changed.
+        </p>
+        <Link href="/taxes" className="text-sm font-medium text-kelly-700 hover:underline">
+          Back to Property Taxes
+        </Link>
+      </div>
+    );
+  }
+  // The rest feed single checks; the report still stands without one of
+  // them, but it must say what is missing.
+  const notLoaded = [
+    entitiesErr || aliasesErr ? "entity names" : null,
+    standsErr || fieldsErr || pasturesErr || leaseLandsErr ? "land use (stands, fields, pastures, leases)" : null,
+    cuValuesErr ? "the current use value table" : null,
+    millageErr ? "millage rates" : null,
+    noticesErr ? "valuation notices" : null,
+  ].filter((x): x is string => x !== null);
+
+  // Today in Central time (the server clock is UTC, which is already
+  // tomorrow every evening).
+  const todayIso = todayISO();
+  const today = new Date(`${todayIso}T12:00:00`);
+
   const years = Array.from(new Set((lines ?? []).map((l) => l.tax_year))).sort((a, b) => b - a);
   // Default: the latest year with a full set of bills (more than a handful of lines).
   const counts = new Map<number, number>();
   for (const l of lines ?? []) counts.set(l.tax_year, (counts.get(l.tax_year) ?? 0) + 1);
   const fullYears = years.filter((y) => (counts.get(y) ?? 0) >= 10);
-  const year = Number(sp.year) || fullYears[0] || years[0] || new Date().getFullYear();
+  const year = Number(sp.year) || fullYears[0] || years[0] || Number(todayIso.slice(0, 4));
   const entity = sp.entity ?? "";
   const property = sp.property ?? "";
   const county = sp.county ?? "";
@@ -124,9 +155,12 @@ export default async function TaxReportPage({
 
   const r = buildTaxReport({
     year,
-    today: new Date(),
+    today,
     state: "AL",
     propertyScope: scope,
+    // One whole entity (no single property): its lines with no parcel
+    // (unmatched and personal property) stay in its totals.
+    entityId: entity && !property ? entity : null,
     county: county || null,
     lines: lines ?? [],
     statements: statements ?? [],
@@ -142,7 +176,6 @@ export default async function TaxReportPage({
   });
 
   // The notice log shows the last two years of notices, open or closed.
-  const todayIso = new Date().toISOString().slice(0, 10);
   const noticeRows = (notices ?? [])
     .filter((n) => !county || n.county === county)
     .slice(0, 8)
@@ -154,15 +187,16 @@ export default async function TaxReportPage({
     });
   const paidYears = Array.from(new Set(r.paidByYear.map((p) => p.year))).slice(0, 4);
   const historyRows = r.parcels.filter((p) => p.history.some((h) => h.value));
-  const entityOfProperty = new Map(props.map((p) => [p.id, p.entity_id]));
+  const entityOfProperty = new Map<string, string | null>(props.map((p) => [p.id, p.entity_id]));
   const entityName = new Map((entities ?? []).map((e) => [e.id, e.name]));
   const packetFor = (parcelId: string, propertyId: string | null) => {
     const eid = propertyId ? entityOfProperty.get(propertyId) : null;
     return buildProtestPacket(r, parcelId, {
       entityName: eid ? (entityName.get(eid) ?? null) : null,
-      today: new Date(),
+      today,
       cuValues: cuValues ?? [],
       state: "AL",
+      propertyEntity: entityOfProperty,
     });
   };
 
@@ -189,6 +223,7 @@ export default async function TaxReportPage({
           </p>
           <h1 className="text-xl font-semibold text-gray-900">Property tax report: {year}</h1>
           <p className="mt-0.5 text-sm text-gray-600">{scopeName}</p>
+          <p className="mt-1 max-w-2xl text-sm text-gray-700">{WORKSHEET_NOTE}</p>
           <Link href="/taxes/reread" className="text-xs font-medium text-kelly-700 hover:underline print:hidden">
             Re-read bills for market and current use values
           </Link>
@@ -205,6 +240,13 @@ export default async function TaxReportPage({
         />
       </div>
 
+      {notLoaded.length > 0 ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Could not load {notLoaded.join(", ")}, so the checks that use {notLoaded.length === 1 ? "it" : "them"} are missing from this
+          report. Reload the page to try again.
+        </p>
+      ) : null}
+
       {/* 1. Bottom line */}
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -212,7 +254,12 @@ export default async function TaxReportPage({
             <p className="text-xs text-gray-500">{year} property tax</p>
             <p className="text-2xl font-semibold text-pine-900">{formatDollars(b.tax)}</p>
             <p className="text-xs text-gray-600">
-              {b.outstanding > 0.01 ? `${formatDollars(b.outstanding)} still open` : "Paid in full"}
+              {/* No lines at all is "nothing on file", never "paid". */}
+              {r.coverage.lines === 0
+                ? `No ${year} bills on file`
+                : b.outstanding > 0.01
+                  ? `${formatDollars(b.outstanding)} still open`
+                  : "Paid in full"}
             </p>
           </div>
           <div>
@@ -240,6 +287,8 @@ export default async function TaxReportPage({
               <span className="font-semibold">{b.findings} thing{b.findings === 1 ? "" : "s"} worth a look</span>
               {b.atStake > 0 ? `, about ${money0(round10(b.atStake))} a year at stake` : ""}.
             </>
+          ) : r.coverage.lines === 0 ? (
+            `No ${year} bills are on file yet, so there is nothing to check.`
           ) : (
             "Nothing needs attention."
           )}
@@ -266,7 +315,7 @@ export default async function TaxReportPage({
                   <p className="mt-1 text-gray-700">{f.detail}</p>
                   <p className="mt-1 text-gray-900">
                     <span className="font-medium">What to do:</span> {f.action}
-                    {f.deadline ? <span className="text-gray-600"> By {fmtDate(f.deadline)}.</span> : null}
+                    {f.deadline ? <span className="text-gray-600"> {deadlineText(f.deadline, todayIso)}</span> : null}
                   </p>
                   {f.propertyId ? (
                     <Link href={`/properties/${f.propertyId}`} className="text-xs font-medium text-kelly-700 hover:underline print:hidden">
@@ -285,9 +334,12 @@ export default async function TaxReportPage({
         <h2 className="mb-1 text-lg font-semibold text-gray-900">Current use and acreage</h2>
         <p className="mb-2 text-sm text-gray-600">
           Current use taxes farm and timber land on what it produces, not what it would sell for. The county record&apos;s
-          taxable land value per acre shows whether a parcel gets it: current use land is capped near{" "}
-          {r.rates.cuYear ? `the ${r.rates.cuYear} state table` : "the state table"} ($532 an acre for the best crop and pasture
-          land, $827 for timber). Set the &quot;Enrolled?&quot; answer where you know it; it overrides the estimate.
+          taxable land value per acre shows whether a parcel gets it: current use land is valued near{" "}
+          {r.rates.cuYear ? `the ${r.rates.cuYear} state table` : "the state table"}
+          {r.rates.cuCropGood !== null && r.rates.cuTimberGood !== null
+            ? ` (${money0(r.rates.cuCropGood)} an acre for the best crop and pasture land, ${money0(r.rates.cuTimberGood)} for timber)`
+            : ""}
+          . Set the &quot;Enrolled?&quot; answer where you know it; it overrides the estimate.
           {r.cuSavesTotal > 0
             ? ` Where a bill shows the market value, current use saves about ${money0(round10(r.cuSavesTotal))} a year on these parcels.`
             : ""}
@@ -315,12 +367,12 @@ export default async function TaxReportPage({
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right text-gray-700">
-                    {[p.record?.calcAcres, p.deededAcres, p.gisAcres].map((v) => (v ? v.toFixed(1) : "-")).join(" / ")}
+                    {[p.record?.calcAcres, p.deededAcres, p.gisAcres].map((v) => (v ? formatAcres(v) : "-")).join(" / ")}
                   </td>
-                  <td className="px-3 py-2 text-right text-gray-700">{p.timberAcres ?? "-"}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{p.timberAcres !== null ? formatAcres(p.timberAcres) : "-"}</td>
                   <td className="px-3 py-2 text-right text-gray-700">
                     {p.landPerAcre !== null ? `$${p.landPerAcre.toLocaleString("en-US")}` : "-"}
-                    {p.cuCeiling ? <span className="block text-xs text-gray-500">cap ~${p.cuCeiling.toLocaleString("en-US")}</span> : null}
+                    {p.cuCeiling ? <span className="block text-xs text-gray-500">best soil class about ${p.cuCeiling.toLocaleString("en-US")}</span> : null}
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -386,9 +438,9 @@ export default async function TaxReportPage({
             </thead>
             <tbody>
               {r.properties.map((p) => (
-                <tr key={p.id} className="border-t border-gray-100">
+                <tr key={p.id || "not-tied"} className="border-t border-gray-100">
                   <td className="px-3 py-2 font-medium text-gray-900">{p.name}</td>
-                  <td className="px-3 py-2 text-right text-gray-700">{formatAcres(p.acres)}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{p.acres > 0 ? formatAcres(p.acres) : "-"}</td>
                   <td className="px-3 py-2 text-right text-gray-900">{formatDollars(p.tax)}</td>
                   <td className={`px-3 py-2 text-right ${p.perAcre !== null && p.perAcre > 4 ? "font-semibold text-amber-800" : "text-gray-700"}`}>
                     {p.perAcre !== null ? formatDollars(p.perAcre) : "-"}
@@ -457,8 +509,8 @@ export default async function TaxReportPage({
             {r.nextYear.thisYear > 0
               ? `${r.nextYear.total >= r.nextYear.thisYear ? "+" : ""}${(((r.nextYear.total - r.nextYear.thisYear) / r.nextYear.thisYear) * 100).toFixed(1)}%`
               : "n/a"}
-            ). Alabama&apos;s 7% cap limits how fast taxable values can rise through the tax year beginning Oct 1, 2027; if it is not
-            extended, values could reset to full assessed value after that.
+            ). Alabama has limited yearly increases in taxable value on some classes of property; ask the county whether a cap
+            applies to these parcels and how long it lasts.
           </p>
         </section>
       ) : null}
@@ -477,8 +529,9 @@ export default async function TaxReportPage({
         <div className="mt-3 rounded-xl border border-gray-200 bg-white p-4">
           <h3 className="mb-1 font-semibold text-gray-900">Valuation notices</h3>
           <p className="mb-2 text-sm text-gray-600">
-            When a county&apos;s valuation notice arrives, log the date printed on it. You have 30 days from it to protest a value to
-            the Board of Equalization, and the report counts that down at the top.
+            When a county&apos;s valuation notice arrives, log the date printed on it. A protest to the Board of Equalization is
+            usually due within 30 days of that date, and the report counts 30 days down at the top. Use the deadline printed on
+            your notice; confirm with the county Board of Equalization.
           </p>
           <NoticeLog orgId={profile.organization_id!} counties={counties} notices={noticeRows} />
         </div>

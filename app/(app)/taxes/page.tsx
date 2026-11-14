@@ -10,11 +10,11 @@ export default async function TaxesPage() {
   const { supabase, profile } = await requireOrg();
 
   const [
-    { data: parcels },
-    { data: properties },
-    { data: statements },
-    { data: lines },
-    { data: payments },
+    { data: parcels, error: parcelsErr },
+    { data: properties, error: propertiesErr },
+    { data: statements, error: statementsErr },
+    { data: lines, error: linesErr },
+    { data: payments, error: paymentsErr },
     { data: entities },
   ] = await Promise.all([
     supabase
@@ -27,6 +27,18 @@ export default async function TaxesPage() {
     supabase.from("tax_payments").select("*").order("paid_date"),
     supabase.from("entities").select("id, name").order("name"),
   ]);
+
+  // A failed read must not look like "no statements, $0.00 due".
+  if (parcelsErr || propertiesErr || statementsErr || linesErr || paymentsErr) {
+    return (
+      <div className="mx-auto max-w-5xl space-y-3 p-4 md:p-6">
+        <h1 className="text-xl font-semibold text-gray-900">Property Taxes</h1>
+        <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          Could not load the tax records, so nothing is shown. Reload the page to try again. Nothing was changed.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading...</div>}>

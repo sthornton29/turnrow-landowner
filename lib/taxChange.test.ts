@@ -104,13 +104,16 @@ describe("decomposition", () => {
 });
 
 describe("assessment ratio flags (Alabama classes)", () => {
-  it("flags 10% -> 20% as probable loss of current use", () => {
+  it("flags 10% -> 20% as a possible class or current use change, to ask the county about", () => {
     const r = report([
       line({ parcel_id: "p1", tax_year: 2024, appraised_value: 100000, assessed_value: 10000, tax_due: 450 }),
       line({ parcel_id: "p1", tax_year: 2025, appraised_value: 100000, assessed_value: 20000, tax_due: 900 }),
     ]);
     const flag = r.movers[0].flags.find((f) => f.kind === "ratio_shift");
-    expect(flag?.message).toContain("usually means current use was lost");
+    // The cause is not asserted: 10% to 20% is a class change, which may
+    // or may not involve current use.
+    expect(flag?.message).toContain("10% (Class III) to 20% (Class II)");
+    expect(flag?.message).toContain("current use status");
     expect(flag?.message).toContain("revenue commissioner");
   });
 
@@ -215,5 +218,96 @@ describe("scope and totals", () => {
   it("movers sort by absolute tax change", () => {
     const r = report(twoParcelLines);
     expect(r.movers.map((m) => m.parcelId)).toEqual(["p1", "p2"]);
+  });
+});
+
+describe("values that are not the same kind are not compared", () => {
+  it("says so instead of splitting the change when one bill printed market value and the other the taxed value", () => {
+    // 2024 printed the value the tax was figured on ($60,400 at 10%);
+    // 2025 printed market value beside the same current use tax.
+    const r = report([
+      line({ parcel_id: "p1", tax_year: 2024, appraised_value: 60400, assessed_value: 6040, tax_due: 486 }),
+      line({ parcel_id: "p1", tax_year: 2025, appraised_value: 485800, assessed_value: 6040, tax_due: 486 }),
+    ]);
+    const c = r.movers[0];
+    expect(c.valuesComparable).toBe(false);
+    expect(c.deltaTax).toBe(0);
+    expect(c.valuationEffect).toBeNull();
+    expect(c.rateEffect).toBeNull();
+    expect(c.pctAppraised).toBeNull();
+    expect(c.sentence).toBe(
+      "Tax unchanged. The values printed for 2024 and 2025 are not comparable (one looks like a market value, the other the value the tax was figured on), so the change is not split between value and rates."
+    );
+    // No "Appraised value up 704.3%" and no "ratio moved 10% to 1.2%".
+    expect(c.flags).toEqual([]);
+    expect(r.summary.flaggedParcels).toBe(0);
+  });
+
+  it("uses the bill's own market and current use columns when the re-read filled them", () => {
+    const r = report([
+      line({ parcel_id: "p1", tax_year: 2024, appraised_value: 60400, tax_due: 181.2, market_value: 485800, current_use_value: 60400 }),
+      line({ parcel_id: "p1", tax_year: 2025, appraised_value: 499000, tax_due: 185, market_value: 499000, current_use_value: 61000 }),
+    ]);
+    const c = r.movers[0];
+    expect([c.y0?.valueKind, c.y1?.valueKind]).toEqual(["taxed", "market"]);
+    expect(c.valuesComparable).toBe(false);
+    expect(c.sentence).toMatch(/^Tax up \$3\.80\. The values printed for 2024 and 2025 are not comparable/);
+    expect(c.flags.some((f) => f.kind === "spike")).toBe(false);
+  });
+
+  it("falls back on the effective rate when the kind cannot be told", () => {
+    // No assessed value either year: value up eightfold with the same tax
+    // is a change of what was printed, not a reappraisal.
+    const r = report([
+      line({ parcel_id: "p1", tax_year: 2024, appraised_value: 60400, tax_due: 181.2 }),
+      line({ parcel_id: "p1", tax_year: 2025, appraised_value: 485800, tax_due: 181.2 }),
+    ]);
+    expect(r.movers[0].valuesComparable).toBe(false);
+    expect(r.movers[0].flags.some((f) => f.kind === "spike")).toBe(false);
+  });
+
+  it("still decomposes and flags a real spike when both years are the same kind", () => {
+    const r = report([
+      line({ parcel_id: "p1", tax_year: 2024, appraised_value: 100000, assessed_value: 10000, tax_due: 300 }),
+      line({ parcel_id: "p1", tax_year: 2025, appraised_value: 130000, assessed_value: 13000, tax_due: 390 }),
+    ]);
+    const c = r.movers[0];
+    expect(c.valuesComparable).toBe(true);
+    expect(c.sentence).toBe("Up $90.00: $90.00 from higher appraisal.");
+    expect(c.flags.some((f) => f.kind === "spike")).toBe(true);
+  });
+});
+
+describe("zero-change sentence", () => {
+  it("does not read 'Up $0.00' when value and rates cancel", () => {
+    expect(decompositionSentence(0, 486, -486)).toBe("No change in tax: $486.00 from higher appraisal, offset by $486.00 from lower rates.");
+    expect(decompositionSentence(0, -20, 20)).toBe("No change in tax: $20.00 from lower appraisal, offset by $20.00 from rates.");
+    expect(decompositionSentence(0, 0, 0)).toBe("No change.");
+  });
+});
+
+describe("ratio shift wording does not assert the cause", () => {
+  it("says the class or current use status may have changed and sends the reader to the county", () => {
+    const r = report([
+      line({ parcel_id: "p1", tax_year: 2024, appraised_value: 100000, assessed_value: 10000, tax_due: 450 }),
+      line({ parcel_id: "p1", tax_year: 2025, appraised_value: 100000, assessed_value: 20000, tax_due: 900 }),
+    ]);
+    const flag = r.movers[0].flags.find((f) => f.kind === "ratio_shift");
+    expect(flag?.message).toContain("which can mean the property's class or its current use status changed; ask the county");
+    expect(flag?.message).not.toContain("usually means");
+  });
+});
+
+describe("summary", () => {
+  it("does not report a percent change in total value when a parcel's two values are not the same kind", () => {
+    const r = report([
+      line({ parcel_id: "p1", tax_year: 2024, appraised_value: 60400, assessed_value: 6040, tax_due: 486 }),
+      line({ parcel_id: "p1", tax_year: 2025, appraised_value: 485800, assessed_value: 6040, tax_due: 486 }),
+      line({ parcel_id: "p2", tax_year: 2024, appraised_value: 50000, assessed_value: 5000, tax_due: 250 }),
+      line({ parcel_id: "p2", tax_year: 2025, appraised_value: 50000, assessed_value: 5000, tax_due: 260 }),
+    ]);
+    expect(r.summary.notComparableParcels).toBe(1);
+    expect(r.summary.appraisedPct).toBeNull();
+    expect(r.summary.taxPct).toBeCloseTo(10 / 736, 10);
   });
 });

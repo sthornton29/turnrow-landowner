@@ -15,7 +15,13 @@
 export interface CountyRecord {
   year: number | null;
   assessed: number | null; // TAV / AssdValue
-  taxableValue: number | null; // assessed / class ratio (the value the tax is figured on)
+  // The value the tax is figured on: the county's own taxable land plus
+  // buildings where it gives them (KCS layers), else assessed / class ratio.
+  taxableValue: number | null;
+  // True when taxableValue was worked back from the assessed value at an
+  // ASSUMED 10% (no class on the record): too high for a Class II (20%)
+  // or mixed parcel, so wherever it is shown it is labeled "estimated".
+  taxableValueEstimated: boolean;
   landValue: number | null;
   // True on KCS layers (Lawrence, Colbert): CLandValue is the land value
   // the tax is figured on (the current use value when enrolled). Morgan's
@@ -62,6 +68,19 @@ export function readCountyRecord(attributes: Record<string, unknown> | null | un
   // Class III is 10%, Class II 20%. Without a class, assume 10% (farm and
   // forest), the class every parcel of this kind should be in.
   const ratio = cls === 2 ? 0.2 : 0.1;
+  // Buildings can sit in a different class from the land (a shop at 20%
+  // on farm land at 10%), so the assessed total worked back at one ratio
+  // overstates the value. KCS layers (Lawrence, Colbert) carry the
+  // taxable land and building values themselves: use those. Morgan's
+  // land value is market value, so there the class ratio is used.
+  const taxableLand = num(a.CLandValue);
+  const taxableValue =
+    taxableLand !== null
+      ? Math.round(taxableLand + (num(a.CImpValue) ?? 0))
+      : assessed !== null
+        ? Math.round(assessed / ratio)
+        : null;
+  const taxableValueEstimated = taxableLand === null && assessed !== null && cls !== 2 && cls !== 3;
   const hcu = str(a.HasCurrentUse);
   // The first POSITIVE acreage: some layers carry a zero placeholder
   // (Colbert's CALC_ACRE is 0, its GIS_Acres is the real figure).
@@ -75,7 +94,8 @@ export function readCountyRecord(attributes: Record<string, unknown> | null | un
   return {
     year: yearRaw && yearRaw > 1900 ? yearRaw : null,
     assessed,
-    taxableValue: assessed !== null ? Math.round(assessed / ratio) : null,
+    taxableValue,
+    taxableValueEstimated,
     landValue: num(first(a, ["CLandValue", "TotalLandValue"])),
     landValueIsTaxable: num(a.CLandValue) !== null,
     improvementValue: num(first(a, ["CImpValue", "TotalImpValue"])),

@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatDollars } from "@/lib/format";
 import { takeHandoffFile } from "@/lib/fileHandoff";
-import { defaultDates, type CountyDefault } from "@/lib/tax";
+import { draftDates, normalizeParcelNumber, plausibleTaxYear, statementDateProblem, type CountyDefault } from "@/lib/tax";
 import { IDENTIFIER_KIND_LABELS, normalizeIdentifier, printedIdentifier, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
-import { groupPages, reconcile, type PageHeader, type RegisteredAccount, type StatementGroup } from "@/lib/taxSegment";
+import { groupPages, pagesNotRead, pagesNotReadText, reconcile, type PageHeader, type RegisteredAccount, type StatementGroup } from "@/lib/taxSegment";
 import { careOfTarget, matchEntity, matchLine, matchLineViaCounty, type CountyLineMatch, type CountyLookupHit, type MatchableEntityRef } from "@/lib/taxMatch";
 import { extractFile, extractStored } from "@/components/documents/classify";
 import { confirmLineParcel, confirmStatementEntity, countyLookup, importParcelHref, type CountyLearn } from "@/components/taxes/taxLearn";
@@ -38,6 +39,10 @@ interface LineDraft {
   acres: string;
   // Bill values beyond the main fields (migration 0050), read-only.
   values?: LineValues;
+  // Fields on THIS line the reader said it was unsure of ("assessed_value");
+  // highlighted in review. Empty for a statement read in parts, where the
+  // reader's line numbers cannot be trusted (see StatementDraft.partsUnsure).
+  unsure: string[];
   // Match state
   mode: "matched" | "unmatched" | "create";
   parcelId: string;
@@ -64,7 +69,13 @@ interface StatementDraft {
   pages: number[];
   status: "review" | "saving" | "saved" | "skipped" | "error";
   error: string | null;
+  // Header fields the reader was unsure of (amber ring in review).
   unsure: string[];
+  // A long statement is read in parts and each part numbers its own
+  // lines from zero, so an unsure mark like "lines[1].assessed_value"
+  // cannot be tied to one line. The field names are kept here and the
+  // whole statement is marked for a look instead.
+  partsUnsure: string[];
   open: boolean;
   county: string;
   state: string;
@@ -73,13 +84,28 @@ interface StatementDraft {
   accountKind: string;
   taxpayer: string;
   careOf: string;
+  // 0 = the reader found no tax year: it is left blank and required,
+  // never assumed to be this year.
   taxYear: number;
   total: string;
   dueDate: string;
   delinquentDate: string;
+  // The dates exactly as the reader returned them. Bills often print "due
+  // October 1" with no year, so the year in them can be a guess: they are
+  // used only while they agree with the tax year (lib/tax.ts draftDates).
+  readDueDate: string;
+  readDelinquentDate: string;
+  // The user typed a date: a tax year change no longer moves the dates.
+  datesEdited: boolean;
+  // Set when the reader's dates did not fit the tax year and the county's
+  // calendar was used instead; shown beside the dates.
+  datesNote: string | null;
   notes: string;
   entityId: string;
   entityEvidence: string | null;
+  // Set when the taxpayer name was close to an entity but not safely one
+  // (a tie, or only an initial): the entity is left blank for the user.
+  entityPick: string | null;
   comparedName: string | null;
   lines: LineDraft[];
   rememberDates: boolean;
@@ -92,7 +118,44 @@ interface FileJob {
   status: "segmenting" | "reading" | "done" | "error";
   progress: string;
   error: string | null;
+  // Pages of the file that ended up in no statement, listed in the
+  // file's row so a skipped page never just vanishes.
+  skippedPages: number[];
 }
+
+// The header fields the review form shows; an unsure mark on anything
+// else (the mailing address, say) has nothing to highlight.
+const HEADER_UNSURE_FIELDS = ["county", "state", "tax_year", "authority_name", "billing_key", "billing_kind", "total_tax", "taxpayer_name", "care_of", "due_date", "delinquent_date"];
+
+// Unsure marks on these describe the bill without deciding a dollar, a
+// date, the tax year, or which parcel a line is for. They are still
+// ringed in amber in review; they just do not hold a statement out of
+// "Confirm all ready". Everything not listed here does.
+const DESCRIPTIVE_HEADER_FIELDS = ["authority_name", "billing_kind", "taxpayer_name", "care_of"];
+const DESCRIPTIVE_LINE_FIELDS = ["exemptions", "legal_description", "property_address", "acres", "timber_acres", "tax_district"];
+
+const LINE_FIELD_LABELS: Record<string, string> = {
+  whole_line: "the whole line",
+  line_type: "line type",
+  identifiers: "printed numbers",
+  appraised_value: "appraised value",
+  assessed_value: "assessed value",
+  tax_due: "tax due",
+  exemptions: "exemptions",
+  legal_description: "legal description",
+  property_address: "address",
+  acres: "acres",
+  market_value: "market value",
+  current_use_value: "current use value",
+  land_value: "land value",
+  improvement_value: "buildings value",
+  assessment_ratio: "assessment ratio",
+  tax_district: "tax district",
+  millage: "millage",
+  timber_acres: "timber acres",
+};
+const lineFieldLabel = (field: string) => LINE_FIELD_LABELS[field] ?? field.replace(/_/g, " ");
+const unsureRing = " border-amber-400 ring-2 ring-amber-100";
 
 const inputClass = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm";
 const smallInput = "w-full rounded border border-gray-300 px-2 py-1 text-xs";
@@ -132,6 +195,12 @@ export default function TaxUploadClient({
   const [stored, setStored] = useState<StoredIdentifier[]>(storedIdentifiers);
   const [parcelList, setParcelList] = useState<ParcelRef[]>(parcels);
   const [confirmingAll, setConfirmingAll] = useState(false);
+  // Parcels this session created with "Create the parcel", by county and
+  // normalized number, so nothing ever creates the same one twice (a save
+  // that failed after its parcel was created, two lines for one parcel).
+  const createdParcels = useRef(new Map<string, string>());
+  const parcelKey = (county: string | null | undefined, number: string) =>
+    `${(county ?? "").trim().toLowerCase()}|${normalizeParcelNumber(number)}`;
 
   const parcelById = useMemo(() => new Map(parcelList.map((p) => [p.id, p])), [parcelList]);
   const entityById = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
@@ -174,6 +243,7 @@ export default function TaxUploadClient({
         status: "segmenting",
         progress: "Uploading and finding statements...",
         error: null,
+        skippedPages: [],
       };
       setFiles((list) => [...list, job]);
       processFile(job);
@@ -224,7 +294,11 @@ export default function TaxUploadClient({
         },
       ];
     }
-    patchFile(job.localId, { status: "reading", progress: `Found ${groups.length} statement${groups.length === 1 ? "" : "s"}. Reading 1 of ${groups.length}...` });
+    // Every page of the file is either in a statement or listed as not
+    // read. (A group with no page list reads the whole file.)
+    const totalPages = Number(seg.extraction.total_pages) || 0;
+    const skippedPages = groups.some((g) => g.pages.length === 0) ? [] : pagesNotRead(totalPages, groups);
+    patchFile(job.localId, { skippedPages, status: "reading", progress: `Found ${groups.length} statement${groups.length === 1 ? "" : "s"}. Reading 1 of ${groups.length}...` });
 
     let done = 0;
     let next = 0;
@@ -254,8 +328,9 @@ export default function TaxUploadClient({
   }
 
   function errorDraft(fileLocalId: string, g: StatementGroup, error: string): StatementDraft {
-    const year = g.tax_year ?? new Date().getFullYear();
-    const dates = defaultDates(year, g.county, g.state, countyDefaults);
+    // No tax year read: left blank (0) and required, never this year.
+    const year = g.tax_year ?? 0;
+    const dates = draftDates(year, {}, g.county, g.state, countyDefaults);
     return {
       localId: crypto.randomUUID(),
       fileLocalId,
@@ -263,6 +338,7 @@ export default function TaxUploadClient({
       status: "review",
       error: error + " Fill in the fields by hand.",
       unsure: [],
+      partsUnsure: [],
       open: true,
       county: g.county ?? "",
       state: g.state ?? "",
@@ -275,9 +351,14 @@ export default function TaxUploadClient({
       total: num(g.total_tax),
       dueDate: dates.due_date,
       delinquentDate: dates.delinquent_date,
+      readDueDate: "",
+      readDelinquentDate: "",
+      datesEdited: false,
+      datesNote: null,
       notes: "",
       entityId: g.entity_id ?? "",
       entityEvidence: g.entity_evidence,
+      entityPick: null,
       comparedName: g.taxpayer_name,
       lines: [],
       rememberDates: false,
@@ -288,16 +369,47 @@ export default function TaxUploadClient({
   function buildDraft(fileLocalId: string, g: StatementGroup, x: Record<string, unknown>): StatementDraft {
     const county = str(x.county) || (g.county ?? "");
     const state = (str(x.state) || (g.state ?? "")).toUpperCase();
-    const year = Number(x.tax_year) || g.tax_year || new Date().getFullYear();
-    const dates = defaultDates(year, county, state, countyDefaults);
+    // A tax year the reader did not find stays blank (0) and is required
+    // in review; it is never assumed to be the current year.
+    const year = Number(x.tax_year) || g.tax_year || 0;
+    // The dates follow the tax year. What the reader returned is kept
+    // only when it agrees with the year (the year in a date it returns is
+    // often its own guess: the two 2026 Morgan statements saved with
+    // 2025 dates came through here unchecked).
+    const readDueDate = str(x.due_date);
+    const readDelinquentDate = str(x.delinquent_date);
+    const dates = draftDates(year, { due_date: readDueDate, delinquent_date: readDelinquentDate }, county, state, countyDefaults);
     const rawLines = Array.isArray(x.lines) ? (x.lines as Array<Record<string, unknown>>) : [];
-    const lines: LineDraft[] = rawLines.map((l) => {
+    // Unsure marks: header fields by name, line fields as "lines[i].field".
+    // A statement read in parts keeps each part's own line numbers, so
+    // its line marks cannot be tied to a line (partsUnsure).
+    const rawUnsure = Array.isArray(x.unsure_fields) ? (x.unsure_fields as unknown[]).map(String) : [];
+    const lineUnsure = new Map<number, string[]>();
+    const partsUnsure: string[] = [];
+    for (const key of rawUnsure) {
+      const m = /^lines\[(\d+)\]\.?([A-Za-z_]*)/.exec(key);
+      if (!m) continue;
+      const index = Number(m[1]);
+      const field = m[2] || "whole_line";
+      // A statement read in parts arrives with its line marks already
+      // shifted to the joined list (app/api/extract/unsureIndex.ts). A
+      // mark that still points past the last line cannot be tied to a
+      // line, so it is kept for the whole statement instead.
+      if (index >= rawLines.length) {
+        if (!partsUnsure.includes(field)) partsUnsure.push(field);
+      } else if (!(lineUnsure.get(index) ?? []).includes(field)) {
+        lineUnsure.set(index, [...(lineUnsure.get(index) ?? []), field]);
+      }
+    }
+    const lines: LineDraft[] = rawLines.map((l, lineIndex) => {
       const rawIds = Array.isArray(l.identifiers) ? (l.identifiers as Array<Record<string, unknown>>) : [];
       const identifiers = rawIds
         .map((i) => printedIdentifier(str(i.label), i.kind, str(i.value)))
         .filter((i): i is PrintedIdentifier => i !== null);
       const lineType: LineDraft["lineType"] = l.line_type === "personal_property" ? "personal_property" : "real_property";
-      const m = matchLine({ line_type: lineType, identifiers }, stored, parcelList);
+      // Only parcels in the statement's county can match (the same
+      // number can belong to different land in another county).
+      const m = matchLine({ line_type: lineType, identifiers }, stored, parcelList, county);
       const firstParcelId = identifiers.find((i) => i.kind === "parcel_number")?.value ?? identifiers[0]?.value ?? "";
       return {
         localId: crypto.randomUUID(),
@@ -311,6 +423,7 @@ export default function TaxUploadClient({
         address: str(l.property_address),
         acres: num(l.acres),
         values: readLineValues(l),
+        unsure: lineUnsure.get(lineIndex) ?? [],
         mode: m.parcelId ? "matched" : "unmatched",
         parcelId: m.parcelId ?? "",
         matchSource: m.parcelId ? "identifier" : null,
@@ -325,7 +438,8 @@ export default function TaxUploadClient({
         learnPrinted: true,
         newParcelNumber: firstParcelId,
         newParcelCounty: county,
-        newParcelPropertyId: properties[0]?.id ?? "",
+        // No property is assumed for a new parcel: the user picks one.
+        newParcelPropertyId: "",
         legalOpen: false,
       };
     });
@@ -334,14 +448,17 @@ export default function TaxUploadClient({
     // Entity: the registry pre-label wins; else the name matcher.
     let entityId = g.entity_id ?? "";
     let entityEvidence = g.entity_evidence;
+    let entityPick: string | null = null;
     let comparedName: string | null = careOfTarget(taxpayer, careOf) ?? (taxpayer || null);
     if (!entityId) {
       const em = matchEntity({ taxpayer_name: taxpayer, care_of: careOf || null }, entities);
       entityId = em.entityId ?? "";
       entityEvidence = em.evidence;
+      entityPick = em.pick ?? null;
       comparedName = em.comparedName ?? comparedName;
     }
-    const lineSum = lines.reduce((a, l) => a + (money(l.tax) ?? 0), 0);
+    // A total the reader did not find stays blank and is required: filled
+    // in from the lines it would always "reconcile" with nothing checked.
     const totalRaw = x.total_tax === null || x.total_tax === undefined ? g.total_tax : Number(x.total_tax);
     return {
       localId: crypto.randomUUID(),
@@ -349,7 +466,8 @@ export default function TaxUploadClient({
       pages: g.pages,
       status: "review",
       error: null,
-      unsure: Array.isArray(x.unsure_fields) ? (x.unsure_fields as unknown[]).map(String) : [],
+      unsure: rawUnsure.filter((k) => HEADER_UNSURE_FIELDS.includes(k)),
+      partsUnsure,
       open: false,
       county,
       state,
@@ -359,16 +477,32 @@ export default function TaxUploadClient({
       taxpayer,
       careOf,
       taxYear: year,
-      total: totalRaw === null || totalRaw === undefined ? (lines.length ? String(Math.round(lineSum * 100) / 100) : "") : String(totalRaw),
-      dueDate: str(x.due_date) || dates.due_date,
-      delinquentDate: str(x.delinquent_date) || dates.delinquent_date,
+      total: totalRaw === null || totalRaw === undefined ? "" : String(totalRaw),
+      dueDate: dates.due_date,
+      delinquentDate: dates.delinquent_date,
+      readDueDate,
+      readDelinquentDate,
+      datesEdited: false,
+      datesNote: dates.note,
       notes: "",
       entityId,
       entityEvidence,
+      entityPick,
       comparedName,
       lines,
       rememberDates: false,
     };
+  }
+
+  // The dates follow the tax year until the user types one by hand.
+  function changeTaxYear(s: StatementDraft, value: string) {
+    const taxYear = Number(value) || 0;
+    if (s.datesEdited) {
+      patchStatement(s.localId, { taxYear });
+      return;
+    }
+    const d = draftDates(taxYear, { due_date: s.readDueDate, delinquent_date: s.readDelinquentDate }, s.county, s.state, countyDefaults);
+    patchStatement(s.localId, { taxYear, dueDate: d.due_date, delinquentDate: d.delinquent_date, datesNote: d.note });
   }
 
   // ---- the live county lookup tier (migration 0042)
@@ -435,7 +569,7 @@ export default function TaxUploadClient({
         continue;
       }
       const hits = l.identifiers.flatMap((i) => (i.kind === "other" ? [] : (countyCache.current.get(cacheKey(i)) ?? [])));
-      const m = matchLineViaCounty({ line_type: l.lineType }, hits, parcelList);
+      const m = matchLineViaCounty({ line_type: l.lineType }, hits, parcelList, c);
       patchLine(sid, l.localId, {
         countyDone: true,
         countyNote: null,
@@ -461,26 +595,66 @@ export default function TaxUploadClient({
       money(s.total)
     );
   }
+  // How many fields the reader said it was unsure of, header and lines.
+  function unsureCount(s: StatementDraft): number {
+    return s.unsure.length + s.partsUnsure.length + s.lines.reduce((a, l) => a + l.unsure.length, 0);
+  }
+  // The unsure marks that keep a statement out of "Confirm all ready":
+  // the ones on a field that decides money, dates, the tax year, or
+  // which parcel a line belongs to. Nearly every bill carries a mark on
+  // something descriptive (a blank acres box, a clipped legal
+  // description, the mailing name); those still show their amber ring
+  // and count in the "N unsure" chip, but holding every statement back
+  // for them would make the button useless, and a person clicking
+  // through twenty statements one at a time reads each less carefully.
+  function unsureThatMatters(s: StatementDraft): number {
+    const header = s.unsure.filter((k) => !DESCRIPTIVE_HEADER_FIELDS.includes(k)).length;
+    const perLine = (fields: string[]) => fields.filter((k) => !DESCRIPTIVE_LINE_FIELDS.includes(k)).length;
+    return header + perLine(s.partsUnsure) + s.lines.reduce((a, l) => a + perLine(l.unsure), 0);
+  }
+  // What a statement still needs. "blocking" stops it from being saved at
+  // all. "review" does not, but keeps it out of "Confirm all ready": it
+  // has to be opened and confirmed on its own, with the marked fields in
+  // front of the user (every reading is reviewed where the reader was
+  // unsure).
+  function attention(s: StatementDraft): { blocking: string[]; review: string[] } {
+    const blocking: string[] = [];
+    const review: string[] = [];
+    if (!s.county.trim()) blocking.push("county");
+    if (!plausibleTaxYear(s.taxYear)) blocking.push("tax year");
+    if (money(s.total) === null) blocking.push("total");
+    else if (!recon(s).reconciled) review.push("lines do not reconcile");
+    // A blank tax is not $0.00: it would count the parcel as billed.
+    if (s.lines.some((l) => money(l.tax) === null)) blocking.push("tax on every line");
+    if (plausibleTaxYear(s.taxYear) && statementDateProblem(s.taxYear, s.dueDate, s.delinquentDate)) blocking.push("check the dates");
+    else if (s.datesNote) review.push("check the dates");
+    if (s.lines.some((l) => l.lineType === "real_property" && l.mode === "unmatched" && l.candidates.length > 1)) blocking.push("pick a parcel");
+    if (s.lines.some((l) => l.mode === "create" && (!l.newParcelNumber.trim() || !l.newParcelPropertyId))) blocking.push("new parcel details");
+    if (s.entityPick && !s.entityId) review.push("pick an entity");
+    if (unsureThatMatters(s) > 0) review.push("look at the unsure fields");
+    return { blocking, review };
+  }
   function needsAttention(s: StatementDraft): string[] {
-    const issues: string[] = [];
-    if (!s.county.trim()) issues.push("county");
-    if (!s.taxYear) issues.push("tax year");
-    if (money(s.total) === null && s.lines.length === 0) issues.push("total");
-    if (!recon(s).reconciled) issues.push("lines do not reconcile");
-    if (s.lines.some((l) => l.lineType === "real_property" && l.mode === "unmatched" && l.candidates.length > 1)) issues.push("pick a parcel");
-    if (s.lines.some((l) => l.mode === "create" && (!l.newParcelNumber.trim() || !l.newParcelPropertyId))) issues.push("new parcel details");
-    return issues;
+    const a = attention(s);
+    return [...a.blocking, ...a.review];
   }
 
   // ---- confirm = save
   async function confirmStatement(s: StatementDraft): Promise<void> {
+    // Never saved with something required missing or dates that disagree
+    // with the tax year, whichever button asked.
+    const blocking = attention(s).blocking;
+    const total = money(s.total);
+    if (blocking.length > 0 || total === null) {
+      patchStatement(s.localId, { status: "review", error: `Not saved. This statement still needs: ${blocking.join(", ") || "total"}.` });
+      return;
+    }
     patchStatement(s.localId, { status: "saving", error: null });
     const county = s.county.trim() || null;
     const state = s.state.trim().toUpperCase() || null;
     const account = s.account.trim() || null;
     const r = recon(s);
     const lineSum = r.lineTotal;
-    const total = money(s.total) ?? lineSum;
 
     // Duplicate guard: same county, state, account, year already on file.
     if (account && county) {
@@ -503,32 +677,49 @@ export default function TaxUploadClient({
     }
 
     // New parcels first (create mode), so the lines can point at them.
-    const createdParcels = new Map<string, string>();
+    // A parcel is created ONCE: if the same county and number is already
+    // on file, or this session already created it (a save that failed
+    // further down and is being confirmed again), that parcel is used.
+    const newParcelIds = new Map<string, string>(); // line -> parcel
+    const reusedParcel = new Set<string>(); // lines pointed at a parcel already on file
     for (const l of s.lines) {
       if (l.mode !== "create") continue;
       if (!l.newParcelNumber.trim() || !l.newParcelPropertyId) {
         patchStatement(s.localId, { status: "review", error: "Give each new parcel a number and a property." });
         return;
       }
+      const number = l.newParcelNumber.trim();
+      const parcelCounty = l.newParcelCounty.trim() || null;
+      const key = parcelKey(parcelCounty, number);
+      const existingId =
+        createdParcels.current.get(key) ??
+        parcelList.find((p) => parcelKey(p.county, p.parcel_number) === key)?.id ??
+        null;
+      if (existingId) {
+        newParcelIds.set(l.localId, existingId);
+        if (!createdParcels.current.has(key)) reusedParcel.add(l.localId);
+        continue;
+      }
       const { data, error } = await supabase
         .from("parcels")
         .insert({
           organization_id: orgId,
           property_id: l.newParcelPropertyId,
-          parcel_number: l.newParcelNumber.trim(),
-          county: l.newParcelCounty.trim() || null,
+          parcel_number: number,
+          county: parcelCounty,
         })
         .select("id")
         .single();
       if (error || !data) {
-        patchStatement(s.localId, { status: "review", error: "Could not create the parcel: " + (error?.message ?? "") });
+        patchStatement(s.localId, { status: "review", error: friendlyDbError(error, "Could not create the parcel. Nothing was saved; please try again.") });
         return;
       }
-      createdParcels.set(l.localId, data.id as string);
+      newParcelIds.set(l.localId, data.id as string);
+      createdParcels.current.set(key, data.id as string);
       const prop = properties.find((p) => p.id === l.newParcelPropertyId);
       setParcelList((list) => [
         ...list,
-        { id: data.id as string, parcel_number: l.newParcelNumber.trim(), county: l.newParcelCounty.trim() || null, property_id: l.newParcelPropertyId, property_name: prop?.name ?? null },
+        { id: data.id as string, parcel_number: number, county: parcelCounty, property_id: l.newParcelPropertyId, property_name: prop?.name ?? null },
       ]);
     }
 
@@ -562,7 +753,7 @@ export default function TaxUploadClient({
         error:
           stErr?.code === "23505" || /duplicate/i.test(stErr?.message ?? "")
             ? `A ${s.taxYear} statement for this account is already on file.`
-            : "Could not save: " + (stErr?.message ?? ""),
+            : friendlyDbError(stErr, "Could not save the statement. Nothing was saved; please try again."),
       });
       return;
     }
@@ -593,17 +784,23 @@ export default function TaxUploadClient({
         .single();
       if (docErr || !doc) {
         await rollback();
-        patchStatement(s.localId, { status: "review", error: "Could not attach the statement file: " + (docErr?.message ?? "") });
+        patchStatement(s.localId, { status: "review", error: friendlyDbError(docErr, "Could not attach the statement file, so the statement was not saved. Please try again.") });
         return;
       }
-      await supabase.from("tax_statements").update({ source_document_id: doc.id }).eq("id", statementId);
+      const { error: linkErr } = await supabase.from("tax_statements").update({ source_document_id: doc.id }).eq("id", statementId);
+      // Not worth undoing the save over: the file is still attached to
+      // the statement as a document, only the "open the uploaded
+      // statement" shortcut is missing.
+      if (linkErr) patchStatement(s.localId, { error: "Saved. The shortcut to the uploaded file could not be set; the file is still listed under the statement's documents." });
     }
 
     // Lines. A parcel printed twice on one statement (regular tax plus
     // an additional bill) becomes one line with the summed tax, since a
     // parcel carries one line per tax year.
+    const createEvidence = (l: LineDraft) =>
+      reusedParcel.has(l.localId) ? "Matched by hand to a parcel already on file with this number" : "Parcel created from this statement";
     const rawLineRows = s.lines.map((l, i) => {
-      const parcelId = l.mode === "create" ? (createdParcels.get(l.localId) ?? null) : l.mode === "matched" && l.parcelId ? l.parcelId : null;
+      const parcelId = l.mode === "create" ? (newParcelIds.get(l.localId) ?? null) : l.mode === "matched" && l.parcelId ? l.parcelId : null;
       const isPP = l.lineType === "personal_property";
       const matchSource = isPP || !parcelId ? null : l.mode === "create" ? "manual" : (l.matchSource ?? "manual");
       return {
@@ -623,7 +820,7 @@ export default function TaxUploadClient({
         ...(l.values && hasAnyValue(l.values) ? { ...l.values, values_read_at: new Date().toISOString() } : {}),
         parcel_id: isPP ? null : parcelId,
         match_source: matchSource,
-        match_evidence: isPP || !parcelId ? null : l.mode === "create" ? "Parcel created from this statement" : l.evidence,
+        match_evidence: isPP || !parcelId ? null : l.mode === "create" ? createEvidence(l) : l.evidence,
         confirmed: true,
       };
     });
@@ -632,7 +829,7 @@ export default function TaxUploadClient({
       const { data: inserted, error: lnErr } = await supabase.from("tax_statement_lines").insert(lineRows).select("id, line_no, parcel_id");
       if (lnErr || !inserted) {
         await rollback();
-        let msg = "Could not save the lines: " + (lnErr?.message ?? "");
+        let msg = friendlyDbError(lnErr, "Could not save the lines, so the statement was not saved. Please try again.");
         if (lnErr?.code === "23505" || /duplicate/i.test(lnErr?.message ?? "")) {
           const dupLine = s.lines.find((l) => l.parcelId && l.mode === "matched");
           const pn = dupLine ? (parcelById.get(dupLine.parcelId)?.parcel_number ?? "") : "";
@@ -653,7 +850,7 @@ export default function TaxUploadClient({
           parcelId,
           identifiers: l.identifiers,
           source: l.mode === "create" ? "manual" : (l.matchSource ?? "manual"),
-          evidence: l.mode === "create" ? "Parcel created from this statement" : l.evidence,
+          evidence: l.mode === "create" ? createEvidence(l) : l.evidence,
           stored: learnedStore,
           learn: l.matchSource === "manual" ? l.learnPrinted : true,
           // The county's record belongs to the parcel it resolved, never
@@ -661,7 +858,7 @@ export default function TaxUploadClient({
           county: l.mode === "matched" && l.matchSource !== "manual" ? l.county : null,
         });
         if (err) {
-          patchStatement(s.localId, { error: "Saved, but could not remember the identifiers: " + err });
+          patchStatement(s.localId, { error: "Saved. The printed numbers could not be remembered on the parcel, so next year's statement may need to be matched by hand again." });
         }
         if (l.matchSource !== "manual" || l.learnPrinted) {
           learnedStore = [
@@ -685,14 +882,14 @@ export default function TaxUploadClient({
         accountNumber: account,
         comparedName: s.comparedName,
       });
-      if (err) patchStatement(s.localId, { error: "Saved, but could not register the account: " + err });
+      if (err) patchStatement(s.localId, { error: "Saved. The account could not be registered to the entity, so next year's statement may need the entity picked again." });
     }
 
     // County dates, when asked.
     if (s.rememberDates && county && s.dueDate && s.delinquentDate) {
       const due = s.dueDate.split("-").map(Number);
       const del = s.delinquentDate.split("-").map(Number);
-      await supabase.from("county_tax_defaults").upsert(
+      const { error: datesErr } = await supabase.from("county_tax_defaults").upsert(
         {
           organization_id: orgId,
           county,
@@ -704,6 +901,7 @@ export default function TaxUploadClient({
         },
         { onConflict: "organization_id,county,state" }
       );
+      if (datesErr) patchStatement(s.localId, { error: `Saved. The dates could not be remembered for ${county} County, so they were not changed for next time.` });
     }
     patchStatement(s.localId, { status: "saved", open: false });
   }
@@ -721,7 +919,8 @@ export default function TaxUploadClient({
 
   // Re-run the line match when the user edits identifiers or the parcel list grows.
   function rematch(sid: string, l: LineDraft) {
-    const m = matchLine({ line_type: l.lineType, identifiers: l.identifiers }, stored, parcelList);
+    const county = statements.find((x) => x.localId === sid)?.county ?? null;
+    const m = matchLine({ line_type: l.lineType, identifiers: l.identifiers }, stored, parcelList, county);
     const next: LineDraft = {
       ...l,
       mode: m.parcelId ? "matched" : "unmatched",
@@ -742,7 +941,7 @@ export default function TaxUploadClient({
   }
 
   const isUnsure = (s: StatementDraft, key: string) => s.unsure.includes(key);
-  const ring = (s: StatementDraft, key: string) => (isUnsure(s, key) ? " border-amber-400 ring-2 ring-amber-100" : "");
+  const ring = (s: StatementDraft, key: string) => (isUnsure(s, key) ? unsureRing : "");
   const reviewable = statements.filter((s) => s.status === "review");
   const readyCount = reviewable.filter((s) => needsAttention(s).length === 0).length;
   const savedCount = statements.filter((s) => s.status === "saved").length;
@@ -804,6 +1003,9 @@ export default function TaxUploadClient({
               ) : (
                 <span>{statements.filter((s) => s.fileLocalId === f.localId).length} statement(s) read</span>
               )}
+              {f.skippedPages.length > 0 ? (
+                <span className="basis-full font-medium text-amber-900">{pagesNotReadText(f.skippedPages)}</span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -829,7 +1031,27 @@ export default function TaxUploadClient({
       <ul className="space-y-3">
         {statements.map((s) => {
           const r = recon(s);
-          const issues = needsAttention(s);
+          const attn = attention(s);
+          const issues = [...attn.blocking, ...attn.review];
+          const unsure = unsureCount(s);
+          const dateProblem = plausibleTaxYear(s.taxYear) ? statementDateProblem(s.taxYear, s.dueDate, s.delinquentDate) : null;
+          // Lines matched to the same parcel are saved as ONE line with
+          // the tax added together (a parcel carries one line a year):
+          // shown here, never done silently.
+          const linesByParcel = new Map<string, number[]>();
+          s.lines.forEach((l, i) => {
+            if (l.lineType !== "real_property" || l.mode !== "matched" || !l.parcelId) return;
+            linesByParcel.set(l.parcelId, [...(linesByParcel.get(l.parcelId) ?? []), i]);
+          });
+          const combinedCount = [...linesByParcel.values()].filter((ix) => ix.length > 1).reduce((a, ix) => a + ix.length, 0);
+          const combinedNote = (l: LineDraft): string | null => {
+            const ix = l.mode === "matched" && l.parcelId ? (linesByParcel.get(l.parcelId) ?? []) : [];
+            if (ix.length < 2) return null;
+            const sum = ix.reduce((a, i) => a + (money(s.lines[i].tax) ?? 0), 0);
+            const nums = ix.map((i) => String(i + 1));
+            const list = nums.length > 2 ? `${nums.slice(0, -1).join(", ")}, and ${nums[nums.length - 1]}` : nums.join(" and ");
+            return `${ix.length} lines combined: lines ${list} match this parcel and will be saved as one line of ${formatDollars(sum)}.`;
+          };
           const entity = s.entityId ? entityById.get(s.entityId) : null;
           const border =
             s.status === "saved" ? "border-kelly-200" : s.status === "skipped" ? "border-gray-200" : issues.length ? "border-amber-300" : "border-gray-200";
@@ -841,7 +1063,7 @@ export default function TaxUploadClient({
                 className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left"
               >
                 <span className="text-sm font-semibold text-gray-900">
-                  {s.county || "Unknown"} County {s.taxYear}
+                  {s.county || "Unknown"} County {s.taxYear || "(tax year not read)"}
                   {s.account ? <span className="font-normal text-gray-500"> · {IDENTIFIER_KIND_LABELS[(s.accountKind as IdentifierKind) ?? "other"] ?? "Number"} {s.account}</span> : null}
                 </span>
                 <span className="text-xs text-gray-600">{s.taxpayer || "No taxpayer read"}</span>
@@ -865,6 +1087,12 @@ export default function TaxUploadClient({
                     {r.gap === null ? "No total to check" : `Lines sum to ${formatDollars(r.lineTotal)}, statement says ${formatDollars(money(s.total)!)} (gap ${formatDollars(r.gap)})`}
                   </span>
                 )}
+                {s.status === "review" && unsure > 0 ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">{unsure} unsure</span>
+                ) : null}
+                {s.status === "review" && combinedCount > 0 ? (
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{combinedCount} lines combined</span>
+                ) : null}
                 {s.status === "review" && issues.length ? (
                   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-900">Needs: {issues.join(", ")}</span>
                 ) : s.status === "review" ? (
@@ -875,6 +1103,13 @@ export default function TaxUploadClient({
 
               {s.open && s.status !== "saved" && s.status !== "skipped" ? (
                 <div className="space-y-4 border-t border-gray-100 px-4 py-4">
+                  {unsure > 0 ? (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      {s.partsUnsure.length > 0
+                        ? `The reader was unsure about ${s.partsUnsure.map(lineFieldLabel).join(", ")} on a line it could not point to. Check every line against the bill, along with the fields outlined in amber.`
+                        : "The reader was not sure of the fields outlined in amber. Check them against the bill before confirming."}
+                    </p>
+                  ) : null}
                   {/* Header */}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <Field label="County">
@@ -884,14 +1119,15 @@ export default function TaxUploadClient({
                       <input value={s.state} onChange={(e) => patchStatement(s.localId, { state: e.target.value.toUpperCase() })} className={inputClass + ring(s, "state")} />
                     </Field>
                     <Field label="Tax year">
-                      <input type="number" value={s.taxYear} onChange={(e) => patchStatement(s.localId, { taxYear: Number(e.target.value) })} className={inputClass + ring(s, "tax_year")} />
+                      {/* Blank when the reader found none; the dates follow it. */}
+                      <input type="number" value={s.taxYear || ""} onChange={(e) => changeTaxYear(s, e.target.value)} placeholder="Year on the bill" className={inputClass + ring(s, "tax_year")} />
                     </Field>
                     <Field label="Taxing authority">
                       <input value={s.authority} onChange={(e) => patchStatement(s.localId, { authority: e.target.value })} className={inputClass + ring(s, "authority_name")} />
                     </Field>
                     <Field label="Billing number (as printed)">
                       <div className="flex gap-1">
-                        <select value={s.accountKind} onChange={(e) => patchStatement(s.localId, { accountKind: e.target.value })} className="rounded-lg border border-gray-300 px-2 py-2 text-xs">
+                        <select value={s.accountKind} onChange={(e) => patchStatement(s.localId, { accountKind: e.target.value })} className={"rounded-lg border border-gray-300 px-2 py-2 text-xs" + ring(s, "billing_kind")}>
                           {(["account_number", "receipt_number", "key_number", "bill_number", "parcel_number", "other"] as const).map((k) => (
                             <option key={k} value={k}>{IDENTIFIER_KIND_LABELS[k]}</option>
                           ))}
@@ -919,7 +1155,7 @@ export default function TaxUploadClient({
                             entityEvidence: ent ? `Chosen by hand for "${s.comparedName ?? s.taxpayer}"` : null,
                           });
                         }}
-                        className={inputClass}
+                        className={inputClass + (s.entityPick && !s.entityId ? unsureRing : "")}
                       >
                         <option value="">No entity</option>
                         {entities.map((e) => (
@@ -927,17 +1163,33 @@ export default function TaxUploadClient({
                         ))}
                       </select>
                       {s.entityEvidence && s.entityId ? <p className="mt-1 text-xs text-gray-600">{s.entityEvidence}</p> : null}
+                      {s.entityPick && !s.entityId ? <p className="mt-1 text-xs text-amber-900">{s.entityPick}</p> : null}
                     </Field>
                     <Field label="Due date">
-                      <input type="date" value={s.dueDate} onChange={(e) => patchStatement(s.localId, { dueDate: e.target.value })} className={inputClass + ring(s, "due_date")} />
+                      <input
+                        type="date"
+                        value={s.dueDate}
+                        onChange={(e) => patchStatement(s.localId, { dueDate: e.target.value, datesEdited: true, datesNote: null })}
+                        className={inputClass + ring(s, "due_date") + (dateProblem || s.datesNote ? unsureRing : "")}
+                      />
                     </Field>
-                    <Field label="Delinquent date">
-                      <input type="date" value={s.delinquentDate} onChange={(e) => patchStatement(s.localId, { delinquentDate: e.target.value })} className={inputClass + ring(s, "delinquent_date")} />
+                    <Field label="Delinquent date (the first late day)">
+                      <input
+                        type="date"
+                        value={s.delinquentDate}
+                        onChange={(e) => patchStatement(s.localId, { delinquentDate: e.target.value, datesEdited: true, datesNote: null })}
+                        className={inputClass + ring(s, "delinquent_date") + (dateProblem || s.datesNote ? unsureRing : "")}
+                      />
                     </Field>
                     <Field label="Notes">
                       <input value={s.notes} onChange={(e) => patchStatement(s.localId, { notes: e.target.value })} className={inputClass} />
                     </Field>
                   </div>
+                  {dateProblem ? (
+                    <p className="text-xs font-medium text-red-700">Check the dates. {dateProblem} The statement cannot be saved until they agree with the tax year.</p>
+                  ) : s.datesNote ? (
+                    <p className="text-xs text-amber-900">{s.datesNote}</p>
+                  ) : null}
                   <label className="flex items-center gap-2 text-xs text-gray-700">
                     <input type="checkbox" checked={s.rememberDates} onChange={(e) => patchStatement(s.localId, { rememberDates: e.target.checked })} className="h-4 w-4 accent-kelly-500" />
                     Remember these due and delinquent dates for {s.county || "this county"}
@@ -968,6 +1220,7 @@ export default function TaxUploadClient({
                                 legal: "",
                                 address: "",
                                 acres: "",
+                                unsure: [],
                                 mode: "unmatched",
                                 parcelId: "",
                                 matchSource: null,
@@ -980,7 +1233,7 @@ export default function TaxUploadClient({
                                 learnPrinted: true,
                                 newParcelNumber: "",
                                 newParcelCounty: s.county,
-                                newParcelPropertyId: properties[0]?.id ?? "",
+                                newParcelPropertyId: "",
                                 legalOpen: false,
                               },
                             ],
@@ -1007,6 +1260,7 @@ export default function TaxUploadClient({
                           })}
                           parcelById={parcelById}
                           properties={properties}
+                          combinedNote={combinedNote(l)}
                           onChange={(patch) => patchLine(s.localId, l.localId, patch)}
                           onIdentifiersChanged={(ids) => rematch(s.localId, { ...l, identifiers: ids })}
                           onRemove={() => patchStatement(s.localId, { lines: s.lines.filter((x) => x.localId !== l.localId) })}
@@ -1019,11 +1273,14 @@ export default function TaxUploadClient({
                     <button
                       type="button"
                       onClick={() => confirmStatement(s)}
-                      disabled={s.status === "saving" || issues.some((x) => x !== "lines do not reconcile")}
+                      disabled={s.status === "saving" || attn.blocking.length > 0}
                       className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50"
                     >
                       {s.status === "saving" ? "Saving..." : "Confirm statement"}
                     </button>
+                    {attn.blocking.length > 0 ? (
+                      <span className="text-xs text-amber-900">Still needed before this can be saved: {attn.blocking.join(", ")}.</span>
+                    ) : null}
                     {!r.reconciled && r.gap !== null ? (
                       <span className="text-xs text-amber-900">The gap is kept on the statement and shown on the Property Taxes page.</span>
                     ) : null}
@@ -1069,6 +1326,7 @@ function LineCard({
   parcels,
   parcelById,
   properties,
+  combinedNote,
   onChange,
   onIdentifiersChanged,
   onRemove,
@@ -1078,6 +1336,8 @@ function LineCard({
   parcels: ParcelRef[];
   parcelById: Map<string, ParcelRef>;
   properties: Array<{ id: string; name: string }>;
+  // Set when another line on the statement matches the same parcel.
+  combinedNote: string | null;
   onChange: (patch: Partial<LineDraft>) => void;
   onIdentifiersChanged: (ids: PrintedIdentifier[]) => void;
   onRemove: () => void;
@@ -1088,6 +1348,11 @@ function LineCard({
   const isPP = line.lineType === "personal_property";
   const matched = line.mode === "matched" && line.parcelId ? parcelById.get(line.parcelId) : null;
   const cardBorder = isPP ? "border-gray-200" : line.mode === "matched" ? "border-kelly-200" : line.mode === "create" ? "border-gray-300" : "border-amber-300";
+  // The same amber ring the header fields get, for the fields on this
+  // line the reader said it was unsure of; a blank tax is ringed too
+  // (it is required, never saved as $0.00).
+  const ring = (field: string) => (line.unsure.includes(field) ? unsureRing : "");
+  const taxMissing = line.tax.trim() === "";
 
   function addIdentifier() {
     const id = printedIdentifier(newLabel, null, newValue);
@@ -1153,25 +1418,30 @@ function LineCard({
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
         <label className="text-[11px] text-gray-600">
           Appraised
-          <input value={line.appraised} onChange={(e) => onChange({ appraised: e.target.value })} className={smallInput} />
+          <input value={line.appraised} onChange={(e) => onChange({ appraised: e.target.value })} className={smallInput + ring("appraised_value")} />
         </label>
         <label className="text-[11px] text-gray-600">
           Assessed
-          <input value={line.assessed} onChange={(e) => onChange({ assessed: e.target.value })} className={smallInput} />
+          <input value={line.assessed} onChange={(e) => onChange({ assessed: e.target.value })} className={smallInput + ring("assessed_value")} />
         </label>
         <label className="text-[11px] text-gray-600">
           Tax due
-          <input value={line.tax} onChange={(e) => onChange({ tax: e.target.value })} className={smallInput} />
+          <input value={line.tax} onChange={(e) => onChange({ tax: e.target.value })} className={smallInput + (taxMissing ? unsureRing : ring("tax_due"))} />
         </label>
         <label className="text-[11px] text-gray-600">
           Acres
-          <input value={line.acres} onChange={(e) => onChange({ acres: e.target.value })} className={smallInput} />
+          <input value={line.acres} onChange={(e) => onChange({ acres: e.target.value })} className={smallInput + ring("acres")} />
         </label>
         <label className="text-[11px] text-gray-600">
           Exemptions
-          <input value={line.exemptions} onChange={(e) => onChange({ exemptions: e.target.value })} className={smallInput} />
+          <input value={line.exemptions} onChange={(e) => onChange({ exemptions: e.target.value })} className={smallInput + ring("exemptions")} />
         </label>
       </div>
+      {taxMissing ? <p className="mt-1 text-xs text-amber-900">No tax was read for this line. Type the amount from the bill (0 if the line really is zero).</p> : null}
+      {line.unsure.length > 0 ? (
+        <p className="mt-1 text-xs text-amber-900">The reader was not sure of: {line.unsure.map(lineFieldLabel).join(", ")}.</p>
+      ) : null}
+      {combinedNote ? <p className="mt-1 text-xs font-medium text-gray-800">{combinedNote}</p> : null}
       {line.address ? <p className="mt-1 text-xs text-gray-600">{line.address}</p> : null}
       {line.legal ? (
         <button type="button" onClick={() => onChange({ legalOpen: !line.legalOpen })} className="mt-1 text-xs font-medium text-kelly-700 hover:underline">
@@ -1275,8 +1545,8 @@ function LineCard({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <input value={line.newParcelNumber} onChange={(e) => onChange({ newParcelNumber: e.target.value })} placeholder="Parcel number" className={smallInput} />
               <input value={line.newParcelCounty} onChange={(e) => onChange({ newParcelCounty: e.target.value })} placeholder="County" className={smallInput} />
-              <select value={line.newParcelPropertyId} onChange={(e) => onChange({ newParcelPropertyId: e.target.value })} className={smallInput}>
-                <option value="">Property...</option>
+              <select value={line.newParcelPropertyId} onChange={(e) => onChange({ newParcelPropertyId: e.target.value })} className={smallInput + (line.newParcelPropertyId ? "" : unsureRing)}>
+                <option value="">Pick the property...</option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}

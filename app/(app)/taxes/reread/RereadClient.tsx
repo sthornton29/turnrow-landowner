@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PDFDocument } from "pdf-lib";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatDollars } from "@/lib/format";
-import { LINE_VALUE_KEYS, LINE_VALUE_LABELS } from "@/lib/taxLineValues";
+import { LINE_VALUE_KEYS, LINE_VALUE_LABELS, valuesFound } from "@/lib/taxLineValues";
 import { matchReread, pageChunks, type ExistingLine, type Proposal, type ReadLine } from "@/lib/taxReread";
 
 // RE-READ BILLS: read each stored bill file again for the values a bill
@@ -40,6 +41,7 @@ export default function RereadClient({ files }: { files: RereadFile[] }) {
   const [status, setStatus] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, Result>>({});
   const [busyAll, setBusyAll] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null); // the file being saved
   const [error, setError] = useState<string | null>(null);
 
   const setS = (path: string, s: string) => setStatus((x) => ({ ...x, [path]: s }));
@@ -97,20 +99,26 @@ export default function RereadClient({ files }: { files: RereadFile[] }) {
 
   async function apply(f: RereadFile) {
     const r = results[f.storagePath];
-    if (!r) return;
+    if (!r || saving) return;
+    setSaving(f.storagePath);
+    setError(null);
     setS(f.storagePath, "Saving...");
     const now = new Date().toISOString();
     for (const p of r.proposals) {
+      // Only the values this read found: a second read that misses a
+      // value must not blank out the one an earlier read saved.
       const { error: err } = await supabase
         .from("tax_statement_lines")
-        .update({ ...p.values, values_read_at: now })
+        .update({ ...valuesFound(p.values), values_read_at: now })
         .eq("id", p.lineId);
       if (err) {
-        setError(`Could not save: ${err.message}`);
+        setError(friendlyDbError(err, "Could not save the values. Please try again."));
         setS(f.storagePath, "");
+        setSaving(null);
         return;
       }
     }
+    setSaving(null);
     setResults((x) => {
       const n = { ...x };
       delete n[f.storagePath];
@@ -198,7 +206,7 @@ export default function RereadClient({ files }: { files: RereadFile[] }) {
                   <div className="flex gap-2">
                     <button
                       onClick={() => apply(f)}
-                      disabled={r.proposals.length === 0}
+                      disabled={r.proposals.length === 0 || saving !== null}
                       className="rounded-lg bg-kelly-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-kelly-600 disabled:opacity-50"
                     >
                       Save {r.proposals.length} line{r.proposals.length === 1 ? "" : "s"}

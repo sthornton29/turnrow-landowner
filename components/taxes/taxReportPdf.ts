@@ -4,7 +4,7 @@
 // verbatim from lib/taxChange.ts - nothing is recomputed here.
 import { jsPDF } from "jspdf";
 import { loadLockupPng } from "@/components/map/printPdf";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars, todayISO } from "@/lib/format";
 import type { TaxChangeReport } from "@/lib/taxChange";
 
 const PAGE = { w: 215.9, h: 279.4 }; // Letter portrait, mm
@@ -41,11 +41,13 @@ export async function generateTaxReportPdf(job: TaxReportJob): Promise<void> {
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
   pdf.setTextColor(...GRAY);
-  pdf.text(new Date().toLocaleDateString(), PAGE.w - MARGIN, y, { align: "right" });
+  pdf.text(formatDate(todayISO()), PAGE.w - MARGIN, y, { align: "right" });
   y += 6;
   pdf.setFontSize(9);
-  pdf.text(job.scopeLine, MARGIN, y);
-  y += 8;
+  // Wrapped: several entity names in the scope used to run off the page.
+  const scopeLines = pdf.splitTextToSize(job.scopeLine, CONTENT_W) as string[];
+  pdf.text(scopeLines, MARGIN, y);
+  y += (scopeLines.length - 1) * 3.8 + 8;
 
   // ---- Summary cards ----
   const cards = [
@@ -57,7 +59,9 @@ export async function generateTaxReportPdf(job: TaxReportJob): Promise<void> {
     {
       label: `Appraised value, ${report.y0} to ${report.y1}`,
       value: `${formatDollars(report.summary.appraised0)} to ${formatDollars(report.summary.appraised1)}`,
-      note: pctText(report.summary.appraisedPct),
+      // No percent when a parcel's two values are different kinds (a
+      // market value one year, the taxed value the other).
+      note: report.summary.notComparableParcels > 0 ? "not comparable, see movers" : pctText(report.summary.appraisedPct),
     },
     {
       label: "Parcels compared",
@@ -116,9 +120,16 @@ export async function generateTaxReportPdf(job: TaxReportJob): Promise<void> {
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(6);
       pdf.setTextColor(...GRAY);
-      pdf.text(formatDollars(v.value), bx + barW / 2, top + (h - 8) - bh - 1, {
-        align: "center",
-      });
+      // With many years the slots are narrow: drop the cents, then the
+      // label, rather than let labels overprint each other and run off
+      // the page.
+      let label = formatDollars(v.value);
+      if (pdf.getTextWidth(label) > slot - 0.6) label = `$${Math.round(v.value).toLocaleString("en-US")}`;
+      if (pdf.getTextWidth(label) <= slot - 0.6) {
+        pdf.text(label, bx + barW / 2, top + (h - 8) - bh - 1, {
+          align: "center",
+        });
+      }
       pdf.setTextColor(60, 60, 60);
       pdf.text(String(v.year), bx + barW / 2, top + h - 3, { align: "center" });
     });
@@ -256,6 +267,6 @@ export async function generateTaxReportPdf(job: TaxReportJob): Promise<void> {
     pdf.text(`Page ${p} of ${pages}`, MARGIN, PAGE.h - 7);
   }
 
-  const date = new Date().toISOString().slice(0, 10);
+  const date = todayISO();
   pdf.save(`tax-change-report-${report.y0}-${report.y1}-${date}.pdf`);
 }

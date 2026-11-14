@@ -2,8 +2,8 @@
 // the self-learning that makes the next year automatic. Pure; unit
 // tested in taxMatch.test.ts (including the learn-once loop).
 
-import { sameIdentifier, IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
-import { normalizeOwnerName, ownerSimilarity, CLUSTER_THRESHOLD } from "@/lib/ownerNames";
+import { isPerBillKind, sameIdentifier, IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier, type StoredIdentifier } from "@/lib/taxIdentifiers";
+import { normalizeOwnerName, ownerSimilarity, tokensMatch, CLUSTER_THRESHOLD } from "@/lib/ownerNames";
 import { parcelKey, parcelsEqual } from "@/lib/parcelNumber";
 
 export interface MatchableParcelRef {
@@ -11,6 +11,8 @@ export interface MatchableParcelRef {
   parcel_number: string;
   property_id: string;
   property_name?: string | null;
+  // When given, a statement only matches parcels in its own county.
+  county?: string | null;
 }
 
 export interface LineMatch {
@@ -25,17 +27,38 @@ function kindLabel(k: string): string {
   return IDENTIFIER_KIND_LABELS[k as IdentifierKind] ?? k;
 }
 
+function countyKey(county: string | null | undefined): string {
+  return (county ?? "").trim().toLowerCase().replace(/\s+county$/, "");
+}
+
+// The parcels a statement from this county may match: the county's own,
+// plus any with no county recorded (nothing says they are elsewhere).
+// County numbers repeat across counties (a Colbert PPIN 1066 and a Morgan
+// key number 1066 are different land), so a known county always narrows
+// the field. Every parcel when the statement's county was not read.
+function parcelsInCounty<T extends MatchableParcelRef>(parcels: T[], county: string | null | undefined): T[] {
+  const key = countyKey(county);
+  if (!key) return parcels;
+  return parcels.filter((p) => {
+    const pk = countyKey(p.county);
+    return !pk || pk === key;
+  });
+}
+
 // Kind-aware first (a printed PPIN against stored ppin rows), then
 // kind-agnostic (counties relabel the same number). Personal property
-// lines never match.
+// lines never match. Pass the statement's county to keep the match
+// inside it. Per-bill numbers (receipt, bill, duplicate) never match,
+// printed or stored.
 export function matchLine(
   line: { line_type: "real_property" | "personal_property" | string; identifiers: PrintedIdentifier[] },
   stored: StoredIdentifier[],
-  parcels: MatchableParcelRef[]
+  parcels: MatchableParcelRef[],
+  county?: string | null
 ): LineMatch {
   const none: LineMatch = { parcelId: null, source: "none", evidence: null, candidates: [] };
   if (line.line_type === "personal_property") return none;
-  const parcelById = new Map(parcels.map((p) => [p.id, p]));
+  const parcelById = new Map(parcelsInCounty(parcels, county).map((p) => [p.id, p]));
   const hits = new Map<string, string>();
   const consider = (printed: PrintedIdentifier, s: StoredIdentifier, kindAware: boolean) => {
     const p = parcelById.get(s.parcel_id);
@@ -60,15 +83,18 @@ export function matchLine(
   for (const weak of [false, true]) {
     if (hits.size > 0) break;
     for (const printed of line.identifiers) {
-      if (printed.kind === "other" || isAccount(printed.kind) !== weak) continue;
+      if (printed.kind === "other" || isPerBillKind(printed.kind) || isAccount(printed.kind) !== weak) continue;
       for (const s of stored) {
         if (s.kind === printed.kind && sameIdentifier(printed, s)) consider(printed, s, true);
       }
     }
     if (hits.size > 0) break;
     for (const printed of line.identifiers) {
-      if (isAccount(printed.kind) !== weak) continue;
+      if (isPerBillKind(printed.kind) || isAccount(printed.kind) !== weak) continue;
       for (const s of stored) {
+        // A receipt or bill number saved before per-bill numbers stopped
+        // being learned never answers for another number.
+        if (isPerBillKind(s.kind)) continue;
         if (!weak && isAccount(s.kind)) continue;
         if (sameIdentifier(printed, s)) consider(printed, s, false);
       }
@@ -97,6 +123,29 @@ export interface EntityMatch {
   evidence: string | null;
   // The name actually compared (the C/O target when present).
   comparedName: string | null;
+  // Set when the name was close to an entity but not safely one of them
+  // (two entities tied, or only an initial ties it to one): the entity is
+  // left blank and this sentence asks the user to pick.
+  pick?: string | null;
+}
+
+// Whole words two normalized names share, counting a county typo
+// ("AMBEMARLE") but not an initial standing in for a word.
+function wholeWordMatches(a: string, b: string): number {
+  const at = a ? a.split(" ") : [];
+  const bt = b ? b.split(" ") : [];
+  const [small, large] = at.length <= bt.length ? [at, bt] : [bt, at];
+  const used = new Set<number>();
+  let n = 0;
+  for (const token of small) {
+    if (token.length < 2) continue;
+    const hit = large.findIndex((t, i) => !used.has(i) && t.length > 1 && tokensMatch(token, t));
+    if (hit >= 0) {
+      used.add(hit);
+      n++;
+    }
+  }
+  return n;
 }
 
 // "MARTIN L SYKES C/O ALBEMARLE CORP": the C/O target is the signal, the
@@ -121,8 +170,13 @@ export function matchEntity(
   // longer one as 1 too ("MARTIN VIRGINIA L" inside "VIRGINIA LARKIN
   // MARTIN TRUST..."), which used to tie with the person's own exact
   // alias and win by list order.
-  let best: { e: MatchableEntityRef; score: number; exact: boolean; via: string } | null = null;
+  type Candidate = { e: MatchableEntityRef; score: number; exact: boolean; via: string; byInitial: boolean };
+  const rank = (c: Candidate) => (c.exact ? 4 : 0) + c.score * 2 + (c.byInitial ? 0 : 1);
+  const printedWords = printedNorm ? printedNorm.split(" ").length : 0;
+  // Each entity's own best name or alias first, then the best entity.
+  const perEntity: Candidate[] = [];
   for (const e of entities) {
+    let mine: Candidate | null = null;
     const names = [{ n: e.name, via: "name" }, ...e.aliases.map((a) => ({ n: a, via: `alias "${a}"` }))];
     for (const { n, via } of names) {
       const norm = normalizeOwnerName(n).normalized;
@@ -130,11 +184,38 @@ export function matchEntity(
       const exact = norm === printedNorm;
       const score = exact ? 1 : ownerSimilarity(printedNorm, norm);
       if (score < CLUSTER_THRESHOLD) continue;
-      const better = !best || (exact && !best.exact) || (exact === best.exact && score > best.score);
-      if (better) best = { e, score, exact, via };
+      // "MARTIN S" reaches "SYKES MARTIN" only because S stands in for
+      // SYKES: one shared word plus an initial is not a match to trust.
+      // Two shared whole words (or every word of a one-word name) are.
+      const byInitial = !exact && wholeWordMatches(printedNorm, norm) < Math.min(2, printedWords, norm.split(" ").length);
+      const cand: Candidate = { e, score, exact, via, byInitial };
+      if (!mine || rank(cand) > rank(mine)) mine = cand;
     }
+    if (mine) perEntity.push(mine);
   }
-  if (!best) return { entityId: null, evidence: null, comparedName: target };
+  if (perEntity.length === 0) return { entityId: null, evidence: null, comparedName: target };
+  const top = Math.max(...perEntity.map(rank));
+  const tied = perEntity.filter((c) => rank(c) === top);
+  // Two entities fit equally well: list order must not decide (the choice
+  // would then be learned as an alias). Leave it for the user.
+  if (tied.length > 1) {
+    const names = tied.map((c) => c.e.name);
+    return {
+      entityId: null,
+      evidence: null,
+      comparedName: target,
+      pick: `"${target}" could be ${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}. Pick the entity.`,
+    };
+  }
+  const best = tied[0];
+  if (best.byInitial) {
+    return {
+      entityId: null,
+      evidence: null,
+      comparedName: target,
+      pick: `"${target}" fits ${best.e.name} only by an initial. Pick the entity if that is right.`,
+    };
+  }
   const how = best.exact ? "matches" : "is a close spelling of";
   return {
     entityId: best.e.id,
@@ -155,8 +236,10 @@ export interface LearnedIdentifier {
 
 // On confirming a line's parcel (auto or manual), every identifier
 // printed on it is worth remembering on that parcel. Skips 'other'
-// identifiers with no label (nothing to remember them by) and anything
-// already stored under the same kind and value.
+// identifiers with no label (nothing to remember them by), per-bill
+// numbers (a receipt, bill, or duplicate number names one year's bill,
+// not the parcel), and anything already stored under the same kind and
+// value.
 export function identifiersToLearn(
   parcelId: string,
   printed: PrintedIdentifier[],
@@ -165,6 +248,7 @@ export function identifiersToLearn(
   const out: LearnedIdentifier[] = [];
   for (const p of printed) {
     if (p.kind === "other" && !p.label) continue;
+    if (isPerBillKind(p.kind)) continue;
     const dup = stored.some((s) => s.parcel_id === parcelId && s.kind === p.kind && sameIdentifier(s, p));
     if (dup) continue;
     if (out.some((o) => o.kind === p.kind && o.normalized === p.normalized)) continue;
@@ -243,8 +327,9 @@ export function sameParcelNumber(a: string | null | undefined, b: string | null 
 // hits pointing at different parcels are listed, none chosen.
 export function matchLineViaCounty(
   line: { line_type: "real_property" | "personal_property" | string },
-  hits: CountyLookupHit[],
-  parcels: MatchableParcelRef[]
+  allHits: CountyLookupHit[],
+  allParcels: MatchableParcelRef[],
+  county?: string | null
 ): CountyLineMatch {
   const none: CountyLineMatch = {
     parcelId: null,
@@ -257,6 +342,10 @@ export function matchLineViaCounty(
     serviceId: null,
     serviceLabel: null,
   };
+  // A per-bill number never decides a match, and the answer stays inside
+  // the statement's county (parcel numbers repeat across counties).
+  const hits = allHits.filter((h) => !isPerBillKind(h.kind));
+  const parcels = parcelsInCounty(allParcels, county);
   if (line.line_type === "personal_property" || hits.length === 0) return none;
   const found = new Map<string, { evidence: string; source: "identifier" | "spatial"; hit: CountyLookupHit }>();
   const notInAccount: CountyLineMatch["notInAccount"] = [];

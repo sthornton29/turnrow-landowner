@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { NO_ENTITY } from "@/lib/entities";
 import { formatDollars } from "@/lib/format";
@@ -58,13 +58,18 @@ export default function TaxChangeReport({
   // Entity multi-select, consistent with the income/gov/dashboard
   // filter: chips toggle, empty = all; seeded from the shared stored
   // selection so the "entity view" follows the user here too.
-  const [entityKeys, setEntityKeys] = useState<string[]>(() =>
-    typeof window === "undefined"
-      ? []
-      : loadStoredEntities().filter(
-          (k) => k === NO_ENTITY || entities.some((e) => e.id === k)
-        )
-  );
+  // Starts empty on the server AND in the browser's first render, then
+  // the stored selection is restored after mount: reading localStorage in
+  // the initializer made the first browser render differ from the
+  // server's ("All entities" against the stored entity), a hydration
+  // error on every load of the page.
+  const [entityKeys, setEntityKeys] = useState<string[]>([]);
+  useEffect(() => {
+    const stored = loadStoredEntities().filter((k) => k === NO_ENTITY || entities.some((e) => e.id === k));
+    if (stored.length > 0) setEntityKeys(stored);
+    // Once, on mount: later changes are the user's own clicks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [propertyFilter, setPropertyFilter] = useState("");
   const [countyFilter, setCountyFilter] = useState("");
   const [spikePct, setSpikePct] = useState(15);
@@ -292,6 +297,12 @@ export default function TaxChangeReport({
               ? ` (${pctText(report.summary.appraisedPct)})`
               : ""}
           </p>
+          {report.summary.notComparableParcels > 0 ? (
+            <p className="text-xs text-amber-800">
+              Not comparable: {report.summary.notComparableParcels === 1 ? "1 parcel's bills" : `${report.summary.notComparableParcels} parcels' bills`} printed
+              a market value one year and the taxed value the other.
+            </p>
+          ) : null}
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-3">
           <p className="text-xs text-gray-500">Parcels compared</p>
@@ -365,6 +376,8 @@ export default function TaxChangeReport({
                             <span className="block text-xs text-gray-500">
                               {pctText(m.pctAppraised)}
                             </span>
+                          ) : m.valuesComparable === false ? (
+                            <span className="block text-xs text-amber-800">not the same kind of value</span>
                           ) : null}
                         </>
                       ) : (

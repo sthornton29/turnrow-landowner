@@ -5,6 +5,7 @@
 // lib/protestPacket.ts.
 import { jsPDF } from "jspdf";
 import { loadLockupPng } from "@/components/map/printPdf";
+import { formatAcres, formatDate } from "@/lib/format";
 import type { ProtestPacket } from "@/lib/protestPacket";
 
 const PAGE = { w: 215.9, h: 279.4 }; // Letter portrait, mm
@@ -51,17 +52,21 @@ export async function generateProtestPacketPdf(pk: ProtestPacket): Promise<void>
   };
   const table = (cols: Array<{ label: string; w: number; right?: boolean }>, rows: string[][]) => {
     const row = (cells: string[], bold: boolean) => {
-      ensureRoom(5);
       pdf.setFont("helvetica", bold ? "bold" : "normal");
       pdf.setFontSize(bold ? 7 : 8);
+      // Every cell wraps inside its column and the row is as tall as its
+      // tallest cell (a long name used to lose everything after its
+      // first line).
+      const wrapped = cols.map((c, i) => pdf.splitTextToSize(cells[i] ?? "", c.w - 2) as string[]);
+      const height = Math.max(1, ...wrapped.map((w) => w.length)) * 3.4 + 0.8;
+      ensureRoom(height + 1);
       pdf.setTextColor(...(bold ? GRAY : INK));
       let x = MARGIN;
       cols.forEach((c, i) => {
-        const text = pdf.splitTextToSize(cells[i] ?? "", c.w - 2)[0] ?? "";
-        pdf.text(text, c.right ? x + c.w - 1 : x, y, c.right ? { align: "right" } : undefined);
+        pdf.text(wrapped[i], c.right ? x + c.w - 1 : x, y, c.right ? { align: "right" } : undefined);
         x += c.w;
       });
-      y += 4.2;
+      y += height;
       if (bold) {
         pdf.setDrawColor(210, 210, 210);
         pdf.line(MARGIN, y - 2.8, MARGIN + CONTENT_W, y - 2.8);
@@ -80,26 +85,55 @@ export async function generateProtestPacketPdf(pk: ProtestPacket): Promise<void>
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);
   pdf.setTextColor(...GRAY);
-  pdf.text(`Prepared ${pk.preparedOn}`, PAGE.w - MARGIN, y, { align: "right" });
+  pdf.text(`Prepared ${formatDate(pk.preparedOn)}`, PAGE.w - MARGIN, y, { align: "right" });
   y += 6;
   pdf.setFontSize(10);
   pdf.setTextColor(...INK);
-  pdf.text(`Parcel ${pk.parcelNumber} · ${pk.county} County${pk.propertyName ? ` · ${pk.propertyName}` : ""} · ${pk.owner}`, MARGIN, y);
-  y += 5;
-  if (pk.deadline) {
-    pdf.setFillColor(254, 226, 226);
-    pdf.roundedRect(MARGIN, y, CONTENT_W, 9, 1.5, 1.5, "F");
+  // Wrapped: a long property and owner name used to run off the page.
+  const titleLines = pdf.splitTextToSize(
+    `Parcel ${pk.parcelNumber} · ${pk.county} County${pk.propertyName ? ` · ${pk.propertyName}` : ""} · ${pk.owner}`,
+    CONTENT_W
+  ) as string[];
+  pdf.text(titleLines, MARGIN, y);
+  y += (titleLines.length - 1) * 4.2 + 5;
+  // What this packet is, on page 1 where it is read (not only the footer).
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(8.5);
+  const noteLines = pdf.splitTextToSize(pk.disclaimer, CONTENT_W) as string[];
+  pdf.text(noteLines, MARGIN, y);
+  y += (noteLines.length - 1) * 3.6 + 3;
+  // A filled box whose height follows its wrapped text.
+  const box = (text: string, fill: [number, number, number], ink: [number, number, number]) => {
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(9.5);
-    pdf.setTextColor(153, 27, 27);
-    pdf.text(`File by ${pk.deadline.date} (30 days from the valuation notice dated ${pk.deadline.noticeDate}).`, MARGIN + 3, y + 6);
-    y += 13;
+    const lines = pdf.splitTextToSize(text, CONTENT_W - 6) as string[];
+    const height = lines.length * 4 + 5;
+    pdf.setFillColor(...fill);
+    pdf.roundedRect(MARGIN, y, CONTENT_W, height, 1.5, 1.5, "F");
+    pdf.setTextColor(...ink);
+    pdf.text(lines, MARGIN + 3, y + 6);
+    y += height + 4;
+  };
+  const useNotice = "Use the deadline printed on your notice; confirm with the county Board of Equalization.";
+  if (pk.deadline) {
+    box(
+      `File by ${formatDate(pk.deadline.date)} (30 days from the valuation notice dated ${formatDate(pk.deadline.noticeDate)}). ${useNotice}`,
+      [254, 226, 226],
+      [153, 27, 27]
+    );
+  } else if (pk.windowClosed) {
+    box(
+      `The window for the notice dated ${formatDate(pk.windowClosed.noticeDate)} closed on ${formatDate(pk.windowClosed.closedOn)}. Ask the county Board of Equalization whether anything can still be filed.`,
+      [243, 244, 246],
+      INK
+    );
   } else {
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(8.5);
     pdf.setTextColor(...GRAY);
-    pdf.text("A protest is due within 30 days of the county's valuation notice.", MARGIN, y + 2);
-    y += 7;
+    const lines = pdf.splitTextToSize(`A protest is usually due within 30 days of the county's valuation notice. ${useNotice}`, CONTENT_W) as string[];
+    pdf.text(lines, MARGIN, y + 2);
+    y += (lines.length - 1) * 3.6 + 7;
   }
 
   // ---- Grounds summary ----
@@ -110,7 +144,11 @@ export async function generateProtestPacketPdf(pk: ProtestPacket): Promise<void>
     for (const g of pk.grounds) {
       para(
         `${g.heading}${g.dollars ? ` (about ${money(Math.round(g.dollars / 10) * 10)} a year)` : ""}${
-          g.forWhom === "assessor" ? " · raise with the revenue commissioner" : " · for the Board of Equalization"
+          g.forWhom === "assessor"
+            ? " · raise with the revenue commissioner"
+            : g.forWhom === "background"
+              ? " · background for you, not in the letter"
+              : " · for the Board of Equalization"
         }`,
         9,
         0,
@@ -123,22 +161,31 @@ export async function generateProtestPacketPdf(pk: ProtestPacket): Promise<void>
 
   // ---- The county's record ----
   heading("The parcel, from the county record and the bills");
+  if (pk.recordNote) para(pk.recordNote, 8.5, 0, true);
   const half = Math.ceil(pk.facts.length / 2);
   const colW = CONTENT_W / 2;
+  // Keep the two columns together on one page.
+  ensureRoom(half * 4.4 + 6);
   const startY = y;
   let maxY = y;
   [pk.facts.slice(0, half), pk.facts.slice(half)].forEach((group, gi) => {
     let yy = startY;
     for (const [k, v] of group) {
+      // The label and the value each wrap inside their half of the
+      // column; the row is as tall as the taller one (an owner name such
+      // as "MARTIN VIRGINIA LARKIN REVOCABLE TRUST" used to be cut to its
+      // first line).
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(7.5);
       pdf.setTextColor(...GRAY);
-      pdf.text(k, MARGIN + gi * colW, yy);
+      const label = pdf.splitTextToSize(k, colW * 0.48) as string[];
+      pdf.text(label, MARGIN + gi * colW, yy);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(8);
       pdf.setTextColor(...INK);
-      pdf.text(pdf.splitTextToSize(v, colW * 0.48)[0] ?? "", MARGIN + gi * colW + colW * 0.5, yy);
-      yy += 4.4;
+      const value = pdf.splitTextToSize(v, colW * 0.48) as string[];
+      pdf.text(value, MARGIN + gi * colW + colW * 0.5, yy);
+      yy += Math.max(label.length, value.length) * 3.4 + 1;
     }
     maxY = Math.max(maxY, yy);
   });
@@ -175,7 +222,7 @@ export async function generateProtestPacketPdf(pk: ProtestPacket): Promise<void>
         { label: "Land value / ac", w: 30, right: true },
         { label: "Current use", w: 45 },
       ],
-      pk.comparables.map((c) => [c.parcelNumber, c.propertyName, c.acres ? c.acres.toFixed(1) : "-", money(c.landPerAcre), c.status])
+      pk.comparables.map((c) => [c.parcelNumber, c.propertyName, c.acres ? formatAcres(c.acres) : "-", money(c.landPerAcre), c.status])
     );
   }
 

@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatDollars, formatNumber } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDate, formatDollars, formatNumber, plural, todayISO } from "@/lib/format";
 import {
   TAX_STATUS_CLASSES,
   TAX_STATUS_LABELS,
+  allocationBasis,
   taxStatus,
   type TaxPaymentRow,
   type TaxStatementLineRow,
@@ -68,14 +70,21 @@ export default function TaxStatusClient({
   const [statements, setStatements] = useState(initialStatements);
   const [lines, setLines] = useState(initialLines);
   const [payments, setPayments] = useState(initialPayments);
-  const currentYear = new Date().getFullYear();
+  // Today in Central time, the same on the server and in the browser.
+  const todayIso = todayISO();
+  const currentYear = Number(todayIso.slice(0, 4));
   const years = useMemo(() => {
     const set = new Set(statements.map((s) => s.tax_year));
     set.add(currentYear);
     return Array.from(set).sort((a, b) => b - a);
   }, [statements, currentYear]);
   const urlYear = Number(searchParams.get("year"));
-  const [year, setYear] = useState(urlYear > 1900 ? urlYear : currentYear);
+  // Opens on the latest tax year that has statements, not the calendar
+  // year: from January to September the calendar year has no bills yet,
+  // and the page read "Total due $0.00" while last year's unpaid bills
+  // (already delinquent) were out of view.
+  const latestStatementYear = initialStatements.reduce((max, s) => Math.max(max, s.tax_year), 0);
+  const [year, setYear] = useState(urlYear > 1900 ? urlYear : latestStatementYear || currentYear);
   useEffect(() => {
     if (urlYear > 1900) setYear(urlYear);
   }, [urlYear]);
@@ -92,9 +101,15 @@ export default function TaxStatusClient({
   }, []);
   const [recordingFor, setRecordingFor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
+  const [batchDate, setBatchDate] = useState(todayIso);
   const [batchMethod, setBatchMethod] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A payment being saved: its button is off until the save answers, so
+  // a double click cannot record it twice.
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null); // shown in the payment form
+  const [batchError, setBatchError] = useState<string | null>(null); // shown in the batch bar
+  const [deleting, setDeleting] = useState<string | null>(null); // the statement being deleted
   const [resolveParcelId, setResolveParcelId] = useState<Record<string, string>>({});
   const [editingEntity, setEditingEntity] = useState<string | null>(null);
   // The live county lookup tier (migration 0042) for the Unmatched
@@ -112,6 +127,12 @@ export default function TaxStatusClient({
       supabase.from("tax_statement_lines").select("*").order("line_no"),
       supabase.from("tax_payments").select("*").order("paid_date"),
     ]);
+    // A failed refresh keeps what is on screen (it used to blank the page
+    // to "no statements") and says the page may be out of date.
+    if (s.error || l.error || p.error) {
+      setError("Could not load the latest tax records, so what is shown may be out of date. Reload the page to try again.");
+      return;
+    }
     setStatements((s.data as TaxStatementRow[]) ?? []);
     setLines((l.data as TaxStatementLineRow[]) ?? []);
     setPayments((p.data as TaxPaymentRow[]) ?? []);
@@ -196,7 +217,7 @@ export default function TaxStatusClient({
       g.lines.push(l);
       groups.set(key, g);
     }
-    const refs = parcels.map((p) => ({ id: p.id, parcel_number: p.parcel_number, property_id: p.property_id, property_name: propertyName.get(p.property_id) ?? null }));
+    const refs = parcels.map((p) => ({ id: p.id, parcel_number: p.parcel_number, property_id: p.property_id, property_name: propertyName.get(p.property_id) ?? null, county: p.county }));
     for (const g of groups.values()) {
       countyLookup({ county: g.county, state: g.state, lines: g.lines.map((l) => ({ key: l.id, identifiers: (l.identifiers ?? []) as PrintedIdentifier[] })) }).then((res) => {
         if (res.error || res.reason === "no_mapping") {
@@ -212,7 +233,7 @@ export default function TaxStatusClient({
         const next: Record<string, CountyLineMatch> = {};
         const pre: Record<string, string> = {};
         for (const l of g.lines) {
-          const m = matchLineViaCounty({ line_type: l.line_type }, byKey.get(l.id) ?? [], refs);
+          const m = matchLineViaCounty({ line_type: l.line_type }, byKey.get(l.id) ?? [], refs, g.county);
           if (m.parcelId || m.notInAccount.length > 0 || m.candidates.length > 0) next[l.id] = m;
           if (m.parcelId) pre[l.id] = m.parcelId;
         }
@@ -225,9 +246,16 @@ export default function TaxStatusClient({
 
   const totalDue = yearStatements.reduce((s, x) => s + x.amount_due, 0);
   const totalPaid = yearStatements.reduce((s, x) => s + (paidByStatement.get(x.id) ?? 0), 0);
+  // Outstanding is each statement's own balance, added up. Total due
+  // minus total paid would let an overpayment on one statement hide an
+  // unpaid balance on another.
+  const totalOutstanding = yearStatements.reduce((s, x) => s + Math.max(x.amount_due - (paidByStatement.get(x.id) ?? 0), 0), 0);
 
   // Per-entity rollup: lines give coverage and due; payments spread by
-  // each line's share of its statement's lines.
+  // each line's share of its WHOLE statement (allocationBasis), not of
+  // the lines this viewer can see, so a member who cannot see every line
+  // gets the same paid figures as an admin. Outstanding is added up line
+  // by line for the same reason as the total above.
   const entityRollup = useMemo(() => {
     if (entities.length === 0 || entityFilter) return [];
     const keys = [...entities.map((e) => e.id), NO_ENTITY];
@@ -238,12 +266,16 @@ export default function TaxStatusClient({
         if (entityParcels.length === 0 && entityLines.length === 0) return null;
         let due = 0;
         let paid = 0;
+        let outstanding = 0;
         for (const l of entityLines) {
           due += l.tax_due;
           const siblings = linesByStatement.get(l.tax_statement_id) ?? [];
           const lineTotal = siblings.reduce((a, x) => a + x.tax_due, 0);
           const stmtPaid = paidByStatement.get(l.tax_statement_id) ?? 0;
-          paid += lineTotal > 0 ? (stmtPaid * l.tax_due) / lineTotal : stmtPaid / Math.max(siblings.length, 1);
+          const basis = allocationBasis(statementById.get(l.tax_statement_id), lineTotal);
+          const linePaid = lineTotal > 0 ? (stmtPaid * l.tax_due) / basis : stmtPaid / Math.max(siblings.length, 1);
+          paid += linePaid;
+          outstanding += Math.max(l.tax_due - linePaid, 0);
         }
         return {
           key,
@@ -252,27 +284,58 @@ export default function TaxStatusClient({
           covered: new Set(entityLines.filter((l) => l.line_type === "real_property" && l.parcel_id).map((l) => l.parcel_id)).size,
           due,
           paid,
+          outstanding,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entities, entityFilter, parcels, yearLines, paidByStatement, linesByStatement, statements]);
 
-  const today = new Date();
+  // Midnight of today's Central date: the delinquent date itself counts
+  // as delinquent, and the server and the browser agree on which day it is.
+  const today = new Date(`${todayIso}T00:00:00`);
   const statusOf = (s: TaxStatementRow) => taxStatus(s, paidByStatement.get(s.id) ?? 0, today);
+  // Statements from ANY tax year that still have a balance and are past
+  // their delinquent date: listed above the year view, so last year's
+  // late bill is never out of sight behind the year picker.
+  const pastDue = statements
+    .filter((s) => statusOf(s) === "delinquent")
+    .sort((a, b) => a.tax_year - b.tax_year || (a.county ?? "").localeCompare(b.county ?? ""));
 
   async function recordPayment(statement: TaxStatementRow, formData: FormData) {
-    setError(null);
+    if (savingPayment) return;
+    setPaymentError(null);
+    const amount = Number(formData.get("amount") ?? 0);
+    const paidDate = String(formData.get("paid_date") ?? "");
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError("Enter the amount paid, more than zero.");
+      return;
+    }
+    if (!paidDate) {
+      setPaymentError("Enter the date it was paid.");
+      return;
+    }
+    const alreadyPaid = paidByStatement.get(statement.id) ?? 0;
+    if (
+      alreadyPaid + amount > statement.amount_due + 0.005 &&
+      !window.confirm(
+        `This would bring the total paid to ${formatDollars(alreadyPaid + amount)}, more than the ${formatDollars(statement.amount_due)} on the statement. Record it anyway?`
+      )
+    ) {
+      return;
+    }
+    setSavingPayment(true);
     const { error: err } = await supabase.from("tax_payments").insert({
       organization_id: orgId,
       tax_statement_id: statement.id,
-      paid_date: String(formData.get("paid_date") ?? ""),
-      amount: Number(formData.get("amount") ?? 0),
+      paid_date: paidDate,
+      amount,
       method: String(formData.get("method") ?? "").trim() || null,
       memo: String(formData.get("memo") ?? "").trim() || null,
     });
+    setSavingPayment(false);
     if (err) {
-      setError("Could not record the payment: " + err.message);
+      setPaymentError(friendlyDbError(err, "Could not record the payment. Please try again."));
       return;
     }
     setRecordingFor(null);
@@ -280,7 +343,8 @@ export default function TaxStatusClient({
   }
 
   async function recordBatch() {
-    setError(null);
+    if (savingPayment) return;
+    setBatchError(null);
     const rows = Array.from(selected)
       .map((id) => yearStatements.find((s) => s.id === id))
       .filter((s): s is TaxStatementRow => !!s)
@@ -294,12 +358,18 @@ export default function TaxStatusClient({
       }))
       .filter((r) => r.amount > 0);
     if (rows.length === 0) {
-      setError("Nothing selected with a balance remaining.");
+      setBatchError("Nothing selected with a balance remaining.");
       return;
     }
+    if (!batchDate) {
+      setBatchError("Enter the date they were paid.");
+      return;
+    }
+    setSavingPayment(true);
     const { error: err } = await supabase.from("tax_payments").insert(rows);
+    setSavingPayment(false);
     if (err) {
-      setError("Could not record the payments: " + err.message);
+      setBatchError(friendlyDbError(err, "Could not record the payments. Please try again."));
       return;
     }
     setSelected(new Set());
@@ -334,7 +404,7 @@ export default function TaxStatusClient({
       setError(
         err.includes("duplicate") || err.includes("23505")
           ? `That parcel already has a ${line.tax_year} statement line.`
-          : "Could not match: " + err
+          : friendlyDbError(err, "Could not match that line. Please try again.")
       );
       return;
     }
@@ -347,15 +417,22 @@ export default function TaxStatusClient({
       .from("tax_statements")
       .update({ entity_id: entityId || null, entity_evidence: entityId ? "Set by hand" : null })
       .eq("id", statement.id);
-    if (err) setError("Could not change the entity: " + err.message);
+    if (err) {
+      // The picker stays open with the old entity still saved.
+      setError(friendlyDbError(err, "Could not change the entity. Please try again."));
+      return;
+    }
     setEditingEntity(null);
     reload();
   }
 
   // Deletes the statement, its lines and payments (cascade), and the
   // documents attached to it (rows and files). A shared multi-statement
-  // source PDF stays in Documents.
+  // source PDF stays in Documents. The statement goes FIRST: if that
+  // fails nothing else is touched, so a statement is never left on file
+  // with its bill already deleted.
   async function deleteStatement(statement: TaxStatementRow) {
+    if (deleting) return;
     if (
       !window.confirm(
         "Delete this tax statement with its lines, recorded payments, and the files attached to it? This cannot be undone."
@@ -363,33 +440,62 @@ export default function TaxStatusClient({
     ) {
       return;
     }
-    const { data: docs } = await supabase
+    setError(null);
+    setDeleting(statement.id);
+    // Which files belong to it has to be read before it is gone.
+    const { data: docs, error: docsErr } = await supabase
       .from("documents")
       .select("id, storage_path")
       .eq("entity_type", "tax_statement")
       .eq("entity_id", statement.id);
+    if (docsErr) {
+      setDeleting(null);
+      setError(friendlyDbError(docsErr, "Could not delete the statement. Nothing was changed; please try again."));
+      return;
+    }
+    const { error: delErr } = await supabase.from("tax_statements").delete().eq("id", statement.id);
+    if (delErr) {
+      setDeleting(null);
+      setError(friendlyDbError(delErr, "Could not delete the statement. Nothing was changed; please try again."));
+      return;
+    }
     if (docs && docs.length > 0) {
       // A multi-statement source PDF shares ONE storage object across the
       // sibling statements' documents rows; only remove paths no other
       // row (any entity) still references.
+      const ids = docs.map((d) => d.id as string);
       const paths = Array.from(new Set(docs.map((d) => d.storage_path as string)));
-      const { data: others } = await supabase
+      const { data: others, error: othersErr } = await supabase
         .from("documents")
         .select("storage_path")
         .in("storage_path", paths)
-        .not("id", "in", `(${docs.map((d) => d.id as string).join(",")})`);
-      const stillReferenced = new Set((others ?? []).map((o) => o.storage_path as string));
-      const removable = paths.filter((p) => !stillReferenced.has(p));
-      if (removable.length > 0) await supabase.storage.from("documents").remove(removable);
-      await supabase.from("documents").delete().in("id", docs.map((d) => d.id as string));
+        .not("id", "in", `(${ids.join(",")})`);
+      const { error: rowsErr } = othersErr ? { error: othersErr } : await supabase.from("documents").delete().in("id", ids);
+      if (rowsErr) {
+        setError("The statement was deleted, but its file could not be removed and is still in Documents. You can delete it there.");
+      } else {
+        // The stored file goes last, once nothing points at it. If this
+        // step fails the leftover is out of sight and harmless.
+        const stillReferenced = new Set((others ?? []).map((o) => o.storage_path as string));
+        const removable = paths.filter((p) => !stillReferenced.has(p));
+        if (removable.length > 0) {
+          const { error: fileErr } = await supabase.storage.from("documents").remove(removable);
+          if (fileErr) console.warn("tax statement file not removed from storage", removable);
+        }
+      }
     }
-    await supabase.from("tax_statements").delete().eq("id", statement.id);
+    setDeleting(null);
     reload();
   }
 
   async function deleteTaxPayment(id: string) {
     if (!window.confirm("Delete this recorded payment?")) return;
-    await supabase.from("tax_payments").delete().eq("id", id);
+    setError(null);
+    const { error: err } = await supabase.from("tax_payments").delete().eq("id", id);
+    if (err) {
+      setError(friendlyDbError(err, "Could not delete the payment. Please try again."));
+      return;
+    }
     reload();
   }
 
@@ -405,17 +511,30 @@ export default function TaxStatusClient({
   function paymentForm(statement: TaxStatementRow) {
     const remaining = Math.max(statement.amount_due - (paidByStatement.get(statement.id) ?? 0), 0);
     return (
-      <form action={(fd) => recordPayment(statement, fd)} className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 p-2">
-        <input name="paid_date" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} className={inputClass} />
-        <input name="amount" type="number" step="0.01" required defaultValue={remaining || ""} placeholder="Amount" className={`${inputClass} w-28`} />
+      // onSubmit, not a form action: a form action clears the fields when
+      // it finishes, and what was typed has to stay if the save fails.
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          recordPayment(statement, new FormData(e.currentTarget));
+        }}
+        className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 p-2"
+      >
+        <input name="paid_date" type="date" required defaultValue={todayIso} className={inputClass} />
+        <input name="amount" type="number" step="0.01" min="0.01" required defaultValue={remaining || ""} placeholder="Amount" className={`${inputClass} w-28`} />
         <input name="method" placeholder="Check # / method" className={`${inputClass} w-36`} />
         <input name="memo" placeholder="Memo" className={`${inputClass} min-w-20 flex-1`} />
-        <button type="submit" className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600">
-          Save
+        <button
+          type="submit"
+          disabled={savingPayment}
+          className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600 disabled:opacity-50"
+        >
+          {savingPayment ? "Saving..." : "Save"}
         </button>
         <button type="button" onClick={() => setRecordingFor(null)} className="text-sm text-gray-500 hover:underline">
           Cancel
         </button>
+        {paymentError ? <p className="basis-full text-sm text-red-600">{paymentError}</p> : null}
       </form>
     );
   }
@@ -559,7 +678,10 @@ export default function TaxStatusClient({
             Every parcel should be on a statement each year; a missing one is how a parcel quietly goes delinquent.
           </p>
         </div>
-        <span className="ml-auto flex items-center gap-2">
+        {/* On a phone the controls take their own lines and wrap (they
+            used to push the page 125px wider than the screen); from the
+            sm breakpoint up this is the same single row as before. */}
+        <span className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:flex-nowrap">
           <Link
             href={`/taxes/report?year=${year}${entityFilter ? `&entity=${entityFilter}` : ""}`}
             className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
@@ -567,7 +689,7 @@ export default function TaxStatusClient({
             Tax report
           </Link>
           {entities.length > 0 ? (
-            <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className={inputClass}>
+            <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className={`${inputClass} max-w-full`}>
               <option value="">All entities</option>
               {entities.map((entity) => (
                 <option key={entity.id} value={entity.id}>
@@ -592,6 +714,53 @@ export default function TaxStatusClient({
         </span>
       </div>
 
+      {/* Past due, any year */}
+      {pastDue.length > 0 ? (
+        <section className="rounded-xl border border-red-200 bg-red-50 p-3">
+          <h2 className="text-sm font-semibold text-red-800">
+            Past due: {plural(pastDue.length, "statement")} still {pastDue.length === 1 ? "has" : "have"} a balance after the delinquent date
+          </h2>
+          <ul className="mt-1 space-y-1 text-sm text-red-900">
+            {pastDue.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-baseline gap-x-2">
+                <span>
+                  {s.tax_year} · {s.county ? `${s.county} · ` : ""}
+                  {statementLabel(s)}: {formatDollars(Math.max(s.amount_due - (paidByStatement.get(s.id) ?? 0), 0))} unpaid, delinquent since{" "}
+                  {formatDate(s.delinquent_date)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Its year, with the statement open; the entity
+                    // filter is cleared so it cannot be hidden.
+                    setEntityFilter("");
+                    setYear(s.tax_year);
+                    setExpanded(s.id);
+                    window.setTimeout(() => document.getElementById(`statement-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+                  }}
+                  className="font-medium text-red-800 underline hover:text-red-950"
+                >
+                  Show in tax year {s.tax_year}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-red-800">If one of these was paid, record the payment on its statement.</p>
+        </section>
+      ) : null}
+
+      {/* The page opens on the latest year WITH statements; once this
+          year's bills are out, say so if none has been uploaded, so that
+          default never hides a whole missing year. */}
+      {year !== currentYear && todayIso >= `${currentYear}-10-01` && !statements.some((s) => s.tax_year === currentYear) ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          No {currentYear} statements are on file yet. Counties usually mail {currentYear} bills by Oct 1.{" "}
+          <button type="button" onClick={() => setYear(currentYear)} className="font-medium underline">
+            Show tax year {currentYear}
+          </button>
+        </p>
+      ) : null}
+
       {/* Summary tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
@@ -599,7 +768,7 @@ export default function TaxStatusClient({
           { label: "Parcels on a statement", value: `${formatNumber(coveredParcelIds.size)} of ${formatNumber(visibleParcels.length)}` },
           { label: "Total due", value: formatDollars(totalDue) },
           { label: "Total paid", value: formatDollars(totalPaid) },
-          { label: "Outstanding", value: formatDollars(Math.max(totalDue - totalPaid, 0)) },
+          { label: "Outstanding", value: formatDollars(totalOutstanding) },
         ].map((s) => (
           <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-3">
             <p className="text-lg font-semibold tabular-nums text-gray-900">{s.value}</p>
@@ -664,7 +833,7 @@ export default function TaxStatusClient({
                     <td className="px-4 py-2 text-right tabular-nums">{formatDollars(r.due)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{formatDollars(r.paid)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">
-                      <span className={r.due - r.paid > 0.005 ? "font-medium text-red-700" : ""}>{formatDollars(Math.max(r.due - r.paid, 0))}</span>
+                      <span className={r.outstanding > 0.005 ? "font-medium text-red-700" : ""}>{formatDollars(r.outstanding)}</span>
                     </td>
                   </tr>
                 ))}
@@ -755,12 +924,17 @@ export default function TaxStatusClient({
           <span className="text-sm font-medium text-pine-900">{selected.size} selected</span>
           <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} className={inputClass} />
           <input value={batchMethod} onChange={(e) => setBatchMethod(e.target.value)} placeholder="Check # / method" className={`${inputClass} w-40`} />
-          <button onClick={recordBatch} className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600">
-            Record payment for selected
+          <button
+            onClick={recordBatch}
+            disabled={savingPayment}
+            className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-50"
+          >
+            {savingPayment ? "Saving..." : "Record payment for selected"}
           </button>
           <button onClick={() => setSelected(new Set())} className="text-sm text-gray-600 hover:underline">
             Clear
           </button>
+          {batchError ? <p className="basis-full text-sm text-red-600">{batchError}</p> : null}
         </div>
       ) : null}
 
@@ -791,6 +965,7 @@ export default function TaxStatusClient({
               return (
                 <li
                   key={s.id}
+                  id={`statement-${s.id}`}
                   ref={s.id === urlStatement ? statementScrollRef : undefined}
                   className="rounded-xl border border-gray-200 bg-white p-3"
                 >
@@ -838,8 +1013,22 @@ export default function TaxStatusClient({
                         {TAX_STATUS_LABELS[status]}
                         {status === "partial" ? ` (${formatDollars(paid)})` : ""}
                       </span>
+                      {paid > s.amount_due + 0.005 ? (
+                        <span
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900"
+                          title="More has been recorded as paid than the statement total. Check the payments under Details."
+                        >
+                          Overpaid by {formatDollars(paid - s.amount_due)}
+                        </span>
+                      ) : null}
                       {status !== "paid" ? (
-                        <button onClick={() => setRecordingFor(recordingFor === s.id ? null : s.id)} className="text-sm font-medium text-kelly-700 hover:underline">
+                        <button
+                          onClick={() => {
+                            setPaymentError(null);
+                            setRecordingFor(recordingFor === s.id ? null : s.id);
+                          }}
+                          className="text-sm font-medium text-kelly-700 hover:underline"
+                        >
                           Record payment
                         </button>
                       ) : null}
@@ -929,8 +1118,12 @@ export default function TaxStatusClient({
                         ) : null}
                         <EntityDocuments orgId={orgId} entityType="tax_statement" entityId={s.id} />
                       </div>
-                      <button onClick={() => deleteStatement(s)} className="text-xs font-medium text-red-600 hover:underline">
-                        Delete statement
+                      <button
+                        onClick={() => deleteStatement(s)}
+                        disabled={deleting !== null}
+                        className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                      >
+                        {deleting === s.id ? "Deleting..." : "Delete statement"}
                       </button>
                     </div>
                   ) : null}

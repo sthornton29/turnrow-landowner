@@ -63,6 +63,17 @@ export function readLineValues(raw: Record<string, unknown>): LineValues {
   };
 }
 
+// Only the values a read actually found. Reading a bill again can miss a
+// value an earlier read saved, so blanks are never written over it.
+export function valuesFound(v: LineValues): Partial<LineValues> {
+  const out: Partial<Record<keyof LineValues, number | string>> = {};
+  for (const k of LINE_VALUE_KEYS) {
+    const value = v[k];
+    if (value !== null) out[k] = value;
+  }
+  return out as Partial<LineValues>;
+}
+
 export function hasAnyValue(v: LineValues): boolean {
   return LINE_VALUE_KEYS.some((k) => v[k] !== null);
 }

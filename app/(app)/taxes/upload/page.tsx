@@ -1,4 +1,4 @@
-import { requireOrg } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import TaxUploadClient from "./TaxUploadClient";
 
 export const metadata = { title: "Upload tax statements" };
@@ -7,8 +7,10 @@ export const metadata = { title: "Upload tax statements" };
 // is saved: parcels with their property names, entities with the
 // spellings counties have used for them, the account registry, and the
 // identifier store (migration 0030). Session client; RLS scopes it.
+// Admins only: creating statements is admin work (row level security
+// refuses it for a 'user'), so anyone else goes back to the Taxes page.
 export default async function TaxUploadPage() {
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile } = await requireAdmin("/taxes");
 
   const [parcels, properties, entities, aliases, accounts, identifiers, defaults] = await Promise.all([
     supabase.from("parcels").select("id, parcel_number, county, property_id").order("parcel_number"),

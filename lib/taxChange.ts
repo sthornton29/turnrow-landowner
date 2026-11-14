@@ -14,11 +14,63 @@ import type { TaxStatementLineRow } from "@/lib/tax";
 //   index-decomposition practice, and cents are folded so the two
 //   parts always sum to the rounded delta exactly.
 
+// What the bill's printed "appraised" value is: the value the tax was
+// figured on ("taxed"), or a market value printed beside a tax figured on
+// a lower current use value ("market"). The extraction read whichever the
+// bill printed, and counties change what they print from year to year
+// (lib/taxReport.ts, "Data honesty"), so two years are only compared when
+// they are the same kind.
+export type PrintedValueKind = "taxed" | "market" | "unknown";
+
 export interface ParcelYearFacts {
   appraised: number | null;
   assessed: number | null;
   taxDue: number;
   exemptions: string | null;
+  valueKind: PrintedValueKind;
+}
+
+const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, 0.01 * Math.abs(b));
+
+// The kind of a line's printed value, from the bill itself: its market
+// and current use columns when both were read, else its assessed value
+// (Alabama assesses at 10% to 30% of the value the tax is figured on, so
+// an assessed value far below 10% of the printed value means the printed
+// value is market value). "unknown" when the line carries neither.
+export function printedValueKind(l: {
+  appraised_value: number | null;
+  assessed_value: number | null;
+  market_value?: number | null;
+  current_use_value?: number | null;
+}): PrintedValueKind {
+  const v = l.appraised_value;
+  if (v == null || v <= 0) return "unknown";
+  const market = l.market_value ?? null;
+  const currentUse = l.current_use_value ?? null;
+  if (market != null && currentUse != null && currentUse > 0 && market > currentUse * 1.05) {
+    if (near(v, market)) return "market";
+    if (near(v, currentUse)) return "taxed";
+  }
+  if (l.assessed_value != null && l.assessed_value > 0) {
+    const ratio = l.assessed_value / v;
+    if (ratio < 0.085) return "market";
+    if (ratio <= 0.35) return "taxed";
+  }
+  return "unknown";
+}
+
+// Can two years' printed values be compared? Yes when both are known to
+// be the same kind, no when they are known to differ. When either kind
+// cannot be told, the effective rate decides: a class change doubles it
+// and a millage vote moves it a few percent, but tax over value changing
+// by more than 2.5 times means the bill switched what it prints.
+function comparableValues(f0: ParcelYearFacts, f1: ParcelYearFacts): boolean | null {
+  if (f0.appraised == null || f1.appraised == null || f0.appraised <= 0 || f1.appraised <= 0) return null;
+  if (f0.valueKind !== "unknown" && f1.valueKind !== "unknown") return f0.valueKind === f1.valueKind;
+  const r0 = f0.taxDue / f0.appraised;
+  const r1 = f1.taxDue / f1.appraised;
+  if (r0 <= 0 || r1 <= 0) return true;
+  return Math.max(r0, r1) / Math.min(r0, r1) <= 2.5;
 }
 
 export type ParcelFlagKind =
@@ -49,6 +101,9 @@ export interface ParcelChange {
   valuationEffect: number | null;
   rateEffect: number | null;
   sentence: string | null; // the plain-language decomposition
+  // False when the two years printed different kinds of value: nothing is
+  // decomposed and no value flags are raised. Null when a value is missing.
+  valuesComparable: boolean | null;
   ratio0: number | null; // assessed / appraised, per year
   ratio1: number | null;
   flags: ParcelFlag[];
@@ -65,7 +120,10 @@ export interface TaxChangeReport {
     taxPct: number | null;
     appraised0: number;
     appraised1: number;
+    // Null when any compared parcel printed a different kind of value in
+    // the two years: the totals then mix market and taxed values.
     appraisedPct: number | null;
+    notComparableParcels: number;
     comparedParcels: number;
     flaggedParcels: number;
   };
@@ -121,7 +179,17 @@ export function decompositionSentence(
     );
   }
   if (parts.length === 0) return "No change.";
+  // The two parts cancel: say so rather than "Up $0.00".
+  if (Math.abs(deltaTax) < 0.005) return `No change in tax: ${parts.join(", offset by ")}.`;
   return `${dir} ${formatDollars(Math.abs(deltaTax))}: ${parts.join(", ")}.`;
+}
+
+// What is said in place of the decomposition when the two years' printed
+// values are not the same kind.
+export function notComparableSentence(deltaTax: number, y0: number, y1: number): string {
+  const tax =
+    Math.abs(deltaTax) < 0.005 ? "Tax unchanged" : `Tax ${deltaTax > 0 ? "up" : "down"} ${formatDollars(Math.abs(deltaTax))}`;
+  return `${tax}. The values printed for ${y0} and ${y1} are not comparable (one looks like a market value, the other the value the tax was figured on), so the change is not split between value and rates.`;
 }
 
 export function buildTaxChangeReport(
@@ -168,6 +236,7 @@ export function buildTaxChangeReport(
       assessed: l.assessed_value,
       taxDue: l.tax_due,
       exemptions: l.exemptions,
+      valueKind: printedValueKind(l),
     });
   }
 
@@ -206,6 +275,7 @@ export function buildTaxChangeReport(
       valuationEffect: null,
       rateEffect: null,
       sentence: null,
+      valuesComparable: null,
       ratio0: null,
       ratio1: null,
       flags: [],
@@ -238,14 +308,22 @@ export function buildTaxChangeReport(
 
     if (f0 && f1) {
       change.deltaTax = round2(f1.taxDue - f0.taxDue);
-      if (f0.appraised != null && f1.appraised != null) {
+      // A market value one year and the taxed value the next is a change
+      // in what the county printed, not in the land: the value change,
+      // the split, the spike flag, and the ratio flag would all be
+      // artifacts ("Appraised value up 704.3%"), so none is produced.
+      change.valuesComparable = comparableValues(f0, f1);
+      const comparable = change.valuesComparable !== false;
+      if (f0.appraised != null && f1.appraised != null && comparable) {
         change.deltaAppraised = round2(f1.appraised - f0.appraised);
         change.pctAppraised =
           f0.appraised > 0 ? (f1.appraised - f0.appraised) / f0.appraised : null;
       }
+      if (!comparable) change.sentence = notComparableSentence(change.deltaTax, y0, y1);
 
       // Exact decomposition when both rates exist.
       if (
+        comparable &&
         change.rate0 != null &&
         change.rate1 != null &&
         f0.appraised != null &&
@@ -261,9 +339,9 @@ export function buildTaxChangeReport(
       }
 
       // Assessment ratio shift: the highest-value flag. A move between
-      // Alabama's 10% (Class III current use) and 20% (Class II) almost
-      // always means a classification change.
-      if (change.ratio0 != null && change.ratio1 != null) {
+      // Alabama's 10% (Class III) and 20% (Class II) can mean the class
+      // or the current use status changed; the county has to say which.
+      if (comparable && change.ratio0 != null && change.ratio1 != null) {
         const shift = change.ratio1 - change.ratio0;
         if (Math.abs(shift) >= 0.03) {
           const from = ratioLabel(change.ratio0);
@@ -277,7 +355,7 @@ export function buildTaxChangeReport(
           change.flags.push({
             kind: "ratio_shift",
             message: lostCurrentUse
-              ? `Assessment ratio moved ${from} to ${to}: the parcel left Class III (farm, forest, home) and now assesses as Class II, which usually means current use was lost. Ask the revenue commissioner about its current-use status; reapplying (Oct 1 to Jan 1) usually fixes it going forward.`
+              ? `Assessment ratio moved ${from} to ${to}, which can mean the property's class or its current use status changed; ask the county (the revenue commissioner's office) which it is and whether anything needs to be filed.`
               : gainedCurrentUse
                 ? `Assessment ratio moved ${from} to ${to}: the parcel moved into Class III (farm, forest, home).`
                 : `Assessment ratio moved ${from} to ${to}: a probable classification or exemption change. Worth confirming with the revenue commissioner.`,
@@ -332,6 +410,7 @@ export function buildTaxChangeReport(
   const tax1 = sumYear(y1, (f) => f.taxDue);
   const appraised0 = sumYear(y0, (f) => f.appraised ?? 0);
   const appraised1 = sumYear(y1, (f) => f.appraised ?? 0);
+  const notComparableParcels = changes.filter((c) => c.valuesComparable === false).length;
 
   return {
     y0,
@@ -343,7 +422,8 @@ export function buildTaxChangeReport(
       taxPct: tax0 > 0 ? (tax1 - tax0) / tax0 : null,
       appraised0,
       appraised1,
-      appraisedPct: appraised0 > 0 ? (appraised1 - appraised0) / appraised0 : null,
+      appraisedPct: appraised0 > 0 && notComparableParcels === 0 ? (appraised1 - appraised0) / appraised0 : null,
+      notComparableParcels,
       comparedParcels: movers.length,
       flaggedParcels: flagged.length,
     },

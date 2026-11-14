@@ -58,6 +58,17 @@ export const IDENTIFIER_KIND_LABELS: Record<IdentifierKind, string> = {
   other: "Other",
 };
 
+// Numbers that name ONE YEAR'S BILL, not the parcel: a receipt, bill, or
+// duplicate number is issued again every year, and the same digits can
+// land on another owner's bill or equal another parcel's key number. They
+// stay on the statement line as printed, but are never saved to a parcel
+// and never used to match one (lib/taxMatch.ts).
+export const PER_BILL_KINDS: ReadonlySet<string> = new Set(["receipt_number", "bill_number", "duplicate_number"]);
+
+export function isPerBillKind(kind: string | null | undefined): boolean {
+  return PER_BILL_KINDS.has(String(kind ?? ""));
+}
+
 // A printed identifier: label as printed, best-guess kind, value as
 // printed, normalized form for matching.
 export interface PrintedIdentifier {

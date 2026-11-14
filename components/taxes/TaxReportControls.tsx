@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 
 // Scope bar for the property tax report (year, entity, property, county;
@@ -97,14 +99,22 @@ export function ParcelFlags({
   const router = useRouter();
   const supabase = createClient();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   async function save(patch: Record<string, unknown>) {
     setBusy(true);
-    await supabase.from("parcels").update(patch).eq("id", parcelId);
+    setError(null);
+    const { error: err } = await supabase.from("parcels").update(patch).eq("id", parcelId);
     setBusy(false);
+    if (err) {
+      // The controls show the saved value again (nothing was changed).
+      setError(friendlyDbError(err, "That did not save. Please try again."));
+      return;
+    }
     router.refresh();
   }
   return (
     <span className="flex flex-wrap items-center gap-2 print:hidden">
+      {error ? <span className="basis-full text-xs text-red-600">{error}</span> : null}
       <select
         value={status}
         disabled={busy}
@@ -160,7 +170,7 @@ export function NoticeLog({
     });
     setBusy(false);
     if (err) {
-      setError(`Could not save: ${err.message}`);
+      setError(friendlyDbError(err, "Could not save the notice. Please try again."));
       return;
     }
     setDate("");
@@ -168,8 +178,13 @@ export function NoticeLog({
   }
   async function remove(id: string) {
     setBusy(true);
-    await supabase.from("tax_valuation_notices").delete().eq("id", id);
+    setError(null);
+    const { error: err } = await supabase.from("tax_valuation_notices").delete().eq("id", id);
     setBusy(false);
+    if (err) {
+      setError(friendlyDbError(err, "Could not remove the notice. Please try again."));
+      return;
+    }
     router.refresh();
   }
   const cls = "rounded-lg border border-gray-300 px-2 py-1 text-sm";
@@ -180,11 +195,13 @@ export function NoticeLog({
           {notices.map((n) => (
             <li key={n.id} className="flex flex-wrap items-center gap-2">
               <span className="text-gray-900">
-                {n.county} County notice of {n.notice_date}:{" "}
+                {n.county} County notice of {formatDate(n.notice_date)}:{" "}
                 {n.open ? (
-                  <span className="font-semibold text-red-700">protest by {n.deadline}</span>
+                  <span className="font-semibold text-red-700">
+                    protest by about {formatDate(n.deadline)} (use the deadline printed on the notice)
+                  </span>
                 ) : (
-                  <span className="text-gray-500">window closed {n.deadline}</span>
+                  <span className="text-gray-500">window closed {formatDate(n.deadline)}</span>
                 )}
               </span>
               <button onClick={() => remove(n.id)} disabled={busy} className="text-xs text-gray-500 hover:underline print:hidden">
@@ -222,22 +239,31 @@ export function NoticeLog({
 // protestPacketPdf.ts, loaded only when clicked).
 export function ProtestPacketButton({ packet }: { packet: import("@/lib/protestPacket").ProtestPacket }) {
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   return (
-    <button
-      onClick={async () => {
-        setBusy(true);
-        try {
-          const { generateProtestPacketPdf } = await import("./protestPacketPdf");
-          await generateProtestPacketPdf(packet);
-        } finally {
-          setBusy(false);
-        }
-      }}
-      disabled={busy}
-      className="block text-xs font-medium text-kelly-700 hover:underline disabled:opacity-50 print:hidden"
-      title="A PDF with the county record, bill history, comparables, a checklist, and a draft protest letter"
-    >
-      {busy ? "Making packet..." : "Protest packet"}
-    </button>
+    <>
+      <button
+        onClick={async () => {
+          setBusy(true);
+          setFailed(false);
+          try {
+            const { generateProtestPacketPdf } = await import("./protestPacketPdf");
+            await generateProtestPacketPdf(packet);
+          } catch {
+            // Without this the button just stopped spinning and nothing
+            // said the PDF was not made.
+            setFailed(true);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="block text-xs font-medium text-kelly-700 hover:underline disabled:opacity-50 print:hidden"
+        title="A PDF with the county record, bill history, comparables, a checklist, and a draft protest letter"
+      >
+        {busy ? "Making packet..." : "Protest packet"}
+      </button>
+      {failed ? <span className="block text-xs text-red-600 print:hidden">Could not make the packet PDF. Please try again.</span> : null}
+    </>
   );
 }

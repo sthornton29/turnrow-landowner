@@ -1,6 +1,7 @@
 // Property tax domain logic: parcel number normalization and matching,
 // due/delinquent date defaults, and computed statement status.
 
+import { formatDate } from "@/lib/format";
 import { canonicalParcel } from "@/lib/parcelNumber";
 
 // The statement HEADER (migration 0030): how the county billed it. The
@@ -35,6 +36,10 @@ export interface TaxStatementLineRow {
   identifiers: Array<{ label: string | null; kind: string; value: string; normalized: string }>;
   appraised_value: number | null;
   assessed_value: number | null;
+  // Filled where the bill prints them (migration 0050, uploads and the
+  // re-read); absent on rows loaded before then.
+  market_value?: number | null;
+  current_use_value?: number | null;
   tax_due: number;
   exemptions: string | null;
   legal_description: string | null;
@@ -65,6 +70,20 @@ export function allocateByLines<T extends { id: string; tax_due: number }>(
   }
   for (const l of lines) out.set(l.id, (amount * (Number(l.tax_due) || 0)) / total);
   return out;
+}
+
+// The total a statement's payments are spread over: EVERY line on the
+// statement, including lines this viewer cannot see (row level security
+// hides unmatched and personal property lines from 'user' members, and a
+// payment spread over only the visible lines would overstate them). The
+// stored line_total is that sum; the statement total stands in when it
+// is missing. Never less than the lines actually in view.
+export function allocationBasis(
+  statement: { amount_due: number; line_total?: number | null } | null | undefined,
+  visibleLineTotal: number
+): number {
+  const stored = Number(statement?.line_total) > 0 ? Number(statement?.line_total) : Number(statement?.amount_due) || 0;
+  return Math.max(stored, visibleLineTotal);
 }
 
 export interface TaxPaymentRow {
@@ -146,6 +165,82 @@ export function defaultDates(
   };
 }
 
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+// delinquent_date is the FIRST delinquent day, so the last day to pay on
+// time is the day before it (Alabama: delinquent Jan 1, pay by Dec 31).
+export function lastDayToPay(delinquentDate: string): string {
+  const m = ISO_DATE.exec(delinquentDate);
+  if (!m) return delinquentDate;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - 1));
+  return iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+// A tax year a person could mean (not a half-typed "202").
+export function plausibleTaxYear(year: number | null | undefined): year is number {
+  return typeof year === "number" && Number.isInteger(year) && year >= 1900 && year <= 2100;
+}
+
+// Do a statement's dates agree with its tax year? Returns a plain
+// sentence saying what is wrong, or null. The due date must fall in the
+// tax year or the year after (some states bill the following year) and
+// the delinquent date must come after it. Blank dates are not checked.
+export function statementDateProblem(
+  taxYear: number,
+  dueDate: string | null | undefined,
+  delinquentDate: string | null | undefined
+): string | null {
+  const due = dueDate && ISO_DATE.test(dueDate) ? dueDate : null;
+  const delinquent = delinquentDate && ISO_DATE.test(delinquentDate) ? delinquentDate : null;
+  if (due) {
+    const y = Number(due.slice(0, 4));
+    if (y !== taxYear && y !== taxYear + 1) {
+      return `The due date (${formatDate(due)}) is not in tax year ${taxYear} or the year after.`;
+    }
+  }
+  if (due && delinquent && delinquent <= due) {
+    return `The delinquent date (${formatDate(delinquent)}) is not after the due date (${formatDate(due)}).`;
+  }
+  if (delinquent) {
+    const y = Number(delinquent.slice(0, 4));
+    if (y < taxYear || y > taxYear + 2) {
+      return `The delinquent date (${formatDate(delinquent)}) does not fit tax year ${taxYear}.`;
+    }
+  }
+  return null;
+}
+
+// The due and delinquent dates a statement draft shows for a tax year.
+// Dates read from the bill are kept only when they agree with the tax
+// year: many bills print "due October 1" with no year, so the year in a
+// date the reader returns can be a guess. When they do not agree, the
+// county's calendar for the tax year is used instead and the note says
+// so, for the review screen to show. Called again whenever the tax year
+// changes, so the dates always follow the year.
+export function draftDates(
+  taxYear: number | null | undefined,
+  read: { due_date?: string | null; delinquent_date?: string | null },
+  county: string | null | undefined,
+  state: string | null | undefined,
+  defaults: CountyDefault[]
+): { due_date: string; delinquent_date: string; note: string | null } {
+  const readDue = read.due_date && ISO_DATE.test(read.due_date) ? read.due_date : null;
+  const readDelinquent = read.delinquent_date && ISO_DATE.test(read.delinquent_date) ? read.delinquent_date : null;
+  // No tax year yet: show what the bill printed, if anything.
+  if (!plausibleTaxYear(taxYear)) return { due_date: readDue ?? "", delinquent_date: readDelinquent ?? "", note: null };
+  const derived = defaultDates(taxYear, county, state, defaults);
+  if (!readDue && !readDelinquent) return { ...derived, note: null };
+  const candidate = { due_date: readDue ?? derived.due_date, delinquent_date: readDelinquent ?? derived.delinquent_date };
+  if (!statementDateProblem(taxYear, candidate.due_date, candidate.delinquent_date)) return { ...candidate, note: null };
+  const printed = [readDue ? `due ${formatDate(readDue)}` : null, readDelinquent ? `delinquent ${formatDate(readDelinquent)}` : null]
+    .filter(Boolean)
+    .join(", ");
+  return {
+    ...derived,
+    note: `The dates read from the bill (${printed}) do not fit tax year ${taxYear}, so the county's usual dates are shown. Check the tax year and the dates.`,
+  };
+}
+
 // ---------------------------------------------------------------- status
 
 export type TaxStatus = "paid" | "partial" | "unpaid" | "delinquent";
@@ -169,7 +264,9 @@ export function taxStatus(
   paidTotal: number,
   today: Date = new Date()
 ): TaxStatus {
-  if (paidTotal >= statement.amount_due - 0.005 && statement.amount_due > 0) return "paid";
+  // A statement for $0.00 has nothing to pay, so it can never be late.
+  if (statement.amount_due <= 0.005) return "paid";
+  if (paidTotal >= statement.amount_due - 0.005) return "paid";
   const pastDelinquent =
     statement.delinquent_date &&
     new Date(statement.delinquent_date + "T00:00:00") <= today;
