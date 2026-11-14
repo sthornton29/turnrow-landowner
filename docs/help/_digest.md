@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-14, version 0.1.0, build ccf00ed. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-14, version 0.1.0, build df4fa69. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -454,7 +454,7 @@ An ag field is a piece of cropland drawn inside a property. Open one from the Ag
 
 ## Tenant planted acres
 
-When the tenant shares plantings, the details also show how many acres they planted irrigated and dryland this year. These come from the tenant's records and can differ from the irrigated acres the map works out from pivot coverage.
+When the tenant shares plantings, the details also show how many acres they planted irrigated and dryland, with the year the figures are for (this year once the tenant has planted, last year until then). These come from the tenant's records and can differ from the irrigated acres the map works out from pivot coverage.
 
 ## Common questions
 

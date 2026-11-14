@@ -6,6 +6,7 @@ import { loadIncomeInputs, projectedLeaseYears } from "@/lib/income";
 import {
   harvestState,
   harvestStateLabel,
+  seasonYear,
   yieldPerAcre,
   yieldUnitLabel,
   type FarmFieldDataRow,
@@ -87,7 +88,11 @@ export default async function FieldSummaryPage({
   const activity = ((farmData ?? []) as FarmFieldDataRow[]).filter((d) =>
     mappedKeys.has(`${d.farm_connection_id}|${d.remote_field_id}`)
   );
-  const currentActivity = activity.filter((d) => d.crop_year === currentYear);
+  // One season of plantings: this year once the tenant has planted this
+  // field, otherwise last year (lib/farmDisplay.ts seasonYear), so the
+  // figures do not go blank on January 1.
+  const season = seasonYear(activity, currentYear);
+  const currentActivity = activity.filter((d) => d.crop_year === season);
 
   // The tenant's projected yields for this field's remote mappings, for
   // rows whose harvest is not complete yet (shown labeled PROJECTED).
@@ -159,11 +164,11 @@ export default async function FieldSummaryPage({
           ],
           [
             "Tenant planted irrigated",
-            tenantIrrigated > 0.05 ? `${formatAcres(tenantIrrigated)} ac (farm data)` : null,
+            tenantIrrigated > 0.05 ? `${formatAcres(tenantIrrigated)} ac (farm data, ${season})` : null,
           ],
           [
             "Tenant planted dryland",
-            tenantDryland > 0.05 ? `${formatAcres(tenantDryland)} ac (farm data)` : null,
+            tenantDryland > 0.05 ? `${formatAcres(tenantDryland)} ac (farm data, ${season})` : null,
           ],
           ["Notes", field.notes],
         ]}
