@@ -9,7 +9,10 @@
 import {
   annualRent,
   cropAssumptions,
+  isLapsedExpectedRow,
   paymentStatus,
+  rentDueYears,
+  rentShareDue,
   type CropPractice,
   type LeaseLike,
   type PaymentStatus,
@@ -42,7 +45,7 @@ export const STRUCTURE_LABELS: Record<RentStructureKey, string> = {
 //   schedule    generated expected payments exist; their sum is the number
 //   projection  computed from terms and the year's assumptions
 //   incomplete  a projection was attempted but an input is missing
-//   none        the lease does not project this year (expired, no dates)
+//   none        no rent falls due this year (outside the lease dates, no dates)
 export type ExpectedBasis = "schedule" | "projection" | "incomplete" | "none";
 
 export const BASIS_LABELS: Record<ExpectedBasis, string> = {
@@ -326,8 +329,10 @@ export function explainLeaseYear(args: ExplainArgs): LeaseYearExplanation {
     }
     if (inYear) received += p.amount;
   }
+  // The Income page's rule: on a lease that is over, unpaid rows for a
+  // lease year after the year it ended no longer count as expected.
   const schedule: ScheduleLine[] = args.expectedRows
-    .slice()
+    .filter((r) => !isLapsedExpectedRow(lease, { year }, receivedByRow.get(r.id) ?? 0))
     .sort((a, b) => a.due_date.localeCompare(b.due_date))
     .map((r) => {
       const got = receivedByRow.get(r.id) ?? 0;
@@ -343,14 +348,13 @@ export function explainLeaseYear(args: ExplainArgs): LeaseYearExplanation {
   const scheduleTotal =
     schedule.length > 0 ? schedule.reduce((s, r) => s + r.expected, 0) : null;
 
-  // ---- which basis wins (the Income page's rule)
-  const projects =
-    lease.status !== "expired" &&
-    lease.status !== "terminated" &&
-    !!lease.start_date &&
-    !!lease.end_date &&
-    year >= Number(lease.start_date.slice(0, 4)) &&
-    year <= Number(lease.end_date.slice(0, 4));
+  // ---- which basis wins (the Income page's rule). The lease's term
+  // decides, not its status: a year projects when rent falls due in it
+  // inside the lease dates, for the part of the year's rent that does.
+  // A year that carries schedule rows never falls back to the projection,
+  // even when none of them count any longer.
+  const projects = args.expectedRows.length === 0 && rentDueYears(lease).includes(year);
+  let dueShare = 1;
   let basis: ExpectedBasis;
   let expected: number;
   if (scheduleTotal !== null) {
@@ -364,7 +368,8 @@ export function explainLeaseYear(args: ExplainArgs): LeaseYearExplanation {
     expected = 0;
   } else {
     basis = "projection";
-    expected = projection;
+    dueShare = rentShareDue(lease, year, projection);
+    expected = dueShare === 1 ? projection : round2(projection * dueShare);
   }
 
   // ---- government share (counted under Government payments, not rent)
@@ -385,14 +390,19 @@ export function explainLeaseYear(args: ExplainArgs): LeaseYearExplanation {
     structure,
     basis,
     year,
-    expected,
+    // The sentence explains the whole year's rent; a year the lease
+    // dates only partly cover says so after it.
+    expected: basis === "projection" && dueShare !== 1 ? (projection ?? expected) : expected,
     totalAcres,
     cash,
     flex,
     cropShare,
     hunting,
     scheduleCount: schedule.length,
-  });
+  }) +
+    (basis === "projection" && dueShare !== 1
+      ? ` Only the payments that fall due in ${year} within the lease dates count here: ${money(expected)}, ${Math.round(dueShare * 100)}% of the year's rent.`
+      : "");
 
   return {
     year,
@@ -439,7 +449,7 @@ function headlineFor(x: {
   scheduleCount: number;
 }): string {
   if (x.basis === "none") {
-    return `This lease is not projected for ${x.year}: it is outside the lease dates or no longer active.`;
+    return `Nothing is expected under this lease in ${x.year}: none of its payments fall due that year within the lease dates.`;
   }
   if (x.basis === "incomplete") {
     return `${x.year} cannot be projected yet because an input is missing. Fill it in and the number appears here.`;

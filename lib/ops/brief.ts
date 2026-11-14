@@ -14,7 +14,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatDate, formatDollars, todayISO } from "@/lib/format";
-import { paymentStatus } from "@/lib/leaseLogic";
+import { isLapsedExpectedRow, paymentStatus } from "@/lib/leaseLogic";
 import { OPS_APP, OPS_LABEL } from "./auth";
 
 export interface OpsTodo { id: string; text: string; due: string | null; status: "open" | "overdue" | "done"; owner: string | null; url: string }
@@ -36,16 +36,23 @@ export function addDaysISO(date: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-// An expected payment dated AFTER the end of a lease that is no longer
-// active (expired or terminated) is not owed: the schedule simply ran on
-// past the lease. Rent that came due during the lease's term still is,
-// however old. A lease with no end date on file is left alone.
+// An expected payment for a lease year AFTER the year a lease ended
+// (expired or terminated) is not owed: the schedule simply ran on past
+// the lease. Rent for the years of its term still is, however old, and
+// whenever it falls due: a crop share lease that ends December 31 is
+// settled the following summer, and that payment must keep showing. A
+// lease with no end date on file is left alone. The rule itself lives in
+// lib/leaseLogic.ts (isLapsedExpectedRow), so Income, the lease page,
+// Home, and this brief all agree.
 export function isAfterEndedLease(
-  dueDate: string,
-  lease: { status?: unknown; end_date?: unknown } | null | undefined
+  row: { year?: unknown },
+  lease: { status?: unknown; end_date?: unknown } | null | undefined,
+  received = 0
 ): boolean {
-  if (!lease || (lease.status !== "expired" && lease.status !== "terminated")) return false;
-  return typeof lease.end_date === "string" && lease.end_date !== "" && dueDate > lease.end_date;
+  if (!lease) return false;
+  const year = Number(row.year);
+  if (row.year === null || row.year === undefined || !Number.isFinite(year)) return false;
+  return isLapsedExpectedRow(lease, { year }, received);
 }
 
 // Unpaid property tax for one tax year that needs a person now.
@@ -133,7 +140,7 @@ export async function buildBrief(client: SupabaseClient, orgId: string, base: st
   const url = (path: string) => `${base}${path}`;
 
   const [expected, payments, leases, sales, tenants, issues, statements, taxPaid, docs, connections, properties] = await Promise.all([
-    rows(client.from("expected_payments").select("id, lease_id, timber_sale_id, label, due_date, expected_amount").eq("organization_id", orgId), "expected payments"),
+    rows(client.from("expected_payments").select("id, lease_id, timber_sale_id, year, label, due_date, expected_amount").eq("organization_id", orgId), "expected payments"),
     rows(client.from("payments").select("expected_payment_id, amount").eq("organization_id", orgId), "payments"),
     rows(client.from("leases").select("id, name, status, lease_type, end_date, auto_renew, tenant_id, terms").eq("organization_id", orgId), "leases"),
     rows(client.from("timber_sales").select("id, sale_name").eq("organization_id", orgId), "timber sales"),
@@ -163,8 +170,8 @@ export async function buildBrief(client: SupabaseClient, orgId: string, base: st
     const status = paymentStatus(amount, got, String(e.due_date), todayStart);
     if (status === "paid") continue;
     const lease = e.lease_id ? leaseById.get(String(e.lease_id)) : null;
-    // A schedule row past the end of an expired or terminated lease is not owed.
-    if (isAfterEndedLease(String(e.due_date), lease)) continue;
+    // A schedule row for a year after an expired or terminated lease ended is not owed.
+    if (isAfterEndedLease(e, lease, got)) continue;
     const from = lease ? String(lease.name) : e.timber_sale_id ? saleName.get(String(e.timber_sale_id)) ?? "a timber sale" : "a lease";
     const page = e.lease_id ? `/leases/${e.lease_id}` : `/timber-sales/${e.timber_sale_id}`;
     const owed = r2(amount - got);

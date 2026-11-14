@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import { NO_ENTITY } from "@/lib/entities";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@/lib/gov/govPayments";
 import {
   UNLINKED_FARM,
+  farmAllocationTotals,
   type BaseAcreRow,
   type ElectionRow,
   type FarmPropertyLink,
@@ -29,6 +31,16 @@ import EntityFilterChips from "@/components/entities/EntityFilterChips";
 const inputClass =
   "w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:border-kelly-500 focus:outline-none";
 
+// A number typed into a text box: commas are dropped ("1,234.5" is
+// 1234.5), blank is null, and anything else that is not a number comes
+// back NaN so the caller can refuse it. (Number("1,234.5") is NaN, which
+// the database stores as blank: the figure used to vanish on save.)
+function parseNumberInput(text: string): number | null {
+  const t = text.replace(/,/g, "").trim();
+  if (t === "") return null;
+  return Number(t);
+}
+
 interface PropertyLite {
   id: string;
   name: string;
@@ -39,6 +51,7 @@ interface PropertyLite {
 
 export default function GovPaymentsClient({
   orgId,
+  isAdmin,
   isPlatformAdmin,
   framing,
   selectedYear,
@@ -55,6 +68,10 @@ export default function GovPaymentsClient({
   leaseTreatments,
 }: {
   orgId: string;
+  // Account admin (sees every farm and every property link). Other
+  // members see only the links to land they have access to, cannot
+  // create farms, and cannot remove the last link they can see.
+  isAdmin: boolean;
   isPlatformAdmin: boolean;
   framing: "payment" | "program";
   selectedYear: number;
@@ -183,7 +200,7 @@ export default function GovPaymentsClient({
       { onConflict: "fsa_farm_id,commodity,program_year" }
     );
     setBusy(false);
-    if (err) setError("Could not save the election. " + err.message);
+    if (err) setError(friendlyDbError(err, "Could not save the election. It was left as it was."));
     else router.refresh();
   }
 
@@ -222,17 +239,23 @@ export default function GovPaymentsClient({
       setError("Farm number is required.");
       return;
     }
+    const farmland = parseNumberInput(farmForm.farmland_acres);
+    const cropland = parseNumberInput(farmForm.cropland_acres);
+    const dcpCropland = parseNumberInput(farmForm.dcp_cropland_acres);
+    if ([farmland, cropland, dcpCropland].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) {
+      setError("Farmland acres, cropland acres, and DCP cropland must be numbers (or left blank).");
+      return;
+    }
     setBusy(true);
     setError(null);
-    const num = (s: string) => (s.trim() === "" ? null : Number(s));
     const patch = {
       organization_id: orgId,
       farm_number: farmForm.farm_number.trim(),
       state: farmForm.state.trim().toUpperCase() || null,
       county: farmForm.county.trim() || null,
-      farmland_acres: num(farmForm.farmland_acres),
-      cropland_acres: num(farmForm.cropland_acres),
-      dcp_cropland_acres: num(farmForm.dcp_cropland_acres),
+      farmland_acres: farmland,
+      cropland_acres: cropland,
+      dcp_cropland_acres: dcpCropland,
       notes: farmForm.notes.trim() || null,
     };
     const { error: err } = farmForm.id
@@ -240,7 +263,7 @@ export default function GovPaymentsClient({
       : await supabase.from("fsa_farms").insert(patch);
     setBusy(false);
     if (err) {
-      setError("Could not save the farm. " + err.message);
+      setError(friendlyDbError(err, "Could not save the farm. What you typed is still here; try again."));
       return;
     }
     setFarmForm(null);
@@ -251,9 +274,10 @@ export default function GovPaymentsClient({
   async function deleteFarm(f: FsaFarmRow) {
     if (!window.confirm(`Delete FSA farm ${f.farm_number} and its base acres?`)) return;
     setBusy(true);
+    setError(null);
     const { error: err } = await supabase.from("fsa_farms").delete().eq("id", f.id);
     setBusy(false);
-    if (err) setError("Could not delete. " + err.message);
+    if (err) setError(friendlyDbError(err, "Could not delete the farm. Nothing was removed."));
     else router.refresh();
   }
 
@@ -266,18 +290,41 @@ export default function GovPaymentsClient({
       { onConflict: "fsa_farm_id,property_id" }
     );
     setBusy(false);
-    if (err) setError("Could not link the property. " + err.message);
+    if (err) setError(friendlyDbError(err, "Could not save the property link. It was left as it was."));
     else router.refresh();
   }
 
-  async function unlinkProperty(farmId: string, propertyId: string) {
+  async function unlinkProperty(farm: FsaFarmRow, propertyId: string) {
+    if (busy) return;
+    const name = propertyById.get(propertyId)?.name ?? "this property";
+    if (
+      !window.confirm(
+        `Remove ${name} from farm ${farm.farm_number}? Its share of this farm's projected payment will no longer count on ${name}. The property and the farm are not deleted.`
+      )
+    ) {
+      return;
+    }
     setBusy(true);
-    await supabase.from("fsa_farm_properties").delete().eq("fsa_farm_id", farmId).eq("property_id", propertyId);
+    setError(null);
+    const { error: err } = await supabase
+      .from("fsa_farm_properties")
+      .delete()
+      .eq("fsa_farm_id", farm.id)
+      .eq("property_id", propertyId);
     setBusy(false);
+    if (err) setError(friendlyDbError(err, "Could not remove the property link. It is still there."));
     router.refresh();
   }
 
-  async function saveBaseAcres(farmId: string, commodity: string, baseAcres: string, plcYield: string) {
+  // True when saved (the add row clears itself only then).
+  async function saveBaseAcres(farmId: string, commodity: string, baseAcres: string, plcYield: string): Promise<boolean> {
+    if (busy) return false;
+    const acres = parseNumberInput(baseAcres);
+    const yld = parseNumberInput(plcYield);
+    if ([acres, yld].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) {
+      setError("Base acres and PLC yield must be numbers (or left blank).");
+      return false;
+    }
     setBusy(true);
     setError(null);
     const { error: err } = await supabase.from("fsa_base_acres").upsert(
@@ -285,22 +332,51 @@ export default function GovPaymentsClient({
         organization_id: orgId,
         fsa_farm_id: farmId,
         commodity,
-        base_acres: baseAcres.trim() === "" ? null : Number(baseAcres),
-        plc_yield: plcYield.trim() === "" ? null : Number(plcYield),
+        base_acres: acres,
+        plc_yield: yld,
       },
       { onConflict: "fsa_farm_id,commodity" }
     );
     setBusy(false);
-    if (err) setError("Could not save base acres. " + err.message);
-    else router.refresh();
+    if (err) {
+      setError(friendlyDbError(err, "Could not save the base acres. What you typed is still here; try again."));
+      return false;
+    }
+    router.refresh();
+    return true;
   }
 
-  async function deleteBaseAcres(farmId: string, commodity: string) {
+  async function deleteBaseAcres(farm: FsaFarmRow, commodity: string) {
+    if (busy) return;
+    const label = COMMODITY_LABELS[commodity as keyof typeof COMMODITY_LABELS] ?? commodity;
+    if (!window.confirm(`Remove the ${label} base acres from farm ${farm.farm_number}?`)) return;
     setBusy(true);
-    await supabase.from("fsa_base_acres").delete().eq("fsa_farm_id", farmId).eq("commodity", commodity);
+    setError(null);
+    const { error: err } = await supabase
+      .from("fsa_base_acres")
+      .delete()
+      .eq("fsa_farm_id", farm.id)
+      .eq("commodity", commodity);
     setBusy(false);
+    if (err) setError(friendlyDbError(err, "Could not remove the base acres. They are still there."));
     router.refresh();
   }
+
+  // A farm's property percentages should total 100: over 100 counts more
+  // than the farm's payment, under 100 leaves part of it on no property.
+  // Checked for admins only (other members see only the links to land
+  // they have access to, so their totals are partial by design).
+  const allocationTotals = farmAllocationTotals(inputs.links);
+  const offTotalFarms = isAdmin
+    ? inputs.farms.flatMap((farm) => {
+        const total = allocationTotals.get(farm.id);
+        return total !== undefined && Math.abs(total - 100) > 0.01 ? [{ farm, total }] : [];
+      })
+    : [];
+  const allocationWarning = (total: number) =>
+    total > 100
+      ? `the property percentages add up to ${formatNumber(total)}%, so ${formatNumber(total)}% of this farm's payment is being counted`
+      : `the property percentages add up to ${formatNumber(total)}%, so ${formatNumber(Math.round((100 - total) * 100) / 100)}% of this farm's payment is not counted on any property`;
 
   const [priceBusy, setPriceBusy] = useState(false);
   async function refreshPrices() {
@@ -420,6 +496,21 @@ export default function GovPaymentsClient({
       ) : null}
       {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       {message ? <p className="rounded-lg bg-kelly-50 px-3 py-2 text-sm text-pine-900">{message}</p> : null}
+      {offTotalFarms.length > 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="font-semibold">
+            Check the property percentages on {offTotalFarms.length === 1 ? "this farm" : "these farms"}. They should total 100%.
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {offTotalFarms.map(({ farm, total }) => (
+              <li key={farm.id}>
+                Farm {farm.farm_number}: {allocationWarning(total)}.
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">Fix them under FSA farms and base acres below.</p>
+        </div>
+      ) : null}
 
       {/* Headline */}
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -648,14 +739,34 @@ export default function GovPaymentsClient({
                               defaultValue={Number(l.allocation_pct)}
                               min={0}
                               max={100}
-                              onBlur={(e) => linkProperty(f.id, l.property_id, Number(e.target.value) || 0)}
+                              onBlur={(e) => {
+                                const pct = e.target.value.trim() === "" ? 0 : Number(e.target.value);
+                                if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+                                  setError("A property's share of a farm must be a percentage from 0 to 100.");
+                                  e.target.value = String(Number(l.allocation_pct));
+                                  return;
+                                }
+                                if (pct === Number(l.allocation_pct)) return;
+                                linkProperty(f.id, l.property_id, pct);
+                              }}
+                              aria-label={`Percent of farm ${f.farm_number} on ${propertyById.get(l.property_id)?.name ?? "this property"}`}
                               className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-right text-xs"
                             />
                             <span className="text-xs text-gray-500">%</span>
-                            <button onClick={() => unlinkProperty(f.id, l.property_id)} className="text-xs text-red-600 hover:underline">remove</button>
+                            {/* A member who is not an admin reaches a farm only
+                                through the property links they can see:
+                                removing the last one would lose them the farm. */}
+                            {isAdmin || links.length > 1 ? (
+                              <button onClick={() => unlinkProperty(f, l.property_id)} disabled={busy} className="text-xs text-red-600 hover:underline disabled:opacity-60">remove</button>
+                            ) : null}
                           </span>
                         </p>
                       ))}
+                      {isAdmin && Math.abs((allocationTotals.get(f.id) ?? 100) - 100) > 0.01 ? (
+                        <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">
+                          These should total 100%: {allocationWarning(allocationTotals.get(f.id) ?? 0)}.
+                        </p>
+                      ) : null}
                       <select
                         defaultValue=""
                         onChange={(e) => {
@@ -676,12 +787,14 @@ export default function GovPaymentsClient({
                         <BaseAcreEditor
                           key={b.commodity}
                           row={b}
+                          busy={busy}
                           onSave={(acres, yld) => saveBaseAcres(f.id, b.commodity, acres, yld)}
-                          onDelete={() => deleteBaseAcres(f.id, b.commodity)}
+                          onDelete={() => deleteBaseAcres(f, b.commodity)}
                         />
                       ))}
                       <AddBaseAcres
                         existing={new Set(base.map((b) => b.commodity))}
+                        busy={busy}
                         onAdd={(c, acres, yld) => saveBaseAcres(f.id, c, acres, yld)}
                       />
                     </div>
@@ -724,10 +837,14 @@ export default function GovPaymentsClient({
                   <button onClick={() => setFarmForm(null)} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700">Cancel</button>
                 </div>
               </div>
-            ) : (
+            ) : isAdmin ? (
+              // Creating a farm is admin work (row level security refuses
+              // it for other members, migration 0034).
               <button onClick={() => editFarm(null)} className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 + Add an FSA farm
               </button>
+            ) : (
+              <p className="text-sm text-gray-500">Adding an FSA farm is done by an admin on your account.</p>
             )}
           </div>
         ) : null}
@@ -780,10 +897,12 @@ export default function GovPaymentsClient({
 
 function BaseAcreEditor({
   row,
+  busy,
   onSave,
   onDelete,
 }: {
   row: BaseAcreRow;
+  busy: boolean;
   onSave: (acres: string, yld: string) => void;
   onDelete: () => void;
 }) {
@@ -796,14 +915,22 @@ function BaseAcreEditor({
       <input value={acres} onChange={(e) => setAcres(e.target.value)} placeholder="acres" className="w-20 rounded border border-gray-300 px-1.5 py-0.5 text-right text-xs" />
       <input value={yld} onChange={(e) => setYld(e.target.value)} placeholder="PLC yield" className="w-20 rounded border border-gray-300 px-1.5 py-0.5 text-right text-xs" />
       {dirty ? (
-        <button onClick={() => onSave(acres, yld)} className="text-xs font-medium text-kelly-700 hover:underline">Save</button>
+        <button onClick={() => onSave(acres, yld)} disabled={busy} className="text-xs font-medium text-kelly-700 hover:underline disabled:opacity-60">Save</button>
       ) : null}
-      <button onClick={onDelete} className="text-xs text-red-600 hover:underline">remove</button>
+      <button onClick={onDelete} disabled={busy} className="text-xs text-red-600 hover:underline disabled:opacity-60">remove</button>
     </p>
   );
 }
 
-function AddBaseAcres({ existing, onAdd }: { existing: Set<string>; onAdd: (c: string, acres: string, yld: string) => void }) {
+function AddBaseAcres({
+  existing,
+  busy,
+  onAdd,
+}: {
+  existing: Set<string>;
+  busy: boolean;
+  onAdd: (c: string, acres: string, yld: string) => Promise<boolean>;
+}) {
   const [commodity, setCommodity] = useState("");
   const [acres, setAcres] = useState("");
   const [yld, setYld] = useState("");
@@ -820,9 +947,10 @@ function AddBaseAcres({ existing, onAdd }: { existing: Set<string>; onAdd: (c: s
       <input value={acres} onChange={(e) => setAcres(e.target.value)} placeholder="acres" className="w-20 rounded border border-gray-300 px-1.5 py-0.5 text-right text-xs" />
       <input value={yld} onChange={(e) => setYld(e.target.value)} placeholder="PLC yield" className="w-20 rounded border border-gray-300 px-1.5 py-0.5 text-right text-xs" />
       <button
-        disabled={!commodity}
-        onClick={() => {
-          onAdd(commodity, acres, yld);
+        disabled={!commodity || busy}
+        onClick={async () => {
+          // Clear the row only once it saved, so a refused entry stays to be fixed.
+          if (!(await onAdd(commodity, acres, yld))) return;
           setCommodity("");
           setAcres("");
           setYld("");

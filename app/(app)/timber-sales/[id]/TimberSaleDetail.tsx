@@ -934,6 +934,7 @@ export default function TimberSaleDetail({
             orgId={orgId}
             timberSaleId={sale.id}
             computeExpected={computeExpected}
+            canManageSchedule={isAdmin}
             emptyHint="No expected payments yet. Set the sale price (and schedule, if split), then press Generate expected payments."
           />
         </section>

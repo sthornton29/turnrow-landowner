@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
 
 // Platform-admin editor for the GLOBAL government payment parameters:
 // program_year_config (per program year) and covered_commodities
@@ -62,7 +63,7 @@ export default function AdminProgramParams({
     setError(null);
     const { error: err } = await fn();
     setBusy(false);
-    if (err) setError(err.message);
+    if (err) setError(friendlyDbError(err, "That did not save. The value was left as it was; try again."));
     else router.refresh();
   }
 

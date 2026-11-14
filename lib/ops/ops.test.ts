@@ -210,24 +210,31 @@ describe("property tax alerts cover every tax year with a balance", () => {
 });
 
 describe("payments past the end of a lease that is over", () => {
-  it("isAfterEndedLease is true only for an expired or terminated lease, after its end date", () => {
-    expect(isAfterEndedLease("2027-03-01", { status: "expired", end_date: "2026-12-31" })).toBe(true);
-    expect(isAfterEndedLease("2027-03-01", { status: "terminated", end_date: "2026-12-31" })).toBe(true);
-    expect(isAfterEndedLease("2026-12-31", { status: "expired", end_date: "2026-12-31" })).toBe(false);
-    expect(isAfterEndedLease("2026-10-15", { status: "expired", end_date: "2026-12-31" })).toBe(false);
-    expect(isAfterEndedLease("2027-03-01", { status: "active", end_date: "2026-12-31" })).toBe(false);
-    expect(isAfterEndedLease("2027-03-01", { status: "expired", end_date: null })).toBe(false);
-    expect(isAfterEndedLease("2027-03-01", null)).toBe(false);
+  it("isAfterEndedLease goes by the lease year, and only for an expired or terminated lease", () => {
+    const expired = { status: "expired", end_date: "2026-12-31" };
+    // A row for a lease year after the lease ended is not owed.
+    expect(isAfterEndedLease({ year: 2027 }, expired)).toBe(true);
+    expect(isAfterEndedLease({ year: 2027 }, { status: "terminated", end_date: "2026-12-31" })).toBe(true);
+    // Rent for the lease's last year is still owed, whenever it falls due.
+    expect(isAfterEndedLease({ year: 2026 }, expired)).toBe(false);
+    expect(isAfterEndedLease({ year: 2025 }, expired)).toBe(false);
+    // Money already recorded against a later row keeps it.
+    expect(isAfterEndedLease({ year: 2027 }, expired, 500)).toBe(false);
+    expect(isAfterEndedLease({ year: 2027 }, { status: "active", end_date: "2026-12-31" })).toBe(false);
+    expect(isAfterEndedLease({ year: 2027 }, { status: "expired", end_date: null })).toBe(false);
+    expect(isAfterEndedLease({ year: 2027 }, null)).toBe(false);
+    // A row read without its year is never dropped on a guess.
+    expect(isAfterEndedLease({}, expired)).toBe(false);
   });
 
-  it("drops schedule rows dated after an expired lease ended and keeps rent that came due during its term", async () => {
+  it("drops schedule rows for years after an expired lease ended and keeps the rent of its term", async () => {
     const db = fakeDb({
       leases: [{ id: "old", organization_id: ORG, name: "Old cropland", status: "expired", lease_type: "agricultural", end_date: "2025-12-31", auto_renew: false, tenant_id: "t1", terms: {} }],
       tenants: [{ id: "t1", organization_id: ORG, name: "Smith Farms", insurance_on_file: false, insurance_expires: null }],
       expected_payments: [
-        { id: "term", organization_id: ORG, lease_id: "old", timber_sale_id: null, label: "Fall rent 2025", due_date: "2025-10-15", expected_amount: 8000 },
-        { id: "after1", organization_id: ORG, lease_id: "old", timber_sale_id: null, label: "Fall rent 2026", due_date: "2026-10-15", expected_amount: 8000 },
-        { id: "after2", organization_id: ORG, lease_id: "old", timber_sale_id: null, label: "Spring rent 2027", due_date: "2026-11-30", expected_amount: 8000 },
+        { id: "term", organization_id: ORG, lease_id: "old", timber_sale_id: null, year: 2025, label: "Fall rent 2025", due_date: "2025-10-15", expected_amount: 8000 },
+        { id: "after1", organization_id: ORG, lease_id: "old", timber_sale_id: null, year: 2026, label: "Fall rent 2026", due_date: "2026-10-15", expected_amount: 8000 },
+        { id: "after2", organization_id: ORG, lease_id: "old", timber_sale_id: null, year: 2027, label: "Spring rent 2027", due_date: "2026-11-30", expected_amount: 8000 },
       ],
       payments: [],
     });
@@ -236,6 +243,24 @@ describe("payments past the end of a lease that is over", () => {
     expect(b.alerts.find((a) => a.text.includes("past due"))).toMatchObject({ amount: 8000, text: "1 payment past due, $8,000.00 in all." });
     expect(b.metrics.find((m) => m.key === "due_30")!.value).toBe(0);
     expect(b.lists[0].rows).toHaveLength(1);
+  });
+
+  it("keeps a crop share lease's final settlement, due the summer after the lease ended", async () => {
+    // The lease ran February to December 2026 and is marked expired. Its
+    // 2026 rent comes in two parts: most at harvest, the rest at final
+    // prices the next July. That second part is owed and must still show.
+    const db = fakeDb({
+      leases: [{ id: "cs", organization_id: ORG, name: "Crop share 2026", status: "expired", lease_type: "agricultural", end_date: "2026-12-31", auto_renew: false, tenant_id: "t1", terms: {} }],
+      tenants: [{ id: "t1", organization_id: ORG, name: "Smith Farms", insurance_on_file: false, insurance_expires: null }],
+      expected_payments: [
+        { id: "final", organization_id: ORG, lease_id: "cs", timber_sale_id: null, year: 2026, label: "Final crop-share rent at final prices", due_date: "2027-07-01", expected_amount: 94629.18 },
+      ],
+      payments: [],
+    });
+    // Mid-June 2027, two weeks before it is due.
+    const b = await buildBrief(db.client as SupabaseClient, ORG, BASE, new Date("2027-06-17T15:00:00Z"));
+    expect(b.todos.map((t) => t.id)).toEqual(["payment-final"]);
+    expect(b.metrics.find((m) => m.key === "due_30")!.value).toBe(94629.18);
   });
 });
 

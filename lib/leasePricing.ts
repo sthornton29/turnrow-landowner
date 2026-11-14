@@ -59,6 +59,23 @@ export function selectPriceRows<T extends TenantPriceRow>(
   return { rows: rows.filter((r) => !r.remote_entity_id), scope: "operation", entityName: null };
 }
 
+// A tenant price in DOLLARS per the yield's unit. The farm software
+// tracks cotton in CENTS per lb (82.90); acres x yield x price must stay
+// in dollars (0.829), kept to four decimals. The same rule as the Tenant
+// Data panel's fill value (lib/tenantData.ts); the two are pinned
+// together in leasePricing.test.ts.
+export function tenantPriceDollars(price: number, unit: string | null): number {
+  return unit === "cents_per_lb" ? Math.round((price / 100) * 10000) / 10000 : price;
+}
+
+// Rounding for a price about to fill an assumption. Per-lb prices
+// (cotton) are small numbers, so they keep four decimals: two would turn
+// $0.7126 into $0.71. Everything else keeps cents.
+export function roundPriceForUse(price: number, crop: string | null | undefined): number {
+  const places = /cotton/i.test(crop ?? "") ? 10000 : 100;
+  return Math.round(price * places) / places;
+}
+
 export type TenantPriceCard =
   | { state: "no_connection" }
   | { state: "scope_off" }
@@ -66,7 +83,9 @@ export type TenantPriceCard =
   | { state: "no_price" }
   | {
       state: "price";
-      price: number;
+      price: number; // as the tenant tracks it (dollars per bu, or CENTS per lb)
+      // DOLLARS per the yield's unit: what a formula or a fill must use.
+      fillValue: number;
       unitLabel: string;
       isFinal: boolean;
       asOf: string | null;
@@ -115,6 +134,7 @@ export function tenantPriceCard(
   return {
     state: "price",
     price: row.projected_avg_price,
+    fillValue: tenantPriceDollars(row.projected_avg_price, row.unit),
     unitLabel: row.unit === "cents_per_lb" ? "c/lb" : "$/bu",
     isFinal: row.is_final,
     asOf: row.as_of,

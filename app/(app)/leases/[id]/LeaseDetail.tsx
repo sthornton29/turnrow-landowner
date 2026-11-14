@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatDate, formatDollars, todayISO } from "@/lib/format";
 import {
   CROP_PRACTICE_LABELS,
   LEASE_STATUS_LABELS,
@@ -79,12 +80,21 @@ const inputClass = "rounded-lg border border-gray-300 px-2 py-1.5 text-sm";
 
 export default function LeaseDetail({
   orgId,
+  isAdmin,
   lease,
   tenants,
   properties,
   fields,
+  savedWithout = [],
 }: {
   orgId: string;
+  // A member who is not an admin may see only part of this lease's land:
+  // controls that rewrite the shared payment schedule are hidden, and the
+  // last land row they can see cannot be removed.
+  isAdmin: boolean;
+  // "land" / "document": the lease was just created but that follow-up
+  // step failed (see LeaseForm).
+  savedWithout?: string[];
   lease: LeaseRow;
   tenants: Array<{
     id: string;
@@ -104,10 +114,19 @@ export default function LeaseDetail({
   const [assumptions, setAssumptions] = useState<AssumptionRow[]>([]);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Errors from the header controls (status, end date, delete lease),
+  // shown beside them rather than down in the land section.
+  const [headerError, setHeaderError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [headerBusy, setHeaderBusy] = useState(false);
+  // The status being saved: shown in the select until the server answers,
+  // then dropped (the select falls back to the saved status either way).
+  const [pendingStatus, setPendingStatus] = useState<LeaseStatus | null>(null);
 
   // Add-land form state
   const [addPropertyId, setAddPropertyId] = useState(properties[0]?.id ?? "");
   const [addFieldId, setAddFieldId] = useState("");
+  const [landBusy, setLandBusy] = useState(false);
 
   const [farmMappings, setFarmMappings] = useState<FieldMappingRow[]>([]);
   const [farmData, setFarmData] = useState<FarmFieldDataRow[]>([]);
@@ -337,6 +356,8 @@ export default function LeaseDetail({
   // ------------------------------------------------------------- land links
 
   async function addLand() {
+    if (landBusy) return;
+    setLandBusy(true);
     setError(null);
     const field = addFieldId ? fieldById.get(addFieldId) : null;
     const property = properties.find((p) => p.id === addPropertyId);
@@ -348,11 +369,12 @@ export default function LeaseDetail({
       field_id: addFieldId || null,
       leased_acres: Math.round(defaultAcres * 100) / 100,
     });
+    setLandBusy(false);
     if (err) {
       setError(
-        err.message.includes("duplicate")
+        err.code === "23505" || err.message.includes("duplicate")
           ? "That land is already linked to this lease."
-          : "Could not link: " + err.message
+          : friendlyDbError(err, "Could not link that land. Nothing was changed; try again.")
       );
       return;
     }
@@ -360,64 +382,164 @@ export default function LeaseDetail({
     load();
   }
 
-  async function updateLandAcres(id: string, acres: number) {
-    await supabase.from("lease_lands").update({ leased_acres: acres }).eq("id", id);
+  // Saved when the acres box loses focus (never per keystroke: those
+  // saves could land out of order). False means it did not save and the
+  // box goes back to the figure on file.
+  async function updateLandAcres(id: string, acres: number): Promise<boolean> {
+    setError(null);
+    const { error: err } = await supabase
+      .from("lease_lands")
+      .update({ leased_acres: acres })
+      .eq("id", id);
+    if (err) {
+      setError(friendlyDbError(err, "Could not save the leased acres. The figure on file was kept."));
+      return false;
+    }
     setLands((ls) => ls.map((l) => (l.id === id ? { ...l, leased_acres: acres } : l)));
+    return true;
   }
 
-  async function removeLand(id: string) {
-    await supabase.from("lease_lands").delete().eq("id", id);
+  async function removeLand(land: LandLink) {
+    if (landBusy) return;
+    const what =
+      (propertyName.get(land.property_id) ?? "this property") +
+      (land.field_id ? ` (ag field ${fieldById.get(land.field_id)?.name ?? ""})` : "");
+    if (
+      !window.confirm(
+        `Remove ${what} from this lease? Its ${formatAcres(land.leased_acres)} acres will no longer count toward the rent. The land itself is not deleted.`
+      )
+    ) {
+      return;
+    }
+    setLandBusy(true);
+    setError(null);
+    const { error: err } = await supabase.from("lease_lands").delete().eq("id", land.id);
+    setLandBusy(false);
+    if (err) setError(friendlyDbError(err, "Could not remove that land. It is still on the lease."));
     load();
   }
 
   // ------------------------------------------------------------- assumptions
 
-  async function saveAssumption(year: number, data: YearAssumptions) {
+  // Returns null when saved, else a plain sentence for the row to show
+  // (the row keeps its typed numbers and its Save button).
+  async function saveAssumption(year: number, data: YearAssumptions): Promise<string | null> {
     const existing = assumptions.find((a) => a.year === year);
-    if (existing) {
-      await supabase
-        .from("lease_year_assumptions")
-        .update({ data })
-        .eq("id", existing.id);
-    } else {
-      await supabase.from("lease_year_assumptions").insert({
-        organization_id: orgId,
-        lease_id: lease.id,
-        year,
-        data,
-      });
+    const { error: err } = existing
+      ? await supabase.from("lease_year_assumptions").update({ data }).eq("id", existing.id)
+      : await supabase.from("lease_year_assumptions").insert({
+          organization_id: orgId,
+          lease_id: lease.id,
+          year,
+          data,
+        });
+    if (err) {
+      return friendlyDbError(err, `Could not save the ${year} assumptions. Your numbers are still here; try Save again.`);
     }
-    load();
+    await load();
+    return null;
   }
 
   // Save a confirmed custom pricing recipe into the lease terms.
   const [editingRecipe, setEditingRecipe] = useState(false);
   async function saveRecipe(recipe: PriceRecipe) {
+    setError(null);
     const terms = { ...(lease.terms ?? {}), custom_recipe: recipe };
     const { error: err } = await supabase
       .from("leases")
       .update({ terms })
       .eq("id", lease.id);
     if (err) {
-      setError("Could not save the recipe: " + err.message);
+      setError(friendlyDbError(err, "Could not save the recipe. Try again."));
       return;
     }
     setEditingRecipe(false);
     router.refresh();
   }
 
+  // Saves the instant the select changes. On failure the select goes
+  // back to the status on file and the reason shows beside it.
   async function setStatus(status: LeaseStatus) {
-    await supabase.from("leases").update({ status }).eq("id", lease.id);
+    if (headerBusy || status === lease.status) return;
+    setHeaderBusy(true);
+    setHeaderError(null);
+    setPendingStatus(status);
+    const { error: err } = await supabase.from("leases").update({ status }).eq("id", lease.id);
+    setHeaderBusy(false);
+    if (err) {
+      setPendingStatus(null);
+      setHeaderError(
+        friendlyDbError(err, "Could not change the status.") +
+          ` The lease is still ${LEASE_STATUS_LABELS[lease.status]}.`
+      );
+      return;
+    }
+    router.refresh();
+  }
+  useEffect(() => {
+    setPendingStatus(null);
+  }, [lease.status]);
+
+  // A lease marked expired or terminated still expects every payment up
+  // to its end date (lib/income.ts): ending it today is what stops the
+  // later ones.
+  async function endLeaseToday() {
+    if (headerBusy) return;
+    if (
+      !window.confirm(
+        `Set this lease's end date to today (${formatDate(todayISO())})? Rent due after today will no longer count as expected. You can change the date again under Edit lease terms.`
+      )
+    ) {
+      return;
+    }
+    setHeaderBusy(true);
+    setHeaderError(null);
+    const { error: err } = await supabase
+      .from("leases")
+      .update({ end_date: todayISO() })
+      .eq("id", lease.id);
+    setHeaderBusy(false);
+    if (err) {
+      setHeaderError(friendlyDbError(err, "Could not change the end date. It was left as it was."));
+      return;
+    }
     router.refresh();
   }
 
   async function deleteLease() {
+    if (headerBusy) return;
     if (!window.confirm("Delete this lease and all of its expected and recorded payments?")) return;
-    await supabase.from("leases").delete().eq("id", lease.id);
+    setHeaderBusy(true);
+    setDeleteError(null);
+    const { data, error: err } = await supabase
+      .from("leases")
+      .delete()
+      .eq("id", lease.id)
+      .select("id");
+    if (err || !data || data.length === 0) {
+      setHeaderBusy(false);
+      setDeleteError(
+        !err
+          ? "This lease was not deleted. You may not have access to delete it; ask an admin on your account."
+          : err.code === "23502" || err.code === "23503"
+            ? // The database refuses to drop an expected payment while a
+              // recorded payment still points at it (see PaymentsSection).
+              "The lease could not be deleted because payments are recorded against its expected payments. Nothing was removed."
+            : friendlyDbError(err, "Could not delete the lease. Nothing was removed.")
+      );
+      return;
+    }
     router.push("/leases");
   }
 
   const availableFields = fields.filter((f) => f.property_id === addPropertyId);
+  const shownStatus = pendingStatus ?? lease.status;
+  // Marked over, yet the end date is still ahead: every payment up to
+  // that date still counts as expected until the date is brought in.
+  const endsAfterToday =
+    (lease.status === "expired" || lease.status === "terminated") &&
+    !!lease.end_date &&
+    lease.end_date > todayISO();
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
@@ -431,9 +553,11 @@ export default function LeaseDetail({
             {lease.lease_type}
           </span>
           <select
-            value={lease.status}
+            value={shownStatus}
+            disabled={headerBusy}
             onChange={(e) => setStatus(e.target.value as LeaseStatus)}
-            className="rounded-lg border border-gray-300 px-2 py-1 text-sm"
+            aria-label="Lease status"
+            className="rounded-lg border border-gray-300 px-2 py-1 text-sm disabled:opacity-60"
           >
             {Object.entries(LEASE_STATUS_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
@@ -459,6 +583,41 @@ export default function LeaseDetail({
           {" · "}
           {formatAcres(totalAcres)} leased acres
         </p>
+        {headerError ? <p className="mt-2 text-sm text-red-600">{headerError}</p> : null}
+        {savedWithout.length > 0 ? (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            The lease was saved, but{" "}
+            {[
+              savedWithout.includes("land")
+                ? "its land could not be linked (link it under Leased land below)"
+                : null,
+              savedWithout.includes("document")
+                ? "the lease document could not be attached (add it under Documents below)"
+                : null,
+            ]
+              .filter(Boolean)
+              .join(", and ") || "one step did not finish"}
+            .
+          </p>
+        ) : null}
+        {endsAfterToday ? (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            This lease is marked {LEASE_STATUS_LABELS[lease.status]}, but its end date is still{" "}
+            {formatDate(lease.end_date)}. Rent for every lease year through{" "}
+            {lease.end_date ? lease.end_date.slice(0, 4) : "that year"} still counts as expected.
+            If the lease ended early, set the end date to the day it ended (under Edit lease
+            terms), or{" "}
+            <button
+              type="button"
+              onClick={endLeaseToday}
+              disabled={headerBusy}
+              className="font-medium underline disabled:opacity-60"
+            >
+              end it today
+            </button>
+            .
+          </p>
+        ) : null}
         {lease.lease_type === "agricultural" &&
         (lease.rent_structure === "flex" || lease.rent_structure === "crop_share") ? (
           <p className="mt-2 text-sm text-gray-700">
@@ -533,27 +692,30 @@ export default function LeaseDetail({
                 </span>
                 {l.field_id ? (
                   <span className="text-sm text-gray-500">
-                    ag field: {fieldById.get(l.field_id)?.name ?? ""}
+                    Ag field: {fieldById.get(l.field_id)?.name ?? ""}
                   </span>
                 ) : (
                   <span className="text-sm text-gray-500">whole property</span>
                 )}
                 <span className="ml-auto flex items-center gap-1 text-sm">
-                  <input
-                    type="number"
-                    step="0.01"
+                  <LandAcresInput
                     value={l.leased_acres}
-                    onChange={(e) => updateLandAcres(l.id, Number(e.target.value))}
-                    className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-right text-sm"
+                    onSave={(acres) => updateLandAcres(l.id, acres)}
                   />
                   <span className="text-gray-500">ac</span>
                 </span>
-                <button
-                  onClick={() => removeLand(l.id)}
-                  className="text-xs font-medium text-red-600 hover:underline"
-                >
-                  Remove
-                </button>
+                {/* A member who is not an admin sees only the land they
+                    have access to; removing the last of it would put the
+                    whole lease out of their reach. */}
+                {isAdmin || lands.length > 1 ? (
+                  <button
+                    onClick={() => removeLand(l)}
+                    disabled={landBusy}
+                    className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+                  >
+                    Remove
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -587,8 +749,8 @@ export default function LeaseDetail({
           </select>
           <button
             onClick={addLand}
-            disabled={!addPropertyId}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            disabled={!addPropertyId || landBusy}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
           >
             + Link land
           </button>
@@ -717,6 +879,7 @@ export default function LeaseDetail({
           orgId={orgId}
           leaseId={lease.id}
           computeExpected={computeExpected}
+          canManageSchedule={isAdmin}
         />
       </section>
 
@@ -728,12 +891,58 @@ export default function LeaseDetail({
       <section className="border-t border-gray-200 pt-4">
         <button
           onClick={deleteLease}
-          className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          disabled={headerBusy}
+          className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
         >
           Delete lease
         </button>
+        {deleteError ? <p className="mt-2 text-sm text-red-600">{deleteError}</p> : null}
       </section>
     </div>
+  );
+}
+
+// The leased acres box on a land row. It keeps what is typed to itself
+// and saves once, when the box loses focus; a save that fails (or a
+// blank or negative entry) puts the figure on file back.
+function LandAcresInput({
+  value,
+  onSave,
+}: {
+  value: number;
+  onSave: (acres: number) => Promise<boolean>;
+}) {
+  const [text, setText] = useState(String(value ?? ""));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setText(String(value ?? ""));
+  }, [value]);
+
+  async function commit() {
+    const acres = Number(text);
+    if (text.trim() === "" || !Number.isFinite(acres) || acres < 0) {
+      setText(String(value ?? ""));
+      return;
+    }
+    if (acres === Number(value)) return;
+    setSaving(true);
+    const ok = await onSave(acres);
+    setSaving(false);
+    if (!ok) setText(String(value ?? ""));
+  }
+
+  return (
+    <input
+      type="number"
+      step="0.01"
+      min={0}
+      value={text}
+      disabled={saving}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      aria-label="Leased acres"
+      className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-right text-sm disabled:opacity-60"
+    />
   );
 }
 
@@ -798,8 +1007,11 @@ function AssumptionRowEditor({
   rmaConfigFor: (crop: string | null) => RmaBenchmarkConfig | null;
   recipe?: PriceRecipe | null;
   fillSignal?: { fills: PanelFill[]; force: boolean; nonce: number } | null;
-  onSave: (data: YearAssumptions) => void;
+  // Resolves to null when saved, else a plain sentence to show here.
+  onSave: (data: YearAssumptions) => Promise<string | null>;
 }) {
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [bonus, setBonus] = useState<number | null>(value.bonus_estimate ?? null);
   const [entries, setEntries] = useState<CropAssumption[]>(() => {
     const list = cropAssumptions(value).map(cloneEntry);
@@ -903,9 +1115,13 @@ function AssumptionRowEditor({
     setAmberKeys((keys) => new Set([...keys, `${i}:expected_price`]));
   }
 
-  function save() {
+  // A save that fails keeps the typed numbers AND the Save button, with
+  // the reason beside it; only a save that went through clears "dirty".
+  async function save() {
+    if (saving) return;
+    let data: YearAssumptions;
     if (structure === "flex") {
-      onSave({ bonus_estimate: bonus });
+      data = { bonus_estimate: bonus };
     } else {
       const crops = entries.filter(entryHasContent).map((e) => {
         const sources: NonNullable<CropAssumption["sources"]> = {};
@@ -923,7 +1139,15 @@ function AssumptionRowEditor({
           ...(Object.keys(sources).length > 0 ? { sources } : {}),
         };
       });
-      onSave({ crops });
+      data = { crops };
+    }
+    setSaving(true);
+    setSaveError(null);
+    const problem = await onSave(data);
+    setSaving(false);
+    if (problem) {
+      setSaveError(problem);
+      return;
     }
     setDirty(false);
   }
@@ -1000,11 +1224,13 @@ function AssumptionRowEditor({
           {dirty ? (
             <button
               onClick={save}
-              className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+              disabled={saving}
+              className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
             >
-              Save
+              {saving ? "Saving..." : "Save"}
             </button>
           ) : null}
+          {saveError ? <p className="w-full basis-full text-sm text-red-600">{saveError}</p> : null}
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -1128,11 +1354,13 @@ function AssumptionRowEditor({
             {dirty ? (
               <button
                 onClick={save}
-                className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600"
+                disabled={saving}
+                className="rounded-lg bg-kelly-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
               >
-                Save
+                {saving ? "Saving..." : "Save"}
               </button>
             ) : null}
+            {saveError ? <p className="w-full basis-full text-sm text-red-600">{saveError}</p> : null}
           </div>
         </div>
       )}

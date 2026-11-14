@@ -5,7 +5,7 @@ import {
   autoFillYearEntries,
   entryIsTenantManaged,
 } from "./tenantAutoFill";
-import type { CropAssumption } from "./leaseLogic";
+import { annualRent, type CropAssumption, type LeaseLike } from "./leaseLogic";
 import type { TenantCropRow } from "./tenantData";
 
 const priceCell = (fillValue: number, opts: { isFinal?: boolean; asOf?: string | null } = {}) => ({
@@ -138,6 +138,96 @@ describe("autoFillYearEntries (pure)", () => {
     });
     expect(entries).toHaveLength(2);
     expect(entries.map((e) => e.practice).sort()).toEqual(["dryland", "irrigated"]);
+  });
+
+  // The tenant's rows for a crop change shape over the season. The old
+  // shape's entries must be replaced, never left to count the crop twice.
+  // 25% share at $4.50: 200 ac irrigated x 220 bu + 100 ac dryland x 80 bu
+  // projects $58,500; after harvest one blended row (300 ac x 170 bu
+  // actual) is $57,375. Left side by side they read $115,875.
+  const lease25: LeaseLike = {
+    lease_type: "agricultural",
+    rent_structure: "crop_share",
+    terms: { landowner_share_pct: 25 },
+    payment_schedule: [],
+    start_date: "2026-01-01",
+    end_date: "2026-12-31",
+  };
+  const tagged = (over: Partial<CropAssumption>): CropAssumption => ({
+    crop: "Corn",
+    expected_price: 4.5,
+    ...over,
+    sources: {
+      acres: { kind: "tenant_actual", as_of: "2026-08-01" },
+      expected_yield: { kind: "tenant_projected", as_of: "2026-08-01" },
+      expected_price: { kind: "tenant_projected", as_of: "2026-08-01" },
+    },
+  });
+  const splitEntries = (): CropAssumption[] => [
+    tagged({ practice: "irrigated", acres: 200, expected_yield: 220 }),
+    tagged({ practice: "dryland", acres: 100, expected_yield: 80 }),
+  ];
+  const blendedActualRow = row({
+    practice: null,
+    plantedAcres: 300,
+    yieldCell: { value: 170, unitLabel: "bu/ac", basis: "actual" },
+    priceCell: priceCell(4.5),
+  });
+
+  it("practice-split entries are replaced when harvest collapses the crop to one blended row", () => {
+    expect(annualRent(lease25, 300, { crops: splitEntries() })).toBe(58500);
+    const { entries, removed } = autoFillYearEntries({
+      entries: splitEntries(),
+      tenantRows: [blendedActualRow],
+      syncedAt: "2026-10-20T12:00:00Z",
+    });
+    expect(removed).toBe(2);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ crop: "Corn", practice: null, acres: 300, expected_yield: 170 });
+    expect(entries[0].sources?.expected_yield?.kind).toBe("tenant_actual");
+    expect(annualRent(lease25, 300, { crops: entries })).toBe(57375); // not 115,875
+  });
+
+  it("a blended entry is replaced when the tenant's rows gain the irrigated/dryland breakout", () => {
+    const blended = tagged({ practice: null, acres: 300, expected_yield: 170 });
+    const { entries, removed } = autoFillYearEntries({
+      entries: [blended],
+      tenantRows: [
+        row({ practice: "irrigated", plantedAcres: 200, yieldCell: { value: 220, unitLabel: "bu/ac", basis: "projected" }, priceCell: priceCell(4.5) }),
+        row({ practice: "dryland", plantedAcres: 100, yieldCell: { value: 80, unitLabel: "bu/ac", basis: "projected" }, priceCell: priceCell(4.5) }),
+      ],
+      syncedAt: null,
+    });
+    expect(removed).toBe(1);
+    expect(entries.map((e) => e.practice).sort()).toEqual(["dryland", "irrigated"]);
+    expect(annualRent(lease25, 300, { crops: entries })).toBe(58500); // not 115,875
+  });
+
+  it("a practice the tenant stops reporting goes, other crops and vanished crops stay", () => {
+    const soy = tagged({ crop: "Soybeans", practice: null, acres: 80, expected_yield: 50 });
+    const { entries, removed } = autoFillYearEntries({
+      entries: [...splitEntries(), soy],
+      // Corn now irrigated only; the tenant no longer reports Soybeans at all.
+      tenantRows: [row({ practice: "irrigated", plantedAcres: 200, yieldCell: { value: 220, unitLabel: "bu/ac", basis: "projected" }, priceCell: priceCell(4.5) })],
+      syncedAt: null,
+    });
+    expect(removed).toBe(1);
+    expect(entries.map((e) => `${e.crop}|${e.practice ?? "blended"}`)).toEqual(["Corn|irrigated", "Soybeans|blended"]);
+  });
+
+  it("a hand-edited entry keeps the year's crop list: nothing is added and nothing is removed", () => {
+    const handEdited: CropAssumption = { ...splitEntries()[0], expected_yield: 230 };
+    handEdited.sources = { ...handEdited.sources, expected_yield: null }; // a hand edit clears the tag
+    const before = [handEdited, splitEntries()[1]];
+    const { entries, removed, filled } = autoFillYearEntries({
+      entries: before,
+      tenantRows: [blendedActualRow],
+      syncedAt: null,
+    });
+    expect(removed).toBe(0);
+    expect(filled).toBe(0);
+    expect(entries.map((e) => e.practice)).toEqual(["irrigated", "dryland"]);
+    expect(entries[0].expected_yield).toBe(230);
   });
 
   it("entryIsTenantManaged: shared expenses or any untagged value flips it", () => {
@@ -282,6 +372,46 @@ describe("autoFillTenantAssumptions", () => {
     // Empty fields on the same entry still filled with tags.
     expect(entry.acres).toBe(100);
     expect(entry.sources.acres.kind).toBe("tenant_actual");
+  });
+
+  it("after harvest the practice-split entries are replaced by the one blended actual entry", async () => {
+    const db = seed();
+    // Harvest complete on the lease's field: 17,000 bu off 100 acres.
+    Object.assign(db.tables.farm_field_data[0], {
+      harvested_acres: 100,
+      harvest_status: "complete",
+      production_units: 17000,
+      production_unit: "bu",
+    });
+    const sources = {
+      acres: { kind: "tenant_actual", as_of: "2026-08-01" },
+      expected_yield: { kind: "tenant_projected", as_of: "2026-08-01" },
+      expected_price: { kind: "tenant_projected", as_of: "2026-08-01" },
+    };
+    const split = [
+      { crop: "Corn", practice: "irrigated", acres: 60, expected_yield: 220, expected_price: 4.55, sources },
+      { crop: "Corn", practice: "dryland", acres: 40, expected_yield: 95, expected_price: 4.55, sources },
+    ];
+    db.tables.lease_year_assumptions.push({
+      id: "a1",
+      organization_id: "org",
+      lease_id: "L1",
+      year: 2026,
+      data: { crops: split },
+    });
+    await autoFillTenantAssumptions(db.client, "org");
+    const crops = db.tables.lease_year_assumptions[0].data.crops;
+    expect(crops).toHaveLength(1);
+    expect(crops[0]).toMatchObject({ crop: "Corn", practice: null, acres: 100, expected_yield: 170 });
+    expect(crops[0].sources.expected_yield.kind).toBe("tenant_actual");
+
+    // A year that already holds both shapes (saved before this rule) is
+    // cleaned up on the next sync even though no value changes.
+    db.tables.lease_year_assumptions[0].data = { crops: [...split, crops[0]] };
+    const again = await autoFillTenantAssumptions(db.client, "org");
+    expect(again).toEqual({ leases: 1, values: 0 });
+    expect(db.tables.lease_year_assumptions[0].data.crops).toHaveLength(1);
+    expect(db.tables.lease_year_assumptions[0].data.crops[0].practice).toBeNull();
   });
 
   it("every read filters the organization explicitly (service-role safety)", async () => {

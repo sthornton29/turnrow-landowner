@@ -146,11 +146,45 @@ describe("explainLeaseYear other structures", () => {
     expect(x.expected).toBe(8000);
   });
 
-  it("does not project outside the lease dates or once expired", () => {
+  // Was "...or once expired": an expired lease used to lose its expected
+  // rent for every year. The status no longer rewrites history (the
+  // Income page's rule, lib/income.ts).
+  it("does not project outside the lease dates; an expired lease keeps the years of its term", () => {
     expect(explainLeaseYear(base({ year: 2027 })).basis).toBe("none");
-    expect(
-      explainLeaseYear(base({ lease: { ...cropShareLease(), status: "expired" } })).basis
-    ).toBe("none");
+    const expired = explainLeaseYear(base({ lease: { ...cropShareLease(), status: "expired" } }));
+    expect(expired.basis).toBe("projection");
+    expect(expired.expected).toBe(explainLeaseYear(base()).expected);
+  });
+
+  it("a July-to-June lease is expected only in the years its payments fall due", () => {
+    const lease = {
+      ...cropShareLease(),
+      lease_type: "hunting" as const,
+      rent_structure: null,
+      terms: { hunt_basis: "lump_sum" as const, amount: 8000 },
+      payment_schedule: [{ label: "Annual payment", month: 7, day: 1, percent: 100 }],
+      start_date: "2026-07-01",
+      end_date: "2027-06-30",
+    };
+    const first = explainLeaseYear(base({ lease, assumptions: undefined, year: 2026 }));
+    expect(first.basis).toBe("projection");
+    expect(first.expected).toBe(8000);
+    // July 1, 2027 is after the lease ends: nothing is due in 2027.
+    const second = explainLeaseYear(base({ lease, assumptions: undefined, year: 2027 }));
+    expect(second.basis).toBe("none");
+    expect(second.expected).toBe(0);
+    // Two halves, one each side of New Year: half the rent each year.
+    const halves = {
+      ...lease,
+      payment_schedule: [
+        { label: "Spring", month: 3, day: 1, percent: 50 },
+        { label: "Fall", month: 9, day: 1, percent: 50 },
+      ],
+    };
+    const half = explainLeaseYear(base({ lease: halves, assumptions: undefined, year: 2027 }));
+    expect(half.expected).toBe(4000);
+    expect(half.projection).toBe(8000); // the full year's rent, shown for the arithmetic
+    expect(half.headline).toContain("50%");
   });
 });
 
@@ -177,6 +211,44 @@ describe("explainLeaseYear schedule and received", () => {
     expect(x.unscheduledPayments).toEqual([
       { date: "2026-04-10", amount: 500, memo: "Late fee" },
     ]);
+  });
+
+  it("an expired lease's unpaid rows for a year after it ended drop out; paid ones stay", () => {
+    // The lease ended in 2025; these rows are for 2026, the year after.
+    const args = base({
+      lease: { ...cropShareLease(), status: "expired", end_date: "2025-12-31" },
+      expectedRows: [
+        { id: "r1", label: "Spring", due_date: "2026-03-01", expected_amount: 10000 },
+        { id: "r2", label: "Summer", due_date: "2026-08-01", expected_amount: 4000 },
+        { id: "r3", label: "Fall", due_date: "2026-11-01", expected_amount: 10000 },
+      ],
+      // The August installment was paid even though the lease had ended.
+      payments: [{ amount: 4000, received_date: "2026-08-03", expected_payment_id: "r2" }],
+    });
+    const x = explainLeaseYear(args);
+    expect(x.schedule.map((s) => s.id)).toEqual(["r2"]);
+    expect(x.expected).toBe(4000);
+    // Still active: every row counts.
+    const active = explainLeaseYear({ ...args, lease: { ...args.lease, status: "active" } });
+    expect(active.expected).toBe(24000);
+  });
+
+  it("an expired lease keeps every row of its last year, whenever each falls due", () => {
+    // Ended June 30, 2026 and marked expired: all three are 2026 rent.
+    const x = explainLeaseYear(
+      base({
+        lease: { ...cropShareLease(), status: "expired", end_date: "2026-06-30" },
+        expectedRows: [
+          { id: "r1", label: "Spring", due_date: "2026-03-01", expected_amount: 10000 },
+          { id: "r2", label: "Harvest", due_date: "2026-12-10", expected_amount: 10000 },
+          { id: "r3", label: "Final settlement", due_date: "2027-07-01", expected_amount: 4000 },
+        ],
+        payments: [],
+      })
+    );
+    expect(x.basis).toBe("schedule");
+    expect(x.schedule.map((s) => s.id)).toEqual(["r1", "r2", "r3"]);
+    expect(x.expected).toBe(24000);
   });
 
   it("counts received by the year the payment was dated, like the Income page", () => {

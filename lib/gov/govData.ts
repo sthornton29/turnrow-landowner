@@ -9,8 +9,10 @@ import {
   type ArcPlcPriceData,
   type CoveredCommodity,
 } from './govPayments'
+import { normalizeCountyName } from './fsaBenchmarkFile'
 import {
   allocateToProperties,
+  normalizeCountyKey,
   projectFarms,
   type BaseAcreRow,
   type BenchmarkRow,
@@ -46,14 +48,22 @@ export async function loadGovInputs(supabase: Client): Promise<GovInputs> {
     supabase.from('program_year_config').select('*'),
   ])
   const farmRows = (farms.data ?? []) as FsaFarmRow[]
-  // Benchmarks only for the states/counties the farms sit in.
+  // Benchmarks only for the states and counties the farms sit in. The
+  // cache holds every county of a state for each file year, so a
+  // state-wide read can run past one page of rows and lose the older
+  // file years (the newest sorts first). County is stored the way the
+  // benchmark file lookup normalizes it.
   const states = Array.from(new Set(farmRows.map((f) => (f.state ?? '').toUpperCase()).filter(Boolean)))
+  const counties = Array.from(
+    new Set(farmRows.flatMap((f) => [normalizeCountyName(f.county), normalizeCountyKey(f.county)]).filter(Boolean)),
+  )
   let benchmarks: BenchmarkRow[] = []
-  if (states.length > 0) {
+  if (states.length > 0 && counties.length > 0) {
     const { data } = await supabase
       .from('fsa_benchmark_cache')
       .select('data_year, state_code, county, commodity, benchmark_yield, benchmark_price')
       .in('state_code', states)
+      .in('county', counties)
       .order('data_year', { ascending: false })
     benchmarks = ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
       state_code: String(r.state_code),
@@ -98,12 +108,16 @@ export interface OrgProjection {
   baseAcresByProperty: Map<string, Map<string, number>> // property -> commodity -> acres
 }
 
-// Keep only the newest file year per (state, county, commodity): the
-// engine notes when it is older than the program year.
-function newestBenchmarks(rows: BenchmarkRow[]): BenchmarkRow[] {
+// Keep only the newest file year per (state, county, commodity) that is
+// not newer than the program year: the engine notes when it is older.
+// (File years after the program year are dropped FIRST; picking the
+// newest row and then dropping it left a county with no benchmark at
+// all once a later year was cached.)
+function newestBenchmarks(rows: BenchmarkRow[], programYear: number): BenchmarkRow[] {
   const seen = new Set<string>()
   const out: BenchmarkRow[] = []
-  for (const r of [...rows].sort((a, b) => b.data_year - a.data_year)) {
+  const eligible = rows.filter((r) => r.data_year <= programYear)
+  for (const r of eligible.sort((a, b) => b.data_year - a.data_year)) {
     const key = `${r.state_code}|${r.county}|${r.commodity}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -121,7 +135,7 @@ export function projectOrg(inputs: GovInputs, programYear: number, liveEstimates
     elections: inputs.elections,
     commodities: inputs.commodities,
     priceData: inputs.priceData,
-    benchmarks: newestBenchmarks(inputs.benchmarks).filter((b) => b.data_year <= programYear),
+    benchmarks: newestBenchmarks(inputs.benchmarks, programYear),
     liveEstimates,
     config,
   })

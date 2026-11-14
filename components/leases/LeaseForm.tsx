@@ -1,11 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDate } from "@/lib/format";
 import {
   LEASE_STATUS_LABELS,
   PRICE_METHOD_LABELS,
+  installmentsOutsideTerm,
+  maxScheduleDay,
+  schedulePercentTotal,
+  scheduleProblem,
   type LeaseStatus,
   type LeaseTerms,
   type LeaseType,
@@ -116,6 +122,12 @@ export default function LeaseForm({
     lease?.tenant_id ?? matchedTenant?.id ?? (prefill?.tenant_name ? "__new__" : tenants[0]?.id ?? "__new__")
   );
   const [newTenantName, setNewTenantName] = useState(prefill?.tenant_name ?? "");
+  // A tenant this form created on an earlier Save attempt (the lease
+  // itself then failed to save): it joins the list and stays selected,
+  // so a retry reuses it instead of creating a second one.
+  const [createdTenants, setCreatedTenants] = useState<
+    Array<{ id: string; name: string; farm_connection_id?: string | null }>
+  >([]);
   const [leaseType, setLeaseType] = useState<LeaseType>(
     lease?.lease_type ?? prefill?.lease_type ?? "agricultural"
   );
@@ -190,6 +202,17 @@ export default function LeaseForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // This form stays mounted on the lease page, holding what it loaded
+  // with, while that page changes the status and the end date on its own.
+  // Follow those two when they change on the lease, so a later Save here
+  // does not write the old values back over them.
+  useEffect(() => {
+    if (lease) setStatus(lease.status);
+  }, [lease?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (lease) setEndDate(lease.end_date ?? "");
+  }, [lease?.end_date]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function updateLand(i: number, patch: Partial<LandRow>) {
     setLand((rows) =>
       rows.map((row, j) =>
@@ -214,6 +237,22 @@ export default function LeaseForm({
   function updateSchedule(i: number, patch: Partial<SchedulePayment>) {
     setSchedule((s) => s.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   }
+  // Percent schedules should account for the whole year's rent; the form
+  // says so when they do not (null: nothing to check).
+  const percentTotal = schedulePercentTotal(schedule);
+  // Only payments due inside the lease dates are expected. A scheduled
+  // payment dated before the lease starts or after it ends is named
+  // here, so it never drops out without the reader knowing.
+  const outsideTerm = scheduleProblem(schedule)
+    ? []
+    : installmentsOutsideTerm({
+        lease_type: leaseType,
+        rent_structure: leaseType === "agricultural" ? rentStructure : null,
+        terms,
+        payment_schedule: schedule,
+        start_date: startDate || null,
+        end_date: endDate || null,
+      });
 
   async function save() {
     setBusy(true);
@@ -234,6 +273,34 @@ export default function LeaseForm({
       }
     }
 
+    // A due date that does not exist (6/31) is caught here, in words,
+    // before anything saves.
+    const scheduleIssue = scheduleProblem(schedule);
+    if (scheduleIssue) {
+      setError(`Payment schedule: ${scheduleIssue}`);
+      setBusy(false);
+      return;
+    }
+
+    // Leased land (new leases): every row with a property needs acres,
+    // and a property can be listed once. Either mistake would make the
+    // database refuse ALL the land rows after the lease itself had saved.
+    const landRows = lease ? [] : land.filter((r) => r.propertyId);
+    for (const r of landRows) {
+      const propertyLabel = properties.find((p) => p.id === r.propertyId)?.name ?? "that property";
+      const acres = Number(r.acres);
+      if (r.acres.trim() === "" || !Number.isFinite(acres) || acres < 0) {
+        setError(`Leased land: enter the leased acres for ${propertyLabel}, or remove that row.`);
+        setBusy(false);
+        return;
+      }
+      if (landRows.filter((x) => x.propertyId === r.propertyId).length > 1) {
+        setError(`Leased land: ${propertyLabel} is listed more than once. Keep one row for it.`);
+        setBusy(false);
+        return;
+      }
+    }
+
     let finalTenantId = tenantId;
     if (tenantId === "__new__") {
       if (!newTenantName.trim()) {
@@ -247,12 +314,31 @@ export default function LeaseForm({
         .select("id")
         .single();
       if (err || !data) {
-        setError("Could not create the tenant: " + (err?.message ?? ""));
+        setError(friendlyDbError(err, "Could not create the tenant. Nothing was saved; try again."));
         setBusy(false);
         return;
       }
       finalTenantId = data.id;
+      // The tenant exists now. Select it, so that if the lease below
+      // fails to save, pressing Save again reuses this tenant instead of
+      // creating a second one with the same name.
+      setCreatedTenants((list) => [...list, { id: data.id, name: newTenantName.trim() }]);
+      setTenantId(data.id);
     }
+
+    // The lease page saves the pricing recipe into terms on its own, so
+    // on an existing lease the recipe and the clauses this form does not
+    // edit come from the lease as it is NOW, never from the copy this
+    // form loaded with (saving that copy used to wipe a recipe set up in
+    // the same visit).
+    const savedTerms: LeaseTerms = lease
+      ? {
+          ...terms,
+          custom_recipe: lease.terms?.custom_recipe,
+          pricing_clause: lease.terms?.pricing_clause,
+          gov_payment_clause: lease.terms?.gov_payment_clause,
+        }
+      : terms;
 
     const row = {
       organization_id: orgId,
@@ -265,7 +351,7 @@ export default function LeaseForm({
       auto_renew: autoRenew,
       termination_notice_days: num(noticeDays),
       rent_structure: leaseType === "agricultural" ? rentStructure : null,
-      terms,
+      terms: savedTerms,
       payment_schedule: schedule,
       special_provisions: provisions.trim() || null,
     };
@@ -274,7 +360,7 @@ export default function LeaseForm({
       const { error: err } = await supabase.from("leases").update(row).eq("id", lease.id);
       setBusy(false);
       if (err) {
-        setError("Could not save: " + err.message);
+        setError(friendlyDbError(err, "Could not save the lease. Your changes are still here; try again."));
         return;
       }
       router.refresh();
@@ -287,26 +373,27 @@ export default function LeaseForm({
       .select("id")
       .single();
     if (err || !data) {
-      setError("Could not save: " + (err?.message ?? ""));
+      setError(friendlyDbError(err, "Could not save the lease. Nothing was lost; try again."));
       setBusy(false);
       return;
     }
 
     // Link the confirmed leased land (a lease can cover several
     // properties). Rows with no property picked are simply not linked;
-    // the lease page can link land any time. Best effort: the lease
-    // exists either way, so failures here never strand the user on a
-    // form that would double-create on retry.
-    const landInserts = land
-      .filter((r) => r.propertyId)
-      .map((r) => ({
-        organization_id: orgId,
-        lease_id: data.id,
-        property_id: r.propertyId,
-        leased_acres: r.acres.trim() === "" ? null : Number(r.acres),
-      }));
+    // the lease page can link land any time. The lease exists either
+    // way, so a failure here never strands the user on a form that would
+    // double-create on retry: the lease page opens and says what is
+    // missing.
+    const savedWithout: string[] = [];
+    const landInserts = landRows.map((r) => ({
+      organization_id: orgId,
+      lease_id: data.id,
+      property_id: r.propertyId,
+      leased_acres: Number(r.acres),
+    }));
     if (landInserts.length > 0) {
-      await supabase.from("lease_lands").insert(landInserts);
+      const { error: landErr } = await supabase.from("lease_lands").insert(landInserts);
+      if (landErr) savedWithout.push("land");
     }
 
     // Attach the source document the terms were extracted from.
@@ -315,19 +402,23 @@ export default function LeaseForm({
       const { error: upErr } = await supabase.storage
         .from("documents")
         .upload(path, sourceFile, { contentType: sourceFile.type });
-      if (!upErr) {
-        await supabase.from("documents").insert({
-          organization_id: orgId,
-          entity_type: "lease",
-          entity_id: data.id,
-          file_name: sourceFile.name,
-          storage_path: path,
-          content_type: sourceFile.type,
-          size_bytes: sourceFile.size,
-        });
-      }
+      const { error: docErr } = upErr
+        ? { error: upErr }
+        : await supabase.from("documents").insert({
+            organization_id: orgId,
+            entity_type: "lease",
+            entity_id: data.id,
+            file_name: sourceFile.name,
+            storage_path: path,
+            content_type: sourceFile.type,
+            size_bytes: sourceFile.size,
+          });
+      if (docErr) savedWithout.push("document");
     }
-    router.push(`/leases/${data.id}`);
+    router.push(
+      `/leases/${data.id}` +
+        (savedWithout.length > 0 ? `?saved_without=${savedWithout.join(",")}` : "")
+    );
   }
 
   return (
@@ -367,7 +458,7 @@ export default function LeaseForm({
             onChange={(e) => setTenantId(e.target.value)}
             className={inputClass + ring("tenant_name")}
           >
-            {[...tenants]
+            {[...tenants, ...createdTenants.filter((c) => !tenants.some((t) => t.id === c.id))]
               // Farm-data tenants (the farming entities) first.
               .sort((a, b) => Number(Boolean(b.farm_connection_id)) - Number(Boolean(a.farm_connection_id)) || a.name.localeCompare(b.name))
               .map((t) => (
@@ -791,8 +882,8 @@ export default function LeaseForm({
               ) : null}
               {(terms.price_method ?? "manual") === "custom" ? (
                 <p className="text-xs text-gray-500">
-                  {terms.custom_recipe
-                    ? `Recipe saved: ${terms.custom_recipe.description}`
+                  {(lease ? lease.terms?.custom_recipe : terms.custom_recipe)
+                    ? `Recipe saved: ${(lease ? lease.terms?.custom_recipe : terms.custom_recipe)!.description}`
                     : "Set up the pricing recipe on the lease page after saving."}
                 </p>
               ) : null}
@@ -1013,10 +1104,13 @@ export default function LeaseForm({
               <input
                 type="number"
                 min={1}
-                max={31}
+                max={maxScheduleDay(row.month)}
                 value={row.day}
                 onChange={(e) => updateSchedule(i, { day: Number(e.target.value) })}
-                className="w-16 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                className={
+                  "w-16 rounded-lg border px-2 py-1.5 text-sm " +
+                  (row.day > maxScheduleDay(row.month) ? "border-red-400" : "border-gray-300")
+                }
                 title="Day"
               />
               <input
@@ -1050,6 +1144,30 @@ export default function LeaseForm({
             </div>
           ))
         )}
+        {scheduleProblem(schedule) ? (
+          <p className="text-xs text-red-600">{scheduleProblem(schedule)}</p>
+        ) : null}
+        {percentTotal && !percentTotal.full ? (
+          <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+            These percentages add up to {percentTotal.total}%, not 100%, so the scheduled payments
+            will add up to {percentTotal.total}% of each year{"'"}s rent. Adjust them to total 100%
+            unless that is what the lease says.
+          </p>
+        ) : null}
+        {outsideTerm.length > 0 ? (
+          <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+            Not counted as expected, because the due date is outside the lease dates:{" "}
+            {outsideTerm
+              .map(
+                (o) =>
+                  `${o.label}, due ${formatDate(o.due_date)} (${
+                    o.when === "before_start" ? "before the lease starts" : "after the lease ends"
+                  })`
+              )
+              .join("; ")}
+            . If that rent is owed, change the lease dates or the due date.
+          </p>
+        ) : null}
       </div>
 
       <div>

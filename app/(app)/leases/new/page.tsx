@@ -1,10 +1,12 @@
-import { requireOrg } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import NewLeaseClient from "./NewLeaseClient";
 
 export const metadata = { title: "New lease" };
 
 export default async function NewLeasePage() {
-  const { supabase, profile } = await requireOrg();
+  // Creating a lease is admin work (row level security refuses it for
+  // anyone else, migration 0034): other members go back to the list.
+  const { supabase, profile } = await requireAdmin("/leases");
   const [{ data: tenants }, { data: properties }, { data: parcels }] =
     await Promise.all([
       supabase.from("tenants").select("id, name, farm_connection_id").order("name"),

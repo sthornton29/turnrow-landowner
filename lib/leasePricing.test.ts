@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   rmaConfigForCrop,
+  roundPriceForUse,
   tenantPriceCard,
+  tenantPriceDollars,
   type TenantPriceRow,
 } from "./leasePricing";
+import { buildTenantCropRows } from "./tenantData";
 
 const price = (over: Partial<TenantPriceRow>): TenantPriceRow => ({
   farm_connection_id: "conn1",
@@ -131,6 +134,55 @@ describe("rmaConfigForCrop", () => {
   it("handles missing config", () => {
     expect(rmaConfigForCrop(null, "corn")).toBeNull();
     expect(rmaConfigForCrop([], "corn")).toBeNull();
+  });
+});
+
+describe("tenant prices in dollars (cotton is tracked in cents per lb)", () => {
+  const cotton = price({ crop: "Cotton", projected_avg_price: 82.9, unit: "cents_per_lb" });
+
+  it("the card carries the dollars value a formula or a fill must use", () => {
+    // 82.90 c/lb is $0.829/lb. A custom pricing recipe used to read the
+    // 82.90 as dollars (100 times the price).
+    const card = tenantPriceCard(["conn1"], new Set(["conn1"]), [cotton], 2026, "cotton");
+    expect(card).toMatchObject({ state: "price", price: 82.9, unitLabel: "c/lb", fillValue: 0.829 });
+    const corn = tenantPriceCard(["conn1"], new Set(["conn1"]), [price({})], 2026, "corn");
+    expect(corn).toMatchObject({ state: "price", price: 4.63, fillValue: 4.63 });
+  });
+
+  it("is the same rule the Tenant Data panel fills with", () => {
+    const rows = buildTenantCropRows({
+      farmData: [
+        {
+          farm_connection_id: "conn1", remote_field_id: "f1", crop_year: 2026, crop: "Cotton",
+          planted_acres: 100, irrigated_acres: null, dryland_acres: null, harvested_acres: null,
+          harvest_status: null, production_units: null, production_unit: null,
+        } as never,
+      ],
+      projectedYields: [],
+      prices: [cotton],
+      relevantKeys: new Set(["conn1|f1"]),
+      relevantConnectionIds: ["conn1"],
+      yieldsScope: new Set(),
+      projectedYieldScope: new Set(),
+      priceScope: new Set(["conn1"]),
+      year: 2026,
+      leaseCrops: ["Cotton"],
+    });
+    const cell = rows[0].priceCell;
+    const card = tenantPriceCard(["conn1"], new Set(["conn1"]), [cotton], 2026, "cotton");
+    expect(typeof cell === "object" && cell ? cell.fillValue : null).toBe(
+      card.state === "price" ? card.fillValue : undefined
+    );
+    expect(tenantPriceDollars(82.9, "cents_per_lb")).toBe(0.829);
+    expect(tenantPriceDollars(71.256, "cents_per_lb")).toBe(0.7126); // four decimals
+    expect(tenantPriceDollars(4.63, "usd_per_bu")).toBe(4.63);
+  });
+
+  it("per-lb prices keep four decimals, per-bushel prices keep cents", () => {
+    expect(roundPriceForUse(0.82904, "Cotton")).toBe(0.829);
+    expect(roundPriceForUse(0.71256, "upland cotton")).toBe(0.7126); // two decimals would say 0.71
+    expect(roundPriceForUse(4.6349, "Corn")).toBe(4.63);
+    expect(roundPriceForUse(11.256, null)).toBe(11.26);
   });
 });
 

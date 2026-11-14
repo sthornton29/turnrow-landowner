@@ -14,12 +14,16 @@ import {
   annualRent,
   govPaymentTreatment,
   isGovShareLabel,
+  isLapsedExpectedRow,
+  rentDueYears,
+  rentShareDue,
   type GovPaymentReceivedVia,
   type GovPaymentTreatment,
   type LeaseLike,
   type YearAssumptions,
 } from "@/lib/leaseLogic";
 import { loadGovInputs, projectForPaymentYear, type GovInputs } from "@/lib/gov/govData";
+import { recordCountsAsReceived } from "@/lib/incomeRecords";
 import { allocateByLines } from "@/lib/tax";
 
 // "government" = the landowner's contractual share (terms.gov_payment_share_pct)
@@ -38,6 +42,10 @@ export interface IncomeRecordInput {
   amount: number;
   property_id: string | null;
   entity_id: string | null;
+  // received | accrued | calculated (lib/incomeRecords.ts). Only a
+  // received record is money in hand; absent (older callers / tests)
+  // reads as received.
+  basis?: string | null;
 }
 
 // Which income bucket an income record's type falls in.
@@ -65,6 +73,9 @@ export interface IncomeInputs {
     year: number;
     expected_amount: number;
     label?: string | null; // "Government payment share (...)" rows type as government
+    // When the row falls due. Informational here: whether a row still
+    // counts on an ended lease goes by its lease year, not this date.
+    due_date?: string | null;
   }>;
   payments: Array<{
     lease_id: string | null;
@@ -118,6 +129,9 @@ export interface YearTotals {
   // True when any of the expected total is a computed projection (no
   // generated payment schedule yet); views show the "will change" note.
   hasProjection: boolean;
+  // Income records marked owed (accrued) or calculated but not confirmed
+  // paid. Never part of received; views show the figure labeled, apart.
+  unconfirmed: number;
 }
 
 export function emptyTotals(): YearTotals {
@@ -127,7 +141,25 @@ export function emptyTotals(): YearTotals {
     taxesDue: 0,
     taxesPaid: 0,
     hasProjection: false,
+    unconfirmed: 0,
   };
+}
+
+// Outstanding for a total row: what each line (an income type, a lease)
+// is still owed, added up. Money received beyond one line's expected
+// amount (income with nothing expected, an overpaid lease) never pays
+// down what another line is owed, so the total row always equals the sum
+// of the Outstanding column above it.
+export function outstandingTotal(
+  lines: YearTotals | Array<{ expected: number; received: number }>
+): number {
+  const list = Array.isArray(lines)
+    ? lines
+    : (Object.keys(lines.expected) as IncomeType[]).map((type) => ({
+        expected: lines.expected[type],
+        received: lines.received[type],
+      }));
+  return list.reduce((s, l) => s + Math.max(l.expected - l.received, 0), 0);
 }
 
 function typeOf(
@@ -141,8 +173,12 @@ function typeOf(
 }
 
 // Projected rent per (lease, year) from terms + leased acres + that
-// year's assumptions. Draft and active leases project; expired and
-// terminated ones stop.
+// year's assumptions, for the installments that fall due inside the
+// lease term (lib/leaseLogic.ts termPlan): a July-to-June lease shows
+// one year's rent, not one per calendar year it touches, and nothing
+// is projected after the end date. The status does not gate this: an
+// expired or terminated lease keeps the expected rent of its term, so
+// marking it never rewrites past years.
 export function projectedLeaseYears(inputs: IncomeInputs): Map<string, Map<number, number>> {
   const acresByLease = new Map<string, number>();
   for (const l of inputs.leaseLands) {
@@ -155,19 +191,18 @@ export function projectedLeaseYears(inputs: IncomeInputs): Map<string, Map<numbe
   }
   const result = new Map<string, Map<number, number>>();
   for (const lease of inputs.leases) {
-    if (lease.status === "expired" || lease.status === "terminated") continue;
-    if (!lease.start_date || !lease.end_date) continue;
-    const startYear = Number(lease.start_date.slice(0, 4));
-    const endYear = Number(lease.end_date.slice(0, 4));
-    if (!startYear || !endYear || endYear < startYear || endYear - startYear > 50) continue;
     const byYear = new Map<number, number>();
-    for (let year = startYear; year <= endYear; year++) {
+    for (const year of rentDueYears(lease)) {
       const rent = annualRent(
         lease,
         acresByLease.get(lease.id) ?? 0,
         assumptionsByLease.get(lease.id)?.get(year)
       );
-      if (rent !== null && rent !== 0) byYear.set(year, rent);
+      if (rent === null || rent === 0) continue;
+      // A year whose installments all fall due carries the whole rent;
+      // a year the term only partly covers carries its part.
+      const share = rentShareDue(lease, year, rent);
+      byYear.set(year, share === 1 ? rent : Math.round(rent * share * 100) / 100);
     }
     if (byYear.size > 0) result.set(lease.id, byYear);
   }
@@ -186,11 +221,25 @@ interface EffectiveExpected {
 // One expected amount per source-year: generated expected_payments win
 // for a (lease, year) once any exist (they carry the user's schedule
 // and adjustments); otherwise the computed projection fills in. Timber
-// sales only ever have generated rows.
+// sales only ever have generated rows. On a lease that is over (expired
+// or terminated), unpaid rows for a lease year after the year it ended
+// no longer count (lib/leaseLogic.ts isLapsedExpectedRow).
 function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
   const entries: EffectiveExpected[] = [];
   const generated = new Map<string, number>();
   const generatedGov = new Map<string, number>();
+  // Lease-years that carry a schedule, counted rows or not: the
+  // projection never fills in beside one.
+  const scheduled = new Set<string>();
+  const leaseById = new Map(inputs.leases.map((l) => [l.id, l]));
+  const receivedByExpected = new Map<string, number>();
+  for (const p of inputs.payments) {
+    if (!p.expected_payment_id) continue;
+    receivedByExpected.set(
+      p.expected_payment_id,
+      (receivedByExpected.get(p.expected_payment_id) ?? 0) + p.amount
+    );
+  }
   for (const e of inputs.expected) {
     if (e.timber_sale_id) {
       entries.push({
@@ -207,6 +256,9 @@ function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
       generatedGov.set(key, (generatedGov.get(key) ?? 0) + e.expected_amount);
     } else if (e.lease_id) {
       const key = `${e.lease_id}|${e.year}`;
+      scheduled.add(key);
+      const lease = leaseById.get(e.lease_id);
+      if (lease && isLapsedExpectedRow(lease, e, receivedByExpected.get(e.id) ?? 0)) continue;
       generated.set(key, (generated.get(key) ?? 0) + e.expected_amount);
     }
   }
@@ -226,7 +278,7 @@ function effectiveExpectedEntries(inputs: IncomeInputs): EffectiveExpected[] {
   }
   for (const [leaseId, byYear] of projectedLeaseYears(inputs)) {
     for (const [year, amount] of byYear) {
-      if (generated.has(`${leaseId}|${year}`)) continue;
+      if (scheduled.has(`${leaseId}|${year}`)) continue;
       entries.push({ leaseId, timberSaleId: null, year, amount, projection: true });
     }
   }
@@ -282,13 +334,18 @@ export function leaseYearRows(
     if (p.expected_payment_id && govIds.has(p.expected_payment_id)) continue;
     get(p.lease_id).received += p.amount;
   }
-  // Leases active in the year whose projection could not be computed
-  // (a missing rate or crop input): shown so the gap is visible.
+  // Leases with rent falling due in the year whose projection could not
+  // be computed (a missing rate or crop input): shown so the gap is
+  // visible. Same rule as the projection: the lease's term decides, not
+  // its status, and a lease-year that carries a schedule is not a gap.
+  const scheduledLeases = new Set(
+    inputs.expected
+      .filter((e) => e.lease_id && e.year === year && !isGovShareLabel(e.label))
+      .map((e) => e.lease_id)
+  );
   for (const lease of inputs.leases) {
-    if (rows.has(lease.id)) continue;
-    if (lease.status === "expired" || lease.status === "terminated") continue;
-    if (!lease.start_date || !lease.end_date) continue;
-    if (year < Number(lease.start_date.slice(0, 4)) || year > Number(lease.end_date.slice(0, 4))) continue;
+    if (rows.has(lease.id) || scheduledLeases.has(lease.id)) continue;
+    if (!rentDueYears(lease).includes(year)) continue;
     get(lease.id).incomplete = true;
   }
   if (scope) {
@@ -471,7 +528,13 @@ export function summarizeByYear(inputs: IncomeInputs): Map<number, YearTotals> {
     get(year).received.timber += s.total_amount;
   }
   for (const r of inputs.records ?? []) {
-    get(r.year).received[recordIncomeType(r.income_type)] += Number(r.amount);
+    // Only a record marked received is money in hand; owed and
+    // calculated ones are reported apart, never as received.
+    if (recordCountsAsReceived(r.basis)) {
+      get(r.year).received[recordIncomeType(r.income_type)] += Number(r.amount);
+    } else {
+      get(r.year).unconfirmed += Number(r.amount);
+    }
   }
   for (const t of inputs.taxStatements) {
     get(t.tax_year).taxesDue += t.amount_due;
@@ -550,6 +613,7 @@ export interface PropertyTotals {
   expectedByType: Record<IncomeType, number>;
   receivedByType: Record<IncomeType, number>;
   hasProjection: boolean;
+  unconfirmed: number; // income records not marked received (see YearTotals)
 }
 
 const zeroByType = (): Record<IncomeType, number> => ({
@@ -575,6 +639,7 @@ export function allocateToProperties(
         expected: 0, received: 0, taxesDue: 0, taxesPaid: 0,
         expectedByType: zeroByType(), receivedByType: zeroByType(),
         hasProjection: false,
+        unconfirmed: 0,
       };
     result.set(propertyId, cur);
     return cur;
@@ -623,10 +688,14 @@ export function allocateToProperties(
       e.projection
     );
   }
-  for (const r of govShareRows(inputs, year)) {
-    if (r.landownerAmount > 0 && !r.generated) {
-      add(r.propertyId, "expected", r.landownerAmount, "government");
-      get(r.propertyId).hasProjection = true;
+  // The projected government share, for the same years summarizeByYear
+  // projects it (govYears), so the by-type and by-property tables agree.
+  if (govYears(inputs).includes(year)) {
+    for (const r of govShareRows(inputs, year)) {
+      if (r.landownerAmount > 0 && !r.generated) {
+        add(r.propertyId, "expected", r.landownerAmount, "government");
+        get(r.propertyId).hasProjection = true;
+      }
     }
   }
   for (const p of inputs.payments) {
@@ -644,7 +713,11 @@ export function allocateToProperties(
   for (const r of inputs.records ?? []) {
     if (r.year !== year) continue;
     const key = r.property_id ?? (r.entity_id ? entityUnassignedKey(r.entity_id) : UNASSIGNED);
-    add(key, "received", Number(r.amount), recordIncomeType(r.income_type));
+    if (recordCountsAsReceived(r.basis)) {
+      add(key, "received", Number(r.amount), recordIncomeType(r.income_type));
+    } else {
+      get(key).unconfirmed += Number(r.amount);
+    }
   }
 
   // Taxes route LINE by LINE: a line's tax goes to its parcel's property;
@@ -707,6 +780,7 @@ export function sumPropertyScope(
     }
     totals.taxesDue += t.taxesDue;
     totals.taxesPaid += t.taxesPaid;
+    totals.unconfirmed += t.unconfirmed;
     if (t.hasProjection) totals.hasProjection = true;
   }
   return totals;
@@ -742,7 +816,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     supabase.from("lease_lands").select("lease_id, property_id, leased_acres"),
     supabase
       .from("expected_payments")
-      .select("id, lease_id, timber_sale_id, year, expected_amount, label"),
+      .select("id, lease_id, timber_sale_id, year, expected_amount, label, due_date"),
     supabase
       .from("payments")
       .select("lease_id, timber_sale_id, amount, received_date, expected_payment_id"),
@@ -759,7 +833,7 @@ export async function loadIncomeInputs(supabase: any): Promise<IncomeInputs> {
     supabase.from("parcels").select("id, property_id"),
     supabase.from("properties").select("id, acres"),
     loadGovInputs(supabase),
-    supabase.from("income_records").select("year, income_type, amount, property_id, entity_id"),
+    supabase.from("income_records").select("year, income_type, amount, property_id, entity_id, basis"),
   ]);
   return {
     leases: leases.data ?? [],

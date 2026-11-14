@@ -34,6 +34,13 @@ export const BASIS_LABELS: Record<string, string> = {
   calculated: "Calculated, not confirmed paid",
 };
 
+// Only a record marked received is money in hand. Owed (accrued) and
+// calculated records are listed and labeled but never counted as
+// received. A row read without the column counts, as it always has.
+export function recordCountsAsReceived(basis: string | null | undefined): boolean {
+  return basis === null || basis === undefined || basis === "received";
+}
+
 export interface IncomeRecordRow {
   id: string;
   year: number;
@@ -52,13 +59,25 @@ export interface IncomeRecordRow {
   notes: string | null;
 }
 
-// Year x type totals for the records in view, newest year first.
-export function totalsByYear(rows: Array<Pick<IncomeRecordRow, "year" | "income_type" | "amount">>) {
-  const map = new Map<number, { year: number; total: number; byType: Map<string, number> }>();
+// Year x type totals for the records in view, newest year first. total
+// and byType hold received money only; records not marked received add
+// up under unconfirmed.
+export function totalsByYear(
+  rows: Array<Pick<IncomeRecordRow, "year" | "income_type" | "amount"> & { basis?: string | null }>
+) {
+  const map = new Map<
+    number,
+    { year: number; total: number; byType: Map<string, number>; unconfirmed: number }
+  >();
   for (const r of rows) {
-    const cur = map.get(r.year) ?? { year: r.year, total: 0, byType: new Map<string, number>() };
-    cur.total += Number(r.amount);
-    cur.byType.set(r.income_type, (cur.byType.get(r.income_type) ?? 0) + Number(r.amount));
+    const cur =
+      map.get(r.year) ?? { year: r.year, total: 0, byType: new Map<string, number>(), unconfirmed: 0 };
+    if (recordCountsAsReceived(r.basis)) {
+      cur.total += Number(r.amount);
+      cur.byType.set(r.income_type, (cur.byType.get(r.income_type) ?? 0) + Number(r.amount));
+    } else {
+      cur.unconfirmed += Number(r.amount);
+    }
     map.set(r.year, cur);
   }
   return Array.from(map.values()).sort((a, b) => b.year - a.year);

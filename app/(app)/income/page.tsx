@@ -10,6 +10,7 @@ import {
   emptyTotals,
   informationalGovPayments,
   loadIncomeInputs,
+  outstandingTotal,
   summarizeByYear,
   sumPropertyScope,
   type IncomeType,
@@ -103,6 +104,10 @@ export default async function IncomePage({
     r.agricultural + r.hunting + r.timber + r.government + r.other;
   const totalExpected = sumTypes(totals.expected);
   const totalReceived = sumTypes(totals.received);
+  // Outstanding adds up type by type: money received beyond what one
+  // type expected (solar records, an overpaid lease) never pays down
+  // what another type is still owed.
+  const totalOutstanding = outstandingTotal(totals);
 
   // Government payments line, scoped the same way (the rows carry their
   // property).
@@ -144,6 +149,10 @@ export default async function IncomePage({
   const leaseTotals = leaseRows.reduce(
     (s, r) => ({ expected: s.expected + r.expectedScoped, received: s.received + r.receivedScoped }),
     { expected: 0, received: 0 }
+  );
+  // Outstanding adds up lease by lease, for the same reason as above.
+  const leaseOutstanding = outstandingTotal(
+    leaseRows.map((r) => ({ expected: r.expectedScoped, received: r.receivedScoped }))
   );
 
   // Entity level: group the by-property rows under the entity that holds
@@ -402,7 +411,7 @@ export default async function IncomePage({
                 <td className="px-4 py-2 text-right tabular-nums">{formatDollars(totalExpected)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatDollars(totalReceived)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">
-                  {formatDollars(Math.max(totalExpected - totalReceived, 0))}
+                  {formatDollars(totalOutstanding)}
                 </td>
               </tr>
               <tr className="border-b border-gray-100">
@@ -430,6 +439,16 @@ export default async function IncomePage({
             </tbody>
           </table>
         </div>
+        {totals.unconfirmed > 0 ? (
+          <p className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+            Not counted as received: {formatDollars(totals.unconfirmed)} in {selectedYear} income
+            records marked owed or calculated, not confirmed paid.{" "}
+            <Link href={`/income/records?year=${selectedYear}`} className="font-medium underline">
+              Review them
+            </Link>{" "}
+            and mark the ones that were paid as Received.
+          </p>
+        ) : null}
       </section>
 
       {/* Selected year: by lease, each row opening its breakdown */}
@@ -511,7 +530,7 @@ export default async function IncomePage({
                     <td className="px-4 py-2 text-right tabular-nums">{formatDollars(leaseTotals.expected)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{formatDollars(leaseTotals.received)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">
-                      {formatDollars(Math.max(leaseTotals.expected - leaseTotals.received, 0))}
+                      {formatDollars(leaseOutstanding)}
                     </td>
                     <td className="px-2 py-2"></td>
                   </tr>

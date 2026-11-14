@@ -3,7 +3,7 @@ import { requireOrg } from "@/lib/auth";
 import { formatNumber } from "@/lib/format";
 import { insuranceBadge } from "@/lib/insurance";
 import SectionTabs from "@/components/leases/SectionTabs";
-import { createTenant } from "./actions";
+import { NewTenantForm } from "./TenantForms";
 
 export const metadata = { title: "Tenants" };
 
@@ -33,36 +33,7 @@ export default async function TenantsPage() {
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-kelly-700">
           + New tenant
         </summary>
-        <form action={createTenant} className="flex flex-wrap gap-2 px-4 pb-4">
-          <input
-            name="name"
-            required
-            placeholder="Name (person or entity)"
-            className="min-w-48 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="contact_person"
-            placeholder="Contact person"
-            className="w-44 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="phone"
-            placeholder="Phone"
-            className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <input
-            name="email"
-            type="email"
-            placeholder="Email"
-            className="w-52 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-          >
-            Create
-          </button>
-        </form>
+        <NewTenantForm />
       </details>
 
       {(tenants ?? []).length === 0 ? (

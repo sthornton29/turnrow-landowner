@@ -9,11 +9,9 @@ import TenantFarmEntity, {
   type ConnectionEntities,
   type EntitySuggestion,
 } from "@/components/tenants/TenantFarmEntity";
-import { updateTenant, deleteTenant } from "../actions";
+import { DeleteTenantButton, TenantEditForm } from "../TenantForms";
 
 export const metadata = { title: "Tenant" };
-
-const inputClass = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm";
 
 export default async function TenantDetailPage({
   params,
@@ -21,7 +19,7 @@ export default async function TenantDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   const [{ data: tenant }, { data: leases }, { data: connections }] = await Promise.all([
     supabase.from("tenants").select("*").eq("id", id).single(),
@@ -108,71 +106,19 @@ export default async function TenantDetailPage({
         </div>
       </div>
 
-      <form
-        action={updateTenant}
-        className="space-y-3 rounded-xl border border-gray-200 bg-white p-4"
-      >
-        <input type="hidden" name="id" value={tenant.id} />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Name</label>
-            <input name="name" defaultValue={tenant.name} required className={inputClass} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Contact person</label>
-            <input name="contact_person" defaultValue={tenant.contact_person ?? ""} className={inputClass} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Phone</label>
-            <input name="phone" defaultValue={tenant.phone ?? ""} className={inputClass} />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Email</label>
-            <input name="email" type="email" defaultValue={tenant.email ?? ""} className={inputClass} />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm font-medium text-gray-700">Mailing address</label>
-            <textarea
-              name="mailing_address"
-              rows={2}
-              defaultValue={tenant.mailing_address ?? ""}
-              className={inputClass}
-            />
-          </div>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                name="insurance_on_file"
-                defaultChecked={tenant.insurance_on_file}
-                className="h-4 w-4 accent-kelly-500"
-              />
-              Insurance certificate on file
-            </label>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Insurance expires
-            </label>
-            <input
-              name="insurance_expires"
-              type="date"
-              defaultValue={tenant.insurance_expires ?? ""}
-              className={inputClass}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-sm font-medium text-gray-700">Notes</label>
-            <textarea name="notes" rows={2} defaultValue={tenant.notes ?? ""} className={inputClass} />
-          </div>
-        </div>
-        <button
-          type="submit"
-          className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
-        >
-          Save changes
-        </button>
-      </form>
+      <TenantEditForm
+        tenant={{
+          id: tenant.id,
+          name: tenant.name,
+          contact_person: tenant.contact_person ?? null,
+          phone: tenant.phone ?? null,
+          email: tenant.email ?? null,
+          mailing_address: tenant.mailing_address ?? null,
+          insurance_on_file: !!tenant.insurance_on_file,
+          insurance_expires: tenant.insurance_expires ?? null,
+          notes: tenant.notes ?? null,
+        }}
+      />
 
       <TenantFarmEntity
         tenantId={tenant.id}
@@ -193,11 +139,18 @@ export default async function TenantDetailPage({
         <h2 className="mb-2 text-lg font-semibold text-gray-900">Leases</h2>
         {(leases ?? []).length === 0 ? (
           <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-            No leases with this tenant yet.{" "}
-            <Link href="/leases/new" className="font-medium text-kelly-700 hover:underline">
-              Create one
-            </Link>
-            .
+            No leases with this tenant yet.
+            {/* Creating a lease is admin work (the new-lease page sends
+                anyone else back to the list). */}
+            {isAdmin ? (
+              <>
+                {" "}
+                <Link href="/leases/new" className="font-medium text-kelly-700 hover:underline">
+                  Create one
+                </Link>
+                .
+              </>
+            ) : null}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -231,18 +184,11 @@ export default async function TenantDetailPage({
       </section>
 
       <section className="border-t border-gray-200 pt-4">
-        <form action={deleteTenant}>
-          <input type="hidden" name="id" value={tenant.id} />
-          <button
-            type="submit"
-            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-          >
-            Delete tenant
-          </button>
-          <p className="mt-1 text-xs text-gray-500">
-            Only possible when the tenant has no leases (delete or reassign those first).
-          </p>
-        </form>
+        <DeleteTenantButton
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+          leaseCount={(leases ?? []).length}
+        />
       </section>
     </div>
   );

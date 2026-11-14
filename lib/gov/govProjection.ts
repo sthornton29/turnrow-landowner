@@ -290,6 +290,21 @@ export function allocateToProperties(rows: ProjectionRow[], links: FarmPropertyL
   return out
 }
 
+// The sum of each farm's property link percentages (a farm with no
+// links is absent). allocateToProperties applies the percentages as
+// entered, so a total over 100 allocates more than the farm's payment
+// and a total under 100 leaves the rest on no property: the Government
+// Payments page warns when a total is not 100.
+export function farmAllocationTotals(links: FarmPropertyLink[]): Map<string, number> {
+  const totals = new Map<string, number>()
+  for (const l of links) {
+    const pct = Number(l.allocation_pct)
+    totals.set(l.fsa_farm_id, (totals.get(l.fsa_farm_id) ?? 0) + (pct > 0 ? pct : 0))
+  }
+  for (const [farmId, total] of totals) totals.set(farmId, Math.round(total * 100) / 100)
+  return totals
+}
+
 export function sumNet(rows: Array<{ net: number }>): number {
   return Math.round(rows.reduce((s, r) => s + r.net, 0) * 100) / 100
 }

@@ -17,7 +17,7 @@ export default async function GovPaymentsPage({
 }: {
   searchParams: Promise<{ year?: string; framing?: string; entity?: string }>;
 }) {
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
   const { year: yearParam, framing: framingParam, entity: entityParam } = await searchParams;
   const framing = framingParam === "program" ? "program" : "payment";
   const currentYear = new Date().getFullYear();
@@ -59,6 +59,7 @@ export default async function GovPaymentsPage({
   return (
     <GovPaymentsClient
       orgId={profile.organization_id!}
+      isAdmin={isAdmin}
       isPlatformAdmin={!!profile.is_platform_admin}
       framing={framing}
       selectedYear={selectedYear}

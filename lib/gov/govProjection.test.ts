@@ -3,6 +3,7 @@ import { resolveProgramYearConfig } from './programConfig'
 import {
   UNLINKED_FARM,
   allocateToProperties,
+  farmAllocationTotals,
   normalizeCountyKey,
   projectFarms,
   sumNet,
@@ -91,6 +92,31 @@ describe('projectFarms', () => {
     expect(alloc.map((a) => a.baseAcres)).toEqual([60, 40])
     expect(sumNet(alloc)).toBe(3859.68)
     expect(allocateToProperties(rows, [])[0].propertyId).toBe(UNLINKED_FARM)
+  })
+
+  it('totals each farm\'s property percentages so views can warn when they are not 100', () => {
+    const links = [
+      { fsa_farm_id: 'f1', property_id: 'pA', allocation_pct: 100 },
+      { fsa_farm_id: 'f1', property_id: 'pB', allocation_pct: '50' },
+      { fsa_farm_id: 'f2', property_id: 'pA', allocation_pct: 33.33 },
+      { fsa_farm_id: 'f2', property_id: 'pB', allocation_pct: 33.33 },
+      { fsa_farm_id: 'f2', property_id: 'pC', allocation_pct: 33.34 },
+      { fsa_farm_id: 'f3', property_id: 'pA', allocation_pct: 60 },
+    ]
+    const totals = farmAllocationTotals(links)
+    expect(totals.get('f1')).toBe(150) // 150% of the farm's payment would be allocated
+    expect(totals.get('f2')).toBe(100)
+    expect(totals.get('f3')).toBe(60) // 40% of the payment lands on no property
+    expect(totals.has('f4')).toBe(false) // a farm with no links has no total
+    // The allocation itself applies the percentages as entered.
+    const rows = projectFarms({
+      programYear: 2025, farms,
+      baseAcres: [{ fsa_farm_id: 'f1', commodity: 'corn', base_acres: 100, plc_yield: 150 }],
+      elections: [], commodities: [corn],
+      priceData: [{ commodity: 'corn', program_year: 2025, effective_reference_price: 4.42, mya_price_estimate: 4.1, mya_price_final: null, wasde_midpoint: null, source: 'estimate' }],
+      config,
+    })
+    expect(sumNet(allocateToProperties(rows, links))).toBe(Math.round(3859.68 * 1.5 * 100) / 100)
   })
 
   it('county keys normalize like the FSA file', () => {

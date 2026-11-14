@@ -13,8 +13,13 @@
 // empty or tagged, no shared expenses entered) also gets missing tenant
 // crops added automatically; once the user hand-touches anything in a
 // year, the year's crop LIST is theirs and only matched entries keep
-// refreshing. Entries whose tenant row vanished keep their last values
-// and as-of labels (never deleted).
+// refreshing. Entries whose tenant crop vanished keep their last values
+// and as-of labels (never deleted). The one removal: in a tenant-managed
+// year, when the tenant's rows for a crop change shape (irrigated +
+// dryland rows collapse to one blended row at harvest, or a blended
+// crop gains the breakout), the entries of that crop under a practice
+// the tenant no longer reports are replaced, so the crop never counts
+// twice.
 //
 // SERVICE-ROLE SAFE: the cron client bypasses RLS, so EVERY query here
 // filters organization_id explicitly and never relies on a policy.
@@ -22,7 +27,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
 
-import { matchCrop } from "@/lib/crops";
+import { matchCrop, sameCrop } from "@/lib/crops";
 import { leaseFarmScope, type ScopeMappingRow } from "@/lib/leaseFarmScope";
 import {
   cropAssumptions,
@@ -77,15 +82,16 @@ export function entryIsTenantManaged(e: CropAssumption): boolean {
 }
 
 // Fill/refresh one year's entries from its tenant rows, in place on a
-// copy. Returns the new entries and how many values changed. Pure;
-// unit tested in tenantAutoFill.test.ts.
+// copy. Returns the new entries, how many values changed, and how many
+// entries were removed because the tenant's rows for their crop changed
+// shape. Pure; unit tested in tenantAutoFill.test.ts.
 export function autoFillYearEntries(args: {
   entries: CropAssumption[];
   tenantRows: TenantCropRow[];
   syncedAt: string | null;
-}): { entries: CropAssumption[]; filled: number } {
+}): { entries: CropAssumption[]; filled: number; removed: number } {
   const { tenantRows, syncedAt } = args;
-  const entries = args.entries.map((e) => ({ ...e, sources: { ...(e.sources ?? {}) } }));
+  let entries = args.entries.map((e) => ({ ...e, sources: { ...(e.sources ?? {}) } }));
   const yearIsTenantManaged = entries.every(entryIsTenantManaged);
   let filled = 0;
 
@@ -128,7 +134,30 @@ export function autoFillYearEntries(args: {
       filled++;
     }
   }
-  return { entries, filled };
+
+  // The tenant's rows for a crop change shape over the season: Corn
+  // irrigated + Corn dryland collapse to one blended ACTUAL row once
+  // harvest completes (tenantData.ts), and a blended crop can gain the
+  // breakout. The loop above added the new shape; the entries the old
+  // shape left behind would count the crop twice, so they are replaced:
+  // an entry of a crop the tenant still reports, under a practice the
+  // tenant no longer reports for it, goes. Only in a tenant-managed
+  // year (every entry here is the auto-fill's own); a year the user has
+  // hand-touched got no new entries above and loses none here. A crop
+  // the tenant no longer reports at all keeps its last values.
+  let removed = 0;
+  if (yearIsTenantManaged) {
+    const kept = entries.filter((e) => {
+      const rowsForCrop = tenantRows.filter((r) => sameCrop(r.crop, e.crop));
+      if (rowsForCrop.length === 0) return true;
+      return rowsForCrop.some(
+        (r) => (r.practice ?? "blended") === (e.practice ?? "blended")
+      );
+    });
+    removed = entries.length - kept.length;
+    entries = kept;
+  }
+  return { entries, filled, removed };
 }
 
 export async function autoFillTenantAssumptions(
@@ -262,12 +291,12 @@ export async function autoFillTenantAssumptions(
       });
       if (tenantRows.length === 0) continue;
 
-      const { entries, filled } = autoFillYearEntries({
+      const { entries, filled, removed } = autoFillYearEntries({
         entries: before,
         tenantRows,
         syncedAt: syncedAt as string | null,
       });
-      if (filled === 0) continue;
+      if (filled === 0 && removed === 0) continue;
 
       const nextData: YearAssumptions = {
         ...(existing?.data?.bonus_estimate != null

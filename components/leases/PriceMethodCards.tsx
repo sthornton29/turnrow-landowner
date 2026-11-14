@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatDollars } from "@/lib/format";
 import type { RmaCachedData } from "@/lib/rma";
 import { resolveBenchmark, windowState } from "@/lib/rma";
-import type { TenantPriceCard } from "@/lib/leasePricing";
+import { roundPriceForUse, type TenantPriceCard } from "@/lib/leasePricing";
 import type { PriceRecipe, RmaBenchmarkConfig } from "@/lib/leaseLogic";
 import {
   evaluateExpression,
@@ -16,7 +16,12 @@ import {
   validateExpression,
 } from "@/lib/priceExpression";
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+// A price as it will fill: per-lb prices (cotton) show their four
+// decimals, everything else reads as dollars and cents.
+function priceText(price: number, crop: string | null): string {
+  const rounded = roundPriceForUse(price, crop);
+  return /cotton/i.test(crop ?? "") ? `$${rounded.toFixed(4)}` : formatDollars(rounded);
+}
 
 // ---------------------------------------------------------------------
 // Tenant average price
@@ -84,7 +89,8 @@ export function TenantPriceCardView({
       ) : null}
       {onUse ? (
         <button
-          onClick={() => onUse(round2(card.price))}
+          // The DOLLARS value: a cents-per-lb price fills as dollars per lb.
+          onClick={() => onUse(roundPriceForUse(card.fillValue, card.crop))}
           className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-100"
         >
           Use this price
@@ -187,12 +193,12 @@ export function RmaBenchmarkCard({
               : "Harvest price"}
           :{" "}
           {resolved.result !== null
-            ? `${formatDollars(resolved.result)} ${data.unit_label}`
+            ? `${priceText(resolved.result, config.crop)} ${data.unit_label}`
             : "not available yet"}
         </span>
         {resolved.result !== null && onUse ? (
           <button
-            onClick={() => onUse(round2(resolved.result!))}
+            onClick={() => onUse(roundPriceForUse(resolved.result!, config.crop))}
             className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-100"
           >
             Use this price
@@ -254,7 +260,9 @@ export function RecipeComputeCard({
       } else unresolved.push(input.name);
     } else if (input.source === "tenant_average") {
       if (tenantCard.state === "price") {
-        values[input.name.toLowerCase()] = tenantCard.price;
+        // In DOLLARS: the tenant tracks cotton in cents per lb, and the
+        // recipe's other inputs and its result are dollars.
+        values[input.name.toLowerCase()] = tenantCard.fillValue;
       } else unresolved.push(input.name);
     } else {
       const side = input.source === "rma_projected" ? rma.data?.projected : rma.data?.harvest;
@@ -303,7 +311,7 @@ export function RecipeComputeCard({
             />
           ) : values[input.name.toLowerCase()] !== undefined ? (
             <span className="text-pine-900">
-              {formatDollars(values[input.name.toLowerCase()])}
+              {priceText(values[input.name.toLowerCase()], crop)}
             </span>
           ) : (
             <span className="text-xs text-amber-700">
@@ -319,11 +327,11 @@ export function RecipeComputeCard({
         <p className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-pine-900">
             {substituteExpression(recipe.expression, values)} ={" "}
-            {formatDollars(round2(computed))}
+            {priceText(computed, crop)}
           </span>
           {onUse ? (
             <button
-              onClick={() => onUse(round2(computed!))}
+              onClick={() => onUse(roundPriceForUse(computed!, crop))}
               className="rounded-lg border border-kelly-500 px-2 py-1 text-xs font-medium text-kelly-700 hover:bg-kelly-100"
             >
               Use this price

@@ -1,14 +1,22 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
 import { formatDollars } from "@/lib/format";
-import { INCOME_RECORD_TYPE_LABELS, totalsByYear, type IncomeRecordRow, type IncomeRecordType } from "@/lib/incomeRecords";
+import {
+  INCOME_RECORD_TYPE_LABELS,
+  recordCountsAsReceived,
+  totalsByYear,
+  type IncomeRecordRow,
+  type IncomeRecordType,
+} from "@/lib/incomeRecords";
 import IncomeRecordsClient from "./IncomeRecordsClient";
 
 export const metadata = { title: "Income records" };
 
 // INCOME RECORDS (migration 0051): income received outside a lease
 // payment or timber settlement, mostly history from the old books. The
-// Income page counts every record as received income in its year.
+// Income page counts every record marked Received as received income in
+// its year; records marked owed or calculated are listed and labeled but
+// not counted.
 
 export default async function IncomeRecordsPage({
   searchParams,
@@ -37,9 +45,14 @@ export default async function IncomeRecordsPage({
       (sp.review !== "1" || r.needs_review)
   );
   const reviewCount = all.filter((r) => r.needs_review).length;
-  const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+  // The headline and the year table hold received money only. Records
+  // marked owed or calculated are added up apart, under their own label.
+  const total = rows.reduce((s, r) => (recordCountsAsReceived(r.basis) ? s + Number(r.amount) : s), 0);
+  const unconfirmedTotal = rows.reduce((s, r) => (recordCountsAsReceived(r.basis) ? s : s + Number(r.amount)), 0);
   const summary = totalsByYear(rows);
-  const typesInView = Array.from(new Set(rows.map((r) => r.income_type))) as IncomeRecordType[];
+  const typesInView = Array.from(
+    new Set(rows.filter((r) => recordCountsAsReceived(r.basis)).map((r) => r.income_type))
+  ) as IncomeRecordType[];
 
   const q = (over: Record<string, string | null>) => {
     const p = new URLSearchParams();
@@ -63,7 +76,8 @@ export default async function IncomeRecordsPage({
         <h1 className="text-xl font-semibold text-gray-900">Income records</h1>
         <p className="mt-0.5 max-w-3xl text-sm text-gray-600">
           Income received outside a lease payment or a timber sale: rent history from the old books, solar and tower payments,
-          building rent. The Income page counts each record as received in its year. Records marked{" "}
+          building rent. The Income page counts each record marked Received as received in its year. A record marked owed
+          or calculated shows that label here and is not counted until you change it to Received. Records marked{" "}
           <span className="font-semibold text-amber-800">Check</span> came from a source that was unclear; open the note, fix
           the property or type if needed, then clear the mark.
         </p>
@@ -105,9 +119,14 @@ export default async function IncomeRecordsPage({
         <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
           <p className="text-2xl font-semibold text-pine-900">{formatDollars(total)}</p>
           <p className="text-sm text-gray-600">
-            {rows.length} record{rows.length === 1 ? "" : "s"}
+            received, {rows.length} record{rows.length === 1 ? "" : "s"}
             {year ? ` in ${year}` : ""}
           </p>
+          {unconfirmedTotal > 0 ? (
+            <p className="text-sm font-medium text-amber-800">
+              plus {formatDollars(unconfirmedTotal)} marked owed or calculated (not counted as received)
+            </p>
+          ) : null}
         </div>
         {summary.length > 1 ? (
           <div className="mt-3 overflow-x-auto">
@@ -122,7 +141,8 @@ export default async function IncomeRecordsPage({
                       </Link>
                     </th>
                   ))}
-                  <th className="py-1 text-right">Total</th>
+                  <th className="py-1 text-right">Total received</th>
+                  {unconfirmedTotal > 0 ? <th className="py-1 pl-3 text-right text-amber-800">Owed or calculated</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -139,6 +159,11 @@ export default async function IncomeRecordsPage({
                       </td>
                     ))}
                     <td className="py-1 text-right font-medium tabular-nums text-gray-900">{formatDollars(s.total)}</td>
+                    {unconfirmedTotal > 0 ? (
+                      <td className="py-1 pl-3 text-right tabular-nums text-amber-800">
+                        {s.unconfirmed ? formatDollars(s.unconfirmed) : ""}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

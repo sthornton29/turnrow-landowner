@@ -17,7 +17,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { extractFile } from "@/components/documents/classify";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatDollars, formatNumber, todayISO } from "@/lib/format";
 import {
   CLUSTER_THRESHOLD,
   normalizeOwnerName,
@@ -97,7 +98,11 @@ interface Extraction {
 interface Item {
   localId: string;
   file: File;
-  status: "extracting" | "review" | "saving" | "saved" | "error";
+  // attaching / attach_failed: the payment IS recorded and the source
+  // document is being (or could not be) attached. Only the attachment
+  // can be retried from there; the payment form never comes back (a
+  // second Record would insert the payment twice).
+  status: "extracting" | "review" | "saving" | "attaching" | "attach_failed" | "saved" | "error";
   error: string | null;
   extraction: Extraction | null;
   // editable review state
@@ -119,9 +124,13 @@ const amberClass = "rounded-lg border border-amber-400 bg-amber-50 px-2 py-1.5 t
 export default function RentUpload({
   orgId,
   defaultLeaseId = null,
+  onSaved,
 }: {
   orgId: string;
   defaultLeaseId?: string | null;
+  // Called after a payment (or settlement) is recorded, so the page
+  // section that opened this can reload its own rows.
+  onSaved?: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -138,12 +147,50 @@ export default function RentUpload({
   const [assumptionsByLease, setAssumptionsByLease] = useState<
     Map<string, YearAssumptions>
   >(new Map());
+  // The latest open-installment read, for proposals made from callbacks
+  // that started before it (an extraction that finishes after a save).
+  const openData = useRef<{ expected: ExpectedRow[]; received: Map<string, number> }>({
+    expected: [],
+    received: new Map(),
+  });
+
+  // Expected payments and what has been received against each, as they
+  // stand in the database right now. Read when the panel opens and again
+  // after every save, so a second check is never proposed against an
+  // installment the first one just paid. Null when a read failed.
+  async function loadOpenInstallments(): Promise<{
+    expected: ExpectedRow[];
+    received: Map<string, number>;
+  } | null> {
+    const [e, p] = await Promise.all([
+      supabase
+        .from("expected_payments")
+        .select("id, lease_id, label, due_date, expected_amount")
+        .not("lease_id", "is", null),
+      supabase.from("payments").select("expected_payment_id, amount"),
+    ]);
+    if (e.error || p.error) return null;
+    const received = new Map<string, number>();
+    for (const row of (p.data as Array<{ expected_payment_id: string | null; amount: number }>) ?? []) {
+      if (row.expected_payment_id) {
+        received.set(
+          row.expected_payment_id,
+          (received.get(row.expected_payment_id) ?? 0) + row.amount
+        );
+      }
+    }
+    const rows = (e.data as ExpectedRow[]) ?? [];
+    setExpected(rows);
+    setReceivedByExpected(received);
+    openData.current = { expected: rows, received };
+    return openData.current;
+  }
 
   useEffect(() => {
     if (!open) return;
     (async () => {
       const year = new Date().getFullYear();
-      const [t, l, s, e, p, a] = await Promise.all([
+      const [t, l, s, , a] = await Promise.all([
         supabase.from("tenants").select("id, name").order("name"),
         supabase.from("leases").select("id, name, tenant_id, status, terms"),
         supabase
@@ -151,11 +198,7 @@ export default function RentUpload({
           .select(
             "id, sale_name, buyer_name, buyer_tenant_id, sale_type, status, delivered_net, allocation_method, stumpage_rates"
           ),
-        supabase
-          .from("expected_payments")
-          .select("id, lease_id, label, due_date, expected_amount")
-          .not("lease_id", "is", null),
-        supabase.from("payments").select("expected_payment_id, amount"),
+        loadOpenInstallments(),
         supabase
           .from("lease_year_assumptions")
           .select("lease_id, year, data")
@@ -164,14 +207,6 @@ export default function RentUpload({
       setTenants((t.data as Tenant[]) ?? []);
       setLeases((l.data as Lease[]) ?? []);
       setSales((s.data as TimberSale[]) ?? []);
-      setExpected((e.data as ExpectedRow[]) ?? []);
-      const rec = new Map<string, number>();
-      for (const row of (p.data as Array<{ expected_payment_id: string | null; amount: number }>) ?? []) {
-        if (row.expected_payment_id) {
-          rec.set(row.expected_payment_id, (rec.get(row.expected_payment_id) ?? 0) + row.amount);
-        }
-      }
-      setReceivedByExpected(rec);
       setAssumptionsByLease(
         new Map(
           ((a.data as Array<{ lease_id: string; data: YearAssumptions }>) ?? []).map(
@@ -180,17 +215,22 @@ export default function RentUpload({
         )
       );
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, supabase]);
 
-  function openLeaseExpected(leaseId: string): OpenExpectedPayment[] {
-    return expected
+  function openLeaseExpected(
+    leaseId: string,
+    rows: ExpectedRow[] = expected,
+    received: Map<string, number> = receivedByExpected
+  ): OpenExpectedPayment[] {
+    return rows
       .filter((e) => e.lease_id === leaseId)
       .map((e) => ({
         id: e.id,
         label: e.label,
         due_date: e.due_date,
         expected_amount: e.expected_amount,
-        received_total: receivedByExpected.get(e.id) ?? 0,
+        received_total: received.get(e.id) ?? 0,
       }))
       .filter((e) => e.expected_amount - e.received_total > 0.005);
   }
@@ -206,10 +246,18 @@ export default function RentUpload({
     return best && best.score >= CLUSTER_THRESHOLD ? best.id : "";
   }
 
-  function applyProposal(item: Item): Item {
+  function applyProposal(
+    item: Item,
+    rows: ExpectedRow[] = openData.current.expected,
+    received: Map<string, number> = openData.current.received
+  ): Item {
     const amount = Number(item.amount) || 0;
     if (!item.leaseId || amount <= 0) return { ...item, allocations: {} };
-    const proposal = proposeAllocation(amount, item.date || null, openLeaseExpected(item.leaseId));
+    const proposal = proposeAllocation(
+      amount,
+      item.date || null,
+      openLeaseExpected(item.leaseId, rows, received)
+    );
     const allocations: Record<string, string> = {};
     for (const line of proposal.lines) allocations[line.expectedId] = String(line.amount);
     return { ...item, allocations };
@@ -326,7 +374,7 @@ export default function RentUpload({
     const { error: upErr } = await supabase.storage
       .from("documents")
       .upload(path, item.file, { contentType: item.file.type || undefined });
-    if (upErr) return `Could not upload the document: ${upErr.message}`;
+    if (upErr) return friendlyDbError(upErr, "The file could not be uploaded.");
     const { error: insErr } = await supabase.from("documents").insert({
       organization_id: orgId,
       entity_type: entityType,
@@ -336,12 +384,27 @@ export default function RentUpload({
       content_type: item.file.type || null,
       size_bytes: item.file.size,
     });
-    return insErr ? `Could not save the document row: ${insErr.message}` : null;
+    return insErr ? friendlyDbError(insErr, "The file uploaded but could not be filed under the lease.") : null;
+  }
+
+  // After the payment is recorded: attach the source document. A failure
+  // here leaves the item in attach_failed, where only this step repeats.
+  async function attachToLease(item: Item) {
+    patch(item.localId, { status: "attaching", error: null });
+    const docErr = await attachDocument(item, "lease", item.leaseId);
+    if (docErr) {
+      patch(item.localId, {
+        status: "attach_failed",
+        error: `The payment is recorded. The document was not attached to the lease: ${docErr}`,
+      });
+      return;
+    }
+    patch(item.localId, { status: "saved", error: null });
   }
 
   async function saveItem(item: Item) {
     patch(item.localId, { status: "saving", error: null });
-    const provenance = `Uploaded ${item.extraction?.document_kind ?? "document"} "${item.file.name}", extracted ${new Date().toISOString().slice(0, 10)}`;
+    const provenance = `Uploaded ${item.extraction?.document_kind ?? "document"} "${item.file.name}", extracted ${todayISO()}`;
     const fail = (message: string) =>
       patch(item.localId, { status: "review", error: message });
 
@@ -352,7 +415,7 @@ export default function RentUpload({
     if (!item.leaseId) return fail("Pick the lease first (or the tenant to narrow it).");
     const total = Number(item.amount) || 0;
     if (total <= 0) return fail("Enter the amount received.");
-    const date = item.date || new Date().toISOString().slice(0, 10);
+    const date = item.date || todayISO();
     const allocationEntries = Object.entries(item.allocations)
       .map(([expectedId, v]) => ({ expectedId, amount: Number(v) || 0 }))
       .filter((a) => a.amount > 0);
@@ -390,10 +453,38 @@ export default function RentUpload({
     ];
     if (rows.length === 0) return fail("Nothing to record: allocate the amount first.");
     const { error } = await supabase.from("payments").insert(rows);
-    if (error) return fail("Could not record the payment: " + error.message);
-    const docErr = await attachDocument(item, "lease", item.leaseId);
-    if (docErr) return fail("Payment saved, but " + docErr);
-    patch(item.localId, { status: "saved" });
+    if (error) {
+      return fail(friendlyDbError(error, "Could not record the payment. Nothing was saved; try again."));
+    }
+    // The payment is in. From here the item never returns to review: a
+    // second Record would insert the payment again.
+    //
+    // What is open has changed. Count this payment against its
+    // installments right away and redo the proposals of the other checks
+    // still waiting on this lease, so two checks uploaded together are
+    // not both set against the same installment.
+    const received = new Map(openData.current.received);
+    for (const a of allocationEntries) {
+      received.set(a.expectedId, (received.get(a.expectedId) ?? 0) + a.amount);
+    }
+    openData.current = { expected: openData.current.expected, received };
+    setReceivedByExpected(received);
+    setItems((prev) =>
+      prev.map((it) =>
+        it.localId !== item.localId &&
+        it.status === "review" &&
+        it.mode === "lease" &&
+        it.leaseId === item.leaseId
+          ? applyProposal(it)
+          : it
+      )
+    );
+    onSaved?.();
+
+    await attachToLease(item);
+    // Then read the open installments back from the database, the
+    // authority for what the remaining checks can be set against.
+    await loadOpenInstallments();
     router.refresh();
   }
 
@@ -465,8 +556,30 @@ export default function RentUpload({
                       Saved
                     </span>
                   ) : null}
+                  {item.status === "attaching" || item.status === "attach_failed" ? (
+                    <span className="rounded-full bg-kelly-50 px-2 py-0.5 text-xs font-medium text-pine-900">
+                      Payment recorded
+                    </span>
+                  ) : null}
+                  {item.status === "attaching" ? (
+                    <span className="text-xs text-gray-500">Attaching the document...</span>
+                  ) : null}
                 </p>
                 {item.error ? <p className="text-sm text-red-600">{item.error}</p> : null}
+                {item.status === "attach_failed" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => attachToLease(item)}
+                      className="rounded-lg border border-kelly-500 px-3 py-1.5 text-sm font-medium text-kelly-700 hover:bg-kelly-50"
+                    >
+                      Try attaching the document again
+                    </button>
+                    <span className="text-xs text-gray-500">
+                      Do not record the payment again. You can also add the file later under
+                      Documents on the lease page.
+                    </span>
+                  </div>
+                ) : null}
 
                 {item.status === "review" || item.status === "saving" ? (
                   <>

@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { formatDollars } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDollars, todayISO } from "@/lib/format";
 import {
   PAYMENT_STATUS_LABELS,
   STATUS_BADGE_CLASSES,
   paymentStatus,
+  planScheduleRefresh,
   type GeneratedPayment,
 } from "@/lib/leaseLogic";
 import RentUpload from "@/components/payments/RentUpload";
@@ -30,21 +32,38 @@ interface PaymentRow {
 
 const inputClass = "rounded-lg border border-gray-300 px-2 py-1.5 text-sm";
 
+// The database refuses to delete an expected row while a payment still
+// points at it. Say that; the generic text for that error code ("something
+// required is missing") would send the reader looking for an empty field.
+function expectedDeleteError(
+  err: { code?: string | null; message?: string | null },
+  fallback: string
+): string {
+  return err.code === "23502" || err.code === "23503"
+    ? "A payment is recorded against an expected payment that was about to be removed, so nothing was removed."
+    : friendlyDbError(err, fallback);
+}
+
 // Expected vs actual payments for one lease or timber sale.
 // "Sync" regenerates expected rows from the parent's computeExpected()
 // but NEVER touches rows that already have payments recorded.
+// canManageSchedule: false hides the controls that regenerate or delete
+// the shared schedule rows (a member who sees only part of a lease's land
+// would rewrite the schedule for everyone from partial acreage).
 export default function PaymentsSection({
   orgId,
   leaseId,
   timberSaleId,
   computeExpected,
   emptyHint,
+  canManageSchedule = true,
 }: {
   orgId: string;
   leaseId?: string;
   timberSaleId?: string;
   computeExpected?: () => GeneratedPayment[];
   emptyHint?: string;
+  canManageSchedule?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [expected, setExpected] = useState<ExpectedRow[]>([]);
@@ -53,16 +72,34 @@ export default function PaymentsSection({
   const [error, setError] = useState<string | null>(null);
   const [recordingFor, setRecordingFor] = useState<string | "extra" | null>(null);
 
-  const load = useCallback(async () => {
+  // Both tables as they stand in the database right now, or null when
+  // either read failed.
+  const fetchRows = useCallback(async (): Promise<{
+    expected: ExpectedRow[];
+    payments: PaymentRow[];
+  } | null> => {
     const col = leaseId ? "lease_id" : "timber_sale_id";
     const idVal = (leaseId ?? timberSaleId)!;
     const [e, p] = await Promise.all([
       supabase.from("expected_payments").select("*").eq(col, idVal).order("due_date"),
       supabase.from("payments").select("*").eq(col, idVal).order("received_date"),
     ]);
-    setExpected((e.data as ExpectedRow[]) ?? []);
-    setPayments((p.data as PaymentRow[]) ?? []);
+    if (e.error || p.error) return null;
+    return {
+      expected: (e.data as ExpectedRow[]) ?? [],
+      payments: (p.data as PaymentRow[]) ?? [],
+    };
   }, [supabase, leaseId, timberSaleId]);
+
+  const load = useCallback(async () => {
+    const rows = await fetchRows();
+    if (!rows) {
+      setError("Could not load the payments. Check your connection and reload the page.");
+      return;
+    }
+    setExpected(rows.expected);
+    setPayments(rows.payments);
+  }, [fetchRows]);
 
   useEffect(() => {
     load();
@@ -83,7 +120,7 @@ export default function PaymentsSection({
   const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
 
   async function sync() {
-    if (!computeExpected) return;
+    if (!computeExpected || busy) return;
     setBusy(true);
     setError(null);
     const target = computeExpected();
@@ -94,38 +131,77 @@ export default function PaymentsSection({
       setBusy(false);
       return;
     }
-    // Delete only rows with no payments recorded against them.
-    const deletable = expected.filter((e) => !receivedByExpected.has(e.id));
-    const keep = expected.filter((e) => receivedByExpected.has(e.id));
-    if (deletable.length > 0) {
-      await supabase
+    // Read the rows again right now: a payment recorded since this
+    // section loaded (an uploaded check, another tab, another person)
+    // must protect its expected row.
+    const fresh = await fetchRows();
+    if (!fresh) {
+      setError("Could not check the payments on file, so nothing was changed. Check your connection and try again.");
+      setBusy(false);
+      return;
+    }
+    const paidIds = new Set(
+      fresh.payments.map((p) => p.expected_payment_id).filter((id): id is string => !!id)
+    );
+    // Only rows with no payments recorded against them are replaced; a
+    // paid row stands for its installment of the new schedule.
+    const plan = planScheduleRefresh(fresh.expected, paidIds, target);
+
+    // New rows go in FIRST: if they are refused, the old schedule is
+    // still there, untouched.
+    let insertedIds: string[] = [];
+    if (plan.inserts.length > 0) {
+      const { data, error: err } = await supabase
+        .from("expected_payments")
+        .insert(
+          plan.inserts.map((t) => ({
+            organization_id: orgId,
+            lease_id: leaseId ?? null,
+            timber_sale_id: timberSaleId ?? null,
+            year: t.year,
+            label: t.label,
+            due_date: t.due_date,
+            expected_amount: t.expected_amount,
+          }))
+        )
+        .select("id");
+      if (err) {
+        setError(
+          friendlyDbError(err, "Could not save the new expected payments.") +
+            " The schedule was left as it was."
+        );
+        setBusy(false);
+        await load();
+        return;
+      }
+      insertedIds = ((data as Array<{ id: string }> | null) ?? []).map((r) => r.id);
+    }
+    if (plan.deleteIds.length > 0) {
+      const { error: err } = await supabase
         .from("expected_payments")
         .delete()
-        .in("id", deletable.map((d) => d.id));
-    }
-    // Insert target rows that aren't already represented by a kept row
-    // (same year + label + due date).
-    const keptKeys = new Set(keep.map((k) => `${k.year}|${k.label}|${k.due_date}`));
-    const inserts = target
-      .filter((t) => !keptKeys.has(`${t.year}|${t.label}|${t.due_date}`))
-      .map((t) => ({
-        organization_id: orgId,
-        lease_id: leaseId ?? null,
-        timber_sale_id: timberSaleId ?? null,
-        year: t.year,
-        label: t.label,
-        due_date: t.due_date,
-        expected_amount: t.expected_amount,
-      }));
-    if (inserts.length > 0) {
-      const { error: err } = await supabase.from("expected_payments").insert(inserts);
-      if (err) setError("Could not generate: " + err.message);
+        .in("id", plan.deleteIds);
+      if (err) {
+        // The old unpaid rows are still there, so take the new ones back
+        // out rather than leave both standing.
+        const undo =
+          insertedIds.length > 0
+            ? await supabase.from("expected_payments").delete().in("id", insertedIds)
+            : { error: null };
+        setError(
+          undo.error
+            ? "The old expected payments could not be removed, and the new ones were added beside them. Delete the extra unpaid rows below, then refresh again."
+            : expectedDeleteError(err, "Could not replace the old expected payments.") +
+                " The schedule was left as it was. Try again."
+        );
+      }
     }
     setBusy(false);
-    load();
+    await load();
   }
 
   async function recordPayment(formData: FormData, expectedId: string | null) {
+    if (busy) return;
     setBusy(true);
     setError(null);
     const { error: err } = await supabase.from("payments").insert({
@@ -140,7 +216,7 @@ export default function PaymentsSection({
     });
     setBusy(false);
     if (err) {
-      setError("Could not record the payment: " + err.message);
+      setError(friendlyDbError(err, "Could not record the payment. Nothing was saved; try again."));
       return;
     }
     setRecordingFor(null);
@@ -148,21 +224,38 @@ export default function PaymentsSection({
   }
 
   async function deletePayment(id: string) {
+    if (busy) return;
     if (!window.confirm("Delete this recorded payment?")) return;
-    await supabase.from("payments").delete().eq("id", id);
+    setBusy(true);
+    setError(null);
+    const { error: err } = await supabase.from("payments").delete().eq("id", id);
+    setBusy(false);
+    if (err) setError(friendlyDbError(err, "Could not delete the payment. It is still recorded."));
     load();
   }
 
   // Deleting an expected row never deletes money received: the payments
-  // FK sets null, so recorded payments stay as unscheduled.
+  // FK is meant to set null, so recorded payments stay as unscheduled.
+  // (As the FK stands in migration 0003 the database refuses the delete
+  // while a payment points at the row; the refusal is shown, never
+  // swallowed.)
   async function deleteExpected(e: ExpectedRow) {
+    if (busy) return;
     const received = receivedByExpected.get(e.id) ?? 0;
     const message =
       received > 0
         ? `Delete the expected "${e.label}" (${e.year})? Payments recorded against it stay as unscheduled payments.`
         : `Delete the expected "${e.label}" (${e.year})?`;
     if (!window.confirm(message)) return;
-    await supabase.from("expected_payments").delete().eq("id", e.id);
+    setBusy(true);
+    setError(null);
+    const { error: err } = await supabase.from("expected_payments").delete().eq("id", e.id);
+    setBusy(false);
+    if (err) {
+      setError(
+        expectedDeleteError(err, "Could not delete the expected payment. It is still on the schedule.")
+      );
+    }
     load();
   }
 
@@ -171,14 +264,19 @@ export default function PaymentsSection({
   function paymentForm(expectedId: string | null, defaultAmount?: number) {
     return (
       <form
-        action={(fd) => recordPayment(fd, expectedId)}
+        // onSubmit, not action: a form action clears the boxes when it
+        // finishes, and a payment that failed to save must keep what was typed.
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          recordPayment(new FormData(ev.currentTarget), expectedId);
+        }}
         className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 p-2"
       >
         <input
           name="received_date"
           type="date"
           required
-          defaultValue={new Date().toISOString().slice(0, 10)}
+          defaultValue={todayISO()}
           className={inputClass}
         />
         <input
@@ -218,7 +316,7 @@ export default function PaymentsSection({
           {formatDollars(totalReceived)} received of {formatDollars(totalExpected)} expected
         </span>
         <span className="ml-auto flex flex-wrap justify-end gap-2">
-          {computeExpected ? (
+          {computeExpected && canManageSchedule ? (
             <button
               onClick={sync}
               disabled={busy}
@@ -233,7 +331,7 @@ export default function PaymentsSection({
           >
             Record unscheduled payment
           </button>
-          {leaseId ? <RentUpload orgId={orgId} defaultLeaseId={leaseId} /> : null}
+          {leaseId ? <RentUpload orgId={orgId} defaultLeaseId={leaseId} onSaved={load} /> : null}
         </span>
       </div>
 
@@ -242,10 +340,12 @@ export default function PaymentsSection({
 
       {expected.length === 0 ? (
         <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500">
-          {emptyHint ??
-            (leaseId
-              ? "No payment schedule yet, and none is needed for projections: the Income page already projects this lease from its terms and assumptions. Generate expected payments when you want dated installments to track and record payments against."
-              : "No expected payments yet. Complete the terms and press Generate expected payments.")}
+          {!canManageSchedule
+            ? "No payment schedule yet. An admin on your account can generate the expected payments; you can still record payments received."
+            : (emptyHint ??
+              (leaseId
+                ? "No payment schedule yet, and none is needed for projections: the Income page already projects this lease from its terms and assumptions. Generate expected payments when you want dated installments to track and record payments against."
+                : "No expected payments yet. Complete the terms and press Generate expected payments."))}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -295,13 +395,16 @@ export default function PaymentsSection({
                           >
                             Record payment
                           </button>
-                          <button
-                            onClick={() => deleteExpected(e)}
-                            className="text-xs font-medium text-red-600 hover:underline"
-                            title="Remove this expected payment; recorded payments stay"
-                          >
-                            Delete
-                          </button>
+                          {canManageSchedule ? (
+                            <button
+                              onClick={() => deleteExpected(e)}
+                              disabled={busy}
+                              className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+                              title="Remove this expected payment; recorded payments stay"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
                         </span>
                       )}
                     </td>
@@ -330,7 +433,8 @@ export default function PaymentsSection({
                 </span>
                 <button
                   onClick={() => deletePayment(p.id)}
-                  className="ml-auto text-xs font-medium text-red-600 hover:underline"
+                  disabled={busy}
+                  className="ml-auto text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
                 >
                   Delete
                 </button>

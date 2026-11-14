@@ -5,6 +5,9 @@ import {
   entityOfUnassignedKey,
   entityUnassignedKey,
   recordIncomeType,
+  emptyTotals,
+  leaseYearRows,
+  outstandingTotal,
   projectedLeaseYears,
   summarizeByYear,
   sumPropertyScope,
@@ -103,10 +106,19 @@ describe("projectedLeaseYears", () => {
     expect(projected.get("lease1")?.has(2027)).toBe(false); // no 2027 assumptions yet
   });
 
-  it("stops projecting expired and terminated leases", () => {
-    const inputs = cropShareInputs();
-    inputs.leases[0].status = "terminated";
-    expect(projectedLeaseYears(inputs).size).toBe(0);
+  // Was "stops projecting expired and terminated leases": marking a lease
+  // expired or terminated used to erase its expected rent from every year,
+  // past years included. History must not change when the status does.
+  it("expired and terminated leases keep the expected rent of their term", () => {
+    const active = cropShareInputs();
+    for (const status of ["expired", "terminated"]) {
+      const inputs = cropShareInputs();
+      inputs.leases[0].status = status;
+      expect(projectedLeaseYears(inputs)).toEqual(projectedLeaseYears(active));
+      expect(summarizeByYear(inputs).get(2026)?.expected.agricultural).toBe(20250);
+      expect(leaseYearRows(inputs, 2026)).toEqual(leaseYearRows(active, 2026));
+      expect(allocateToProperties(inputs, 2026).get("propA")?.expected).toBeCloseTo(20250 * 0.6, 2);
+    }
   });
 
   it("projects a cash lease from rate x acres with no assumptions at all", () => {
@@ -127,6 +139,161 @@ describe("projectedLeaseYears", () => {
       leaseLands: [{ lease_id: "cash1", property_id: "propA", leased_acres: 500 }],
     };
     expect(projectedLeaseYears(inputs).get("cash1")?.get(2026)).toBe(50000);
+  });
+});
+
+// A hunting lease running July 1 to June 30 at $10,000 a year, paid each
+// July 1. It used to show $10,000 in 2026 AND in 2027 (the second "due"
+// the day after the lease ended).
+const huntingInputs = (over: Record<string, unknown> = {}): IncomeInputs => ({
+  ...emptyInputs(),
+  leases: [
+    {
+      id: "hunt1",
+      status: "active",
+      lease_type: "hunting",
+      rent_structure: null,
+      terms: { hunt_basis: "lump_sum", amount: 10000 },
+      payment_schedule: [{ label: "Annual payment", month: 7, day: 1, percent: 100 }],
+      start_date: "2026-07-01",
+      end_date: "2027-06-30",
+      ...over,
+    },
+  ],
+  leaseLands: [{ lease_id: "hunt1", property_id: "propA", leased_acres: 100 }],
+});
+
+describe("leases that do not run January to December", () => {
+  it("projects one year's rent, in the year it falls due", () => {
+    const inputs = huntingInputs();
+    const projected = projectedLeaseYears(inputs);
+    expect(projected.get("hunt1")?.get(2026)).toBe(10000);
+    expect(projected.get("hunt1")?.has(2027)).toBe(false);
+    const byYear = summarizeByYear(inputs);
+    expect(byYear.get(2026)?.expected.hunting).toBe(10000);
+    expect(byYear.get(2027)?.expected.hunting ?? 0).toBe(0);
+    expect(allocateToProperties(inputs, 2027).get("propA")).toBeUndefined();
+    // Nothing is due in 2027, so the by-lease table has no row for it
+    // (and no "Incomplete" flag).
+    expect(leaseYearRows(inputs, 2027)).toEqual([]);
+    expect(leaseYearRows(inputs, 2026)).toMatchObject([{ leaseId: "hunt1", expected: 10000, projection: true }]);
+  });
+
+  it("splits the year's rent by the installments that fall due inside the term", () => {
+    const inputs = huntingInputs({
+      payment_schedule: [
+        { label: "Spring", month: 3, day: 1, percent: 50 },
+        { label: "Fall", month: 9, day: 1, percent: 50 },
+      ],
+    });
+    const projected = projectedLeaseYears(inputs).get("hunt1")!;
+    expect(projected.get(2026)).toBe(5000); // September 1, 2026
+    expect(projected.get(2027)).toBe(5000); // March 1, 2027
+  });
+
+  it("a February to December lease (the live shape) projects exactly as before", () => {
+    const inputs: IncomeInputs = {
+      ...emptyInputs(),
+      leases: [
+        {
+          id: "cash1",
+          status: "active",
+          lease_type: "agricultural",
+          rent_structure: "cash",
+          terms: { cash_basis: "per_acre", rate_per_acre: 100 },
+          payment_schedule: [],
+          start_date: "2026-02-01",
+          end_date: "2026-12-31",
+        },
+      ],
+      leaseLands: [{ lease_id: "cash1", property_id: "propA", leased_acres: 500 }],
+    };
+    expect(projectedLeaseYears(inputs)).toEqual(new Map([["cash1", new Map([[2026, 50000]])]]));
+    expect(summarizeByYear(inputs).get(2026)?.expected.agricultural).toBe(50000);
+  });
+});
+
+describe("expired and terminated leases", () => {
+  // $10,000 a year in two halves (March 1 and December 1), 2025 through 2027.
+  const cashInputs = (status: string, endDate: string): IncomeInputs => ({
+    ...emptyInputs(),
+    leases: [
+      {
+        id: "cash1",
+        status,
+        lease_type: "agricultural",
+        rent_structure: "cash",
+        terms: { cash_basis: "lump_sum", lump_sum: 10000 },
+        payment_schedule: [
+          { label: "First half", month: 3, day: 1, percent: 50 },
+          { label: "Second half", month: 12, day: 1, percent: 50 },
+        ],
+        start_date: "2025-01-01",
+        end_date: endDate,
+      },
+    ],
+    leaseLands: [{ lease_id: "cash1", property_id: "propA", leased_acres: 100 }],
+  });
+
+  it("nothing is projected after the end date", () => {
+    // Terminated with the end date set to June 30, 2026: 2025 keeps its
+    // full year, 2026 keeps the March half, and 2027 is gone.
+    const projected = projectedLeaseYears(cashInputs("terminated", "2026-06-30")).get("cash1")!;
+    expect(projected.get(2025)).toBe(10000);
+    expect(projected.get(2026)).toBe(5000);
+    expect(projected.has(2027)).toBe(false);
+  });
+
+  it("generated rows for years after the lease ended stop counting unless money was recorded against them", () => {
+    const withRows = (status: string) => {
+      const inputs = cashInputs(status, "2026-06-30");
+      inputs.expected = [
+        { id: "e1", lease_id: "cash1", timber_sale_id: null, year: 2026, expected_amount: 5000, label: "First half", due_date: "2026-03-01" },
+        { id: "e2", lease_id: "cash1", timber_sale_id: null, year: 2026, expected_amount: 5000, label: "Second half", due_date: "2026-12-01" },
+        { id: "e3", lease_id: "cash1", timber_sale_id: null, year: 2027, expected_amount: 5000, label: "First half", due_date: "2027-03-01" },
+        { id: "e4", lease_id: "cash1", timber_sale_id: null, year: 2027, expected_amount: 5000, label: "Second half", due_date: "2027-12-01" },
+      ];
+      // The tenant did pay the March 2027 installment.
+      inputs.payments = [
+        { lease_id: "cash1", timber_sale_id: null, amount: 5000, received_date: "2027-03-02", expected_payment_id: "e3" },
+      ];
+      return inputs;
+    };
+    for (const status of ["expired", "terminated"]) {
+      const byYear = summarizeByYear(withRows(status));
+      // The lease ended June 30, 2026. Both 2026 rows belong to its last
+      // year and still count, the December one included: the lease YEAR
+      // decides, not the due date.
+      expect(byYear.get(2026)?.expected.agricultural).toBe(10000);
+      expect(byYear.get(2027)?.expected.agricultural).toBe(5000); // e3: paid, so it still counts; e4 lapsed
+      expect(byYear.get(2026)?.hasProjection).toBe(false); // the schedule still stands in for 2026
+      expect(leaseYearRows(withRows(status), 2026)).toMatchObject([{ expected: 10000, projection: false }]);
+    }
+    // The same rows on a lease that is still active all count.
+    const active = summarizeByYear(withRows("active"));
+    expect(active.get(2026)?.expected.agricultural).toBe(10000);
+    expect(active.get(2027)?.expected.agricultural).toBe(10000);
+  });
+
+  it("a crop share lease's final settlement, due the summer after it ended, still counts once the lease is marked expired", () => {
+    // The real shape of the family's lease: February to December 2026,
+    // most of the rent at harvest and the rest at final prices in July
+    // 2027. Both rows are 2026 rent.
+    const inputs = cashInputs("expired", "2026-12-31");
+    inputs.leases[0].start_date = "2026-02-01";
+    inputs.expected = [
+      { id: "p", lease_id: "cash1", timber_sale_id: null, year: 2026, expected_amount: 283887.53, label: "Provisional crop-share rent", due_date: "2026-12-10" },
+      { id: "f", lease_id: "cash1", timber_sale_id: null, year: 2026, expected_amount: 94629.18, label: "Final crop-share rent at final prices", due_date: "2027-07-01" },
+    ];
+    inputs.payments = [];
+    const byYear = summarizeByYear(inputs);
+    expect(byYear.get(2026)?.expected.agricultural).toBeCloseTo(378516.71, 2);
+    // And marking it expired changed nothing: active reads the same.
+    const stillActive = cashInputs("active", "2026-12-31");
+    stillActive.leases[0].start_date = "2026-02-01";
+    stillActive.expected = inputs.expected;
+    stillActive.payments = [];
+    expect(summarizeByYear(stillActive).get(2026)?.expected.agricultural).toBeCloseTo(378516.71, 2);
   });
 });
 
@@ -328,6 +495,21 @@ describe("government payment share", () => {
     expect(totals.received.agricultural).toBe(0);
     expect(allocateToProperties(inputs, year).get("p1")?.expected).toBe(964.92);
   });
+
+  it("the by-type and by-property tables use one year rule for the projected share", () => {
+    // Price data for the program year that pays two years out: the
+    // by-property table used to count that share while the by-type table
+    // (which projects the share for last year, this year, and next) did not.
+    const inputs = lease(50);
+    inputs.gov.priceData.push({ commodity: "corn", program_year: year + 1, effective_reference_price: 4.42, mya_price_estimate: 4.1, mya_price_final: null, wasde_midpoint: null, source: "estimate" });
+    expect(govShareRows(inputs, year + 2)[0]?.landownerAmount).toBe(964.92); // the share itself exists
+    const byYear = summarizeByYear(inputs);
+    for (const y of [year - 1, year, year + 1, year + 2]) {
+      const byType = byYear.get(y)?.expected.government ?? 0;
+      const byProperty = sumPropertyScope(allocateToProperties(inputs, y), null).expected.government;
+      expect(byProperty, `government share for ${y}`).toBeCloseTo(byType, 6);
+    }
+  });
 });
 
 describe("income records (history and income outside a lease)", () => {
@@ -365,12 +547,56 @@ describe("income records (history and income outside a lease)", () => {
     expect(entityOfUnassignedKey("betts")).toBeNull();
   });
 
+  it("counts only records marked Received as received; owed and calculated ones are reported apart", () => {
+    const i = inputs();
+    i.records!.push(
+      { year: 2021, income_type: "share_rent", amount: 5000, property_id: "betts", entity_id: "trusts", basis: "accrued" },
+      { year: 2021, income_type: "solar", amount: 700, property_id: null, entity_id: "trusts", basis: "calculated" },
+      { year: 2021, income_type: "solar", amount: 100, property_id: "betts", entity_id: "trusts", basis: "received" }
+    );
+    const y = summarizeByYear(i).get(2021)!;
+    expect(y.received.agricultural).toBe(0); // the $5,000 is owed, not received
+    expect(y.received.other).toBeCloseTo(33433.41 + 100, 2);
+    expect(y.unconfirmed).toBeCloseTo(5700, 2);
+    const by = allocateToProperties(i, 2021);
+    expect(by.get("betts")!.received).toBeCloseTo(14348.01 + 100, 2);
+    expect(by.get("betts")!.unconfirmed).toBe(5000);
+    expect(by.get(entityUnassignedKey("trusts"))!.received).toBe(15000);
+    expect(by.get(entityUnassignedKey("trusts"))!.unconfirmed).toBe(700);
+    expect(sumPropertyScope(by, null).unconfirmed).toBeCloseTo(5700, 2);
+    expect(sumPropertyScope(by, new Set(["betts"])).unconfirmed).toBe(5000);
+    // Records loaded without a basis (older callers) still count as received.
+    expect(summarizeByYear(inputs()).get(2021)!.unconfirmed).toBe(0);
+  });
+
   it("keeps an entity's property-less records inside that entity's scope", () => {
     const by = allocateToProperties(inputs(), 2015);
     const alb = sumPropertyScope(by, new Set([entityUnassignedKey("alb")]));
     expect(alb.received.agricultural).toBeCloseTo(439117.2, 2);
     const all = sumPropertyScope(by, null);
     expect(all.received.agricultural).toBeCloseTo(summarizeByYear(inputs()).get(2015)!.received.agricultural, 2);
+  });
+});
+
+describe("outstanding on a total row", () => {
+  it("adds up what each line is still owed; money beyond one line's expected never pays down another", () => {
+    // Agricultural leases: expected $100,000, received $60,000. Solar
+    // records: $45,000 received, nothing expected. Netting the totals
+    // (100,000 - 105,000) said $0.00 outstanding.
+    const totals = emptyTotals();
+    totals.expected.agricultural = 100000;
+    totals.received.agricultural = 60000;
+    totals.received.other = 45000;
+    expect(outstandingTotal(totals)).toBe(40000);
+    // The same rule for a list of leases: one overpaid, one short.
+    expect(
+      outstandingTotal([
+        { expected: 10000, received: 12000 },
+        { expected: 8000, received: 3000 },
+        { expected: 5000, received: 5000 },
+      ])
+    ).toBe(5000);
+    expect(outstandingTotal(emptyTotals())).toBe(0);
   });
 });
 

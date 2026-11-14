@@ -64,7 +64,7 @@ export default async function DashboardPage({
     supabase.from("entities").select("id, name").order("name"),
     supabase
       .from("expected_payments")
-      .select("id, lease_id, timber_sale_id, label, due_date, expected_amount")
+      .select("id, lease_id, timber_sale_id, year, label, due_date, expected_amount")
       .order("due_date"),
     supabase.from("payments").select("expected_payment_id, amount"),
     supabase
@@ -157,9 +157,11 @@ export default async function DashboardPage({
     .filter(
       (e) =>
         e.status !== "paid" &&
-        // A schedule row dated after an expired or terminated lease
-        // ended is not owed; rent from the lease's own term still is.
-        !isAfterEndedLease(e.due_date, e.lease_id ? leaseById.get(e.lease_id) : null) &&
+        // A schedule row for a year after an expired or terminated
+        // lease ended is not owed; rent for the lease's own years still
+        // is, even when it falls due after the lease's last day (a crop
+        // share settlement the following summer).
+        !isAfterEndedLease(e, e.lease_id ? leaseById.get(e.lease_id) : null, e.received) &&
         (e.status === "past_due" || e.status === "partial" || e.due_date <= in60)
     );
   // Overdue first, the most recently due at the top (oldest-first let

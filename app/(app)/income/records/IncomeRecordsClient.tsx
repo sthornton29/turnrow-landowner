@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { formatDollars } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDate, formatDollars } from "@/lib/format";
 import {
   BASIS_LABELS,
   INCOME_RECORD_TYPES,
@@ -12,7 +13,8 @@ import {
 } from "@/lib/incomeRecords";
 
 // The income records list: inline fixes (entity, property, type, the
-// Check mark), delete, and a form to add a record by hand.
+// Check mark, and whether an owed or calculated record has since been
+// received), delete, and a form to add a record by hand.
 
 export default function IncomeRecordsClient({
   orgId,
@@ -48,14 +50,31 @@ export default function IncomeRecordsClient({
     setError(null);
     const { error: err } = await supabase.from("income_records").update(patch).eq("id", id);
     setBusy(null);
-    if (err) setError(`Could not save: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not save that change. The record was left as it was."));
     else router.refresh();
   }
-  async function remove(id: string) {
-    setBusy(id);
-    const { error: err } = await supabase.from("income_records").delete().eq("id", id);
+  // Deleting removes a line of income history for good, so it asks first.
+  async function remove(r: IncomeRecordRow) {
+    if (busy) return;
+    const what = [
+      formatDollars(r.amount),
+      r.payer ? `from ${r.payer}` : null,
+      r.received_date ? `on ${formatDate(r.received_date)}` : `in ${r.year}`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (
+      !window.confirm(
+        `Delete this income record (${what})? It will no longer count in ${r.year} income. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusy(r.id);
+    setError(null);
+    const { error: err } = await supabase.from("income_records").delete().eq("id", r.id);
     setBusy(null);
-    if (err) setError(`Could not delete: ${err.message}`);
+    if (err) setError(friendlyDbError(err, "Could not delete the record. It is still here."));
     else router.refresh();
   }
   async function add() {
@@ -81,7 +100,7 @@ export default function IncomeRecordsClient({
     });
     setBusy(null);
     if (err) {
-      setError(`Could not save: ${err.message}`);
+      setError(friendlyDbError(err, "Could not save the record. What you typed is still here; try again."));
       return;
     }
     setDraft({ received_date: "", payer: "", entity_id: "", property_id: "", income_type: draft.income_type, amount: "", notes: "" });
@@ -244,8 +263,25 @@ export default function IncomeRecordsClient({
                         </option>
                       ))}
                     </select>
+                    {/* Owed and calculated records are not counted as
+                        received; once the money is in, mark it here. */}
                     {r.basis !== "received" ? (
-                      <span className="mt-1 block text-xs text-amber-800">{BASIS_LABELS[r.basis] ?? r.basis}</span>
+                      <label className="mt-1 block text-xs text-amber-800">
+                        Not counted as received
+                        <select
+                          value={r.basis}
+                          onChange={(e) => update(r.id, { basis: e.target.value })}
+                          className={`${sel} mt-0.5 block border-amber-300 bg-amber-50 text-amber-900`}
+                          aria-label="How firm this figure is"
+                        >
+                          {Object.entries(BASIS_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                          {BASIS_LABELS[r.basis] ? null : <option value={r.basis}>{r.basis}</option>}
+                        </select>
+                      </label>
                     ) : null}
                   </td>
                   <td className="px-3 py-2 text-right font-medium tabular-nums text-gray-900">{formatDollars(r.amount)}</td>
@@ -269,7 +305,7 @@ export default function IncomeRecordsClient({
                     >
                       {r.needs_review ? "Check" : "Checked"}
                     </button>
-                    <button onClick={() => remove(r.id)} className="ml-2 text-xs text-gray-400 hover:text-red-700" title="Delete this record">
+                    <button onClick={() => remove(r)} disabled={busy !== null} className="ml-2 text-xs text-gray-400 hover:text-red-700 disabled:opacity-60" title="Delete this record">
                       Delete
                     </button>
                   </td>
