@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireOrg } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import RereadClient, { type RereadFile } from "./RereadClient";
 
 export const metadata = { title: "Re-read bills" };
@@ -7,8 +7,10 @@ export const metadata = { title: "Re-read bills" };
 // Lists every stored bill file with the statement lines it carries, for
 // the value re-read (migration 0050, lib/taxReread.ts).
 
+// Admins only, like the upload it re-does: a re-read spends a paid read
+// on every bill and writes values onto statement lines.
 export default async function RereadPage() {
-  const { supabase } = await requireOrg();
+  const { supabase } = await requireAdmin("/taxes/report");
   const [{ data: statements }, { data: docs }, { data: lines }, { data: parcels }] = await Promise.all([
     supabase.from("tax_statements").select("id, tax_year, county, source_document_id"),
     supabase.from("documents").select("id, storage_path, file_name, content_type").eq("entity_type", "tax_statement"),

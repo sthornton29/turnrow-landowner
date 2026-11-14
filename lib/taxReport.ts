@@ -623,7 +623,7 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
         late
           ? `; it went delinquent ${formatDate(delinquent)} (the last day to pay on time was ${formatDate(payBy)})`
           : `. Pay by ${formatDate(payBy)}; delinquent ${formatDate(delinquent)}`
-      }. Late taxes add interest and fees, and go to a tax sale in May.`,
+      }. Late taxes add interest and fees, and unpaid taxes can go to a tax sale the following spring (the county can confirm the dates).`,
       action: "Pay it, or record the payment on the Taxes page if it was paid.",
       dollars: bal,
       deadline: payBy,
@@ -713,7 +713,7 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
   const y = inp.today.getFullYear();
   const cuWindowOpen = inp.today.getMonth() >= 9;
   const deadlines = [
-    { date: `${y}-12-31`, label: "Property taxes delinquent after Dec 31", detail: "Taxes are due Oct 1. Unpaid bills go to probate in February and a tax sale in May." },
+    { date: `${y}-12-31`, label: "Property taxes delinquent after Dec 31", detail: "Taxes are due Oct 1. Unpaid bills can be turned over to the probate court early the next year and go to a tax sale in the spring; confirm the dates with the county." },
     {
       date: cuWindowOpen ? lastBusinessDayOfDecember(y) : `${y}-10-01`,
       label: cuWindowOpen ? "Current use applications close on the last business day of December" : "Current use applications open Oct 1",

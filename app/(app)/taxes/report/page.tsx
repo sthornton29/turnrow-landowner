@@ -41,7 +41,7 @@ export default async function TaxReportPage({
   searchParams: Promise<{ year?: string; entity?: string; property?: string; county?: string }>;
 }) {
   const sp = await searchParams;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   const [
     { data: lines, error: linesErr },
@@ -234,9 +234,13 @@ export default async function TaxReportPage({
           ) : null}
           <p className="mt-0.5 text-sm text-gray-600">{scopeName}</p>
           <p className="mt-1 max-w-2xl text-sm text-gray-700">{WORKSHEET_NOTE}</p>
-          <Link href="/taxes/reread" className="text-xs font-medium text-kelly-700 hover:underline print:hidden">
-            Re-read bills for market and current use values
-          </Link>
+          {/* Re-reading is admin work, like uploading (the page sends
+              anyone else back here). */}
+          {isAdmin ? (
+            <Link href="/taxes/reread" className="text-xs font-medium text-kelly-700 hover:underline print:hidden">
+              Re-read bills for market and current use values
+            </Link>
+          ) : null}
         </div>
         <TaxReportControls
           year={year}
@@ -473,9 +477,13 @@ export default async function TaxReportPage({
           <p className="mb-2 text-sm text-gray-600">
             The value each year&apos;s bill printed. &quot;Taxed&quot; is the value the tax was figured on; &quot;market&quot; is a
             market value printed beside a lower current use value. Older bills mix the two, so{" "}
-            <Link href="/taxes/reread" className="text-kelly-700 hover:underline print:hidden">
-              re-reading the bills
-            </Link>{" "}
+            {isAdmin ? (
+              <Link href="/taxes/reread" className="text-kelly-700 hover:underline">
+                re-reading the bills
+              </Link>
+            ) : (
+              "re-reading the bills (an admin can do this)"
+            )}{" "}
             fills in both where they are printed.
           </p>
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
