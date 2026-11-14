@@ -2847,6 +2847,19 @@ export default function MapView({
       completedDrawIdsRef.current = new Set(ids.map(String));
       draw.changeMode("direct_select", { featureId: ids[0] });
       setEditHint("Drag a point to move it, or tap it and press Delete point. Then press Save.");
+      // Bring the shape up to working size. From a whole-farm view its
+      // points sit a few pixels apart and cannot be grabbed. This only
+      // ever zooms in: someone already close in on one corner stays put.
+      const box = fitBoundsOf([g]);
+      if (box) {
+        const cam = map.cameraForBounds(box, {
+          padding: { top: 130, bottom: 70, left: 70, right: 70 },
+          maxZoom: 18,
+        });
+        if (cam && typeof cam.zoom === "number" && cam.zoom > map.getZoom() + 0.5) {
+          map.easeTo({ center: cam.center, zoom: cam.zoom, duration: 400 });
+        }
+      }
     } else if (isLineTarget || selected.entityType === "road") {
       draw.changeMode("draw_line_string");
       setDrawingShape(true);
