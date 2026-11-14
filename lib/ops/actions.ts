@@ -33,6 +33,7 @@ import {
   type SchedulePayment,
   type YearAssumptions,
 } from "@/lib/leaseLogic";
+import { formatDate } from "@/lib/format";
 import { OPS_APP, OPS_LABEL } from "./auth";
 
 export interface ActionParam {
@@ -201,8 +202,8 @@ const setExpectedPayments: Action = {
     const total = r2(installments.reduce((s, x) => s + x.amount, 0));
     const was = r2(replaced.reduce((s, e) => s + Number(e.expected_amount), 0));
     const table: Preview["rows"] = [
-      ...replaced.map((e) => [`${e.label} due ${e.due_date}`, Number(e.expected_amount), null] as Preview["rows"][number]),
-      ...installments.map((x) => [`${x.label} due ${x.due_date}`, null, x.amount] as Preview["rows"][number]),
+      ...replaced.map((e) => [`${e.label} due ${formatDate(e.due_date as string)}`, Number(e.expected_amount), null] as Preview["rows"][number]),
+      ...installments.map((x) => [`${x.label} due ${formatDate(x.due_date)}`, null, x.amount] as Preview["rows"][number]),
     ];
     const same = replaced.length === installments.length && installments.every((x) => replaced.some((e) => e.label === x.label && e.due_date === x.due_date && r2(Number(e.expected_amount)) === x.amount));
     const params = { lease: lease.id, year, installments };
