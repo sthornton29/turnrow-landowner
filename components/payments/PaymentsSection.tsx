@@ -7,6 +7,7 @@ import { formatDate, formatDollars, todayISO } from "@/lib/format";
 import {
   PAYMENT_STATUS_LABELS,
   STATUS_BADGE_CLASSES,
+  isLapsedExpectedRow,
   paymentStatus,
   planScheduleRefresh,
   type GeneratedPayment,
@@ -57,6 +58,7 @@ export default function PaymentsSection({
   computeExpected,
   emptyHint,
   canManageSchedule = true,
+  lease,
 }: {
   orgId: string;
   leaseId?: string;
@@ -64,6 +66,11 @@ export default function PaymentsSection({
   computeExpected?: () => GeneratedPayment[];
   emptyHint?: string;
   canManageSchedule?: boolean;
+  // The lease these payments belong to. With it, a row for a year after
+  // an expired or terminated lease ended reads "No longer expected"
+  // instead of "Past due", the same rule Income and Home count by
+  // (lib/leaseLogic.ts isLapsedExpectedRow).
+  lease?: { status?: unknown; end_date?: unknown };
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [expected, setExpected] = useState<ExpectedRow[]>([]);
@@ -364,6 +371,7 @@ export default function PaymentsSection({
               {expected.map((e) => {
                 const received = receivedByExpected.get(e.id) ?? 0;
                 const status = paymentStatus(e.expected_amount, received, e.due_date, today);
+                const lapsed = lease ? isLapsedExpectedRow(lease, e, received) : false;
                 return (
                   <tr key={e.id} className="border-b border-gray-100 last:border-0 align-top">
                     <td className="whitespace-nowrap px-3 py-2">{formatDate(e.due_date)}</td>
@@ -378,11 +386,20 @@ export default function PaymentsSection({
                       {received > 0 ? formatDollars(received) : ""}
                     </td>
                     <td className="px-3 py-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}
-                      >
-                        {PAYMENT_STATUS_LABELS[status]}
-                      </span>
+                      {lapsed ? (
+                        <span
+                          className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                          title="This row is for a year after the lease ended, so it is not counted as owed."
+                        >
+                          No longer expected
+                        </span>
+                      ) : (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}
+                        >
+                          {PAYMENT_STATUS_LABELS[status]}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       {recordingFor === e.id ? (

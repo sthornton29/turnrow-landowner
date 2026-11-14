@@ -215,14 +215,24 @@ export default function AdminProgramParams({
                     )
                   );
                 const numOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
+                // A blank box and an unreadable number both count as "no
+                // value"; anything else must differ from what is stored
+                // before it is saved, so tabbing through a row writes
+                // nothing.
+                const changed = (v: number | null, stored: number | null) =>
+                  !(v === null && stored == null) && !(v !== null && Number.isNaN(v)) && v !== (stored == null ? null : Number(stored));
                 return (
-                  <tr key={c.slug}>
+                  // Keyed by year as well: these boxes hold what was typed,
+                  // so without it a change of year left last year's numbers
+                  // on screen and the next tap out of a box saved them
+                  // under the new year.
+                  <tr key={`${c.slug}-${year}`}>
                     <td className="px-1 py-1 font-medium">{c.name}</td>
-                    <td className="px-1 py-1"><input defaultValue={p.effective_reference_price ?? ""} disabled={busy} onBlur={(e) => save({ effective_reference_price: numOrNull(e.target.value) })} className={cell} /></td>
-                    <td className="px-1 py-1"><input defaultValue={p.mya_price_final ?? ""} disabled={busy} onBlur={(e) => save({ mya_price_final: numOrNull(e.target.value), source: numOrNull(e.target.value) == null ? p.source : "usda" })} className={cell} /></td>
-                    <td className="px-1 py-1"><input defaultValue={p.mya_price_estimate ?? ""} disabled={busy} onBlur={(e) => { const v = numOrNull(e.target.value); if (v !== p.mya_price_estimate) save({ mya_price_estimate: v, source: v == null ? "estimate" : "manual" }); }} className={cell} /></td>
-                    <td className="px-1 py-1"><input defaultValue={p.wasde_midpoint ?? ""} disabled={busy} onBlur={(e) => save({ wasde_midpoint: numOrNull(e.target.value) })} className={cell} /></td>
-                    <td className="px-1 py-1"><input defaultValue={p.benchmark_price ?? ""} disabled={busy} onBlur={(e) => save({ benchmark_price: numOrNull(e.target.value) })} className={cell} /></td>
+                    <td className="px-1 py-1"><input defaultValue={p.effective_reference_price ?? ""} disabled={busy} onBlur={(e) => { const v = numOrNull(e.target.value); if (changed(v, p.effective_reference_price)) save({ effective_reference_price: v }); }} className={cell} /></td>
+                    <td className="px-1 py-1"><input defaultValue={p.mya_price_final ?? ""} disabled={busy} onBlur={(e) => { const v = numOrNull(e.target.value); if (changed(v, p.mya_price_final)) save({ mya_price_final: v, source: v == null ? p.source : "usda" }); }} className={cell} /></td>
+                    <td className="px-1 py-1"><input defaultValue={p.mya_price_estimate ?? ""} disabled={busy} onBlur={(e) => { const v = numOrNull(e.target.value); if (changed(v, p.mya_price_estimate)) save({ mya_price_estimate: v, source: v == null ? "estimate" : "manual" }); }} className={cell} /></td>
+                    <td className="px-1 py-1"><input defaultValue={p.wasde_midpoint ?? ""} disabled={busy} onBlur={(e) => { const v = numOrNull(e.target.value); if (changed(v, p.wasde_midpoint)) save({ wasde_midpoint: v }); }} className={cell} /></td>
+                    <td className="px-1 py-1"><input defaultValue={p.benchmark_price ?? ""} disabled={busy} onBlur={(e) => { const v = numOrNull(e.target.value); if (changed(v, p.benchmark_price)) save({ benchmark_price: v }); }} className={cell} /></td>
                     <td className="px-1 py-1 text-gray-500">{p.source}</td>
                   </tr>
                 );

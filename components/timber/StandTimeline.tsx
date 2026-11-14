@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars } from "@/lib/format";
 import {
   ACTIVITY_TYPES,
   TAX_CATEGORIES,
@@ -188,8 +188,8 @@ export default function StandTimeline({
     return (
       <li key={a.id} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="w-24 shrink-0 font-mono text-xs text-gray-500">
-            {a.activity_date ?? a.activity_year}
+          <span className="w-24 shrink-0 text-xs text-gray-500">
+            {a.activity_date ? formatDate(a.activity_date) : a.activity_year}
           </span>
           <span className="font-medium text-gray-900">{a.title ?? def.label}</span>
           {a.status === "planned" ? (

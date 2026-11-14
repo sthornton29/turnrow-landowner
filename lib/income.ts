@@ -747,6 +747,7 @@ export function allocateToProperties(
     const remainder = t.amount_due - routed;
     if (Math.abs(remainder) > 0.005) add(UNASSIGNED, "taxesDue", remainder);
   }
+  const statementById = new Map(inputs.taxStatements.map((t) => [t.id, t]));
   for (const p of inputs.taxPayments) {
     if (Number(p.paid_date.slice(0, 4)) !== year) continue;
     const lines = linesByStatement.get(p.tax_statement_id) ?? [];
@@ -754,8 +755,26 @@ export function allocateToProperties(
       add(UNASSIGNED, "taxesPaid", p.amount);
       continue;
     }
-    const shares = allocateByLines(p.amount, lines);
-    for (const l of lines) add(propertyOfLine(l), "taxesPaid", shares.get(l.id) ?? 0);
+    // A payment follows the bill: each line takes its part of the WHOLE
+    // statement, and the part that belongs to no line in view (a gap
+    // between the header and its lines, or lines a member cannot see)
+    // stays in Unassigned, exactly where that part of the tax due sits
+    // above. Spreading the payment over only the lines in view would
+    // show those properties as paid more than they were billed.
+    const lineTotal = lines.reduce((a, l) => a + (Number(l.tax_due) || 0), 0);
+    const billed = Number(statementById.get(p.tax_statement_id)?.amount_due) || 0;
+    if (lineTotal <= 0 || billed <= lineTotal + 0.005) {
+      const shares = allocateByLines(p.amount, lines);
+      for (const l of lines) add(propertyOfLine(l), "taxesPaid", shares.get(l.id) ?? 0);
+      continue;
+    }
+    let routed = 0;
+    for (const l of lines) {
+      const share = (p.amount * (Number(l.tax_due) || 0)) / billed;
+      add(propertyOfLine(l), "taxesPaid", share);
+      routed += share;
+    }
+    add(UNASSIGNED, "taxesPaid", p.amount - routed);
   }
   return result;
 }

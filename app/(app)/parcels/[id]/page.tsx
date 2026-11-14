@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { formatAcres, formatDate, formatDollars } from "@/lib/format";
-import { allocateByLines } from "@/lib/tax";
+import { allocationBasis } from "@/lib/tax";
 import {
   ActionLink,
   DetailsCard,
@@ -41,14 +41,16 @@ export default async function ParcelSummaryPage({
       // This parcel's LINES with their statement headers (migration 0030).
       supabase
         .from("tax_statement_lines")
-        .select("id, tax_year, tax_due, tax_statement_id, tax_statements(id, amount_due, due_date, county, account_number)")
+        .select("id, tax_year, tax_due, tax_statement_id, tax_statements(id, amount_due, line_total, due_date, county, account_number)")
         .eq("parcel_id", id)
         .order("tax_year", { ascending: false }),
       supabase.from("tax_payments").select("tax_statement_id, amount"),
     ]);
 
-  // Paid on each statement, then this parcel's share by its line's
-  // part of the statement's lines.
+  // Paid on each statement, then this parcel's share: its line's part
+  // of the WHOLE statement (allocationBasis), not of the lines this
+  // viewer can see. A member who cannot see every line on a statement
+  // would otherwise be shown too much paid toward this parcel.
   const paidByStatement = new Map<string, number>();
   for (const p of taxPayments ?? []) {
     paidByStatement.set(
@@ -60,11 +62,25 @@ export default async function ParcelSummaryPage({
   const { data: siblingLines } = statementIds.length
     ? await supabase.from("tax_statement_lines").select("id, tax_statement_id, tax_due").in("tax_statement_id", statementIds)
     : { data: [] as Array<{ id: string; tax_statement_id: string; tax_due: number }> };
+  const headerByStatement = new Map<string, { amount_due: number; line_total?: number | null }>();
+  for (const l of statements ?? []) {
+    const h = Array.isArray(l.tax_statements) ? l.tax_statements[0] : l.tax_statements;
+    if (h) headerByStatement.set(l.tax_statement_id, h);
+  }
   const paidShareByLine = new Map<string, number>();
   for (const sid of statementIds) {
     const lines = (siblingLines ?? []).filter((l) => l.tax_statement_id === sid);
-    const shares = allocateByLines(paidByStatement.get(sid) ?? 0, lines);
-    for (const [lineId, amt] of shares) paidShareByLine.set(lineId, amt);
+    const visibleTotal = lines.reduce((a, l) => a + (Number(l.tax_due) || 0), 0);
+    const basis = allocationBasis(headerByStatement.get(sid), visibleTotal);
+    const stmtPaid = paidByStatement.get(sid) ?? 0;
+    for (const l of lines) {
+      paidShareByLine.set(
+        l.id,
+        visibleTotal > 0 && basis > 0
+          ? (stmtPaid * (Number(l.tax_due) || 0)) / basis
+          : stmtPaid / Math.max(lines.length, 1)
+      );
+    }
   }
 
   return (

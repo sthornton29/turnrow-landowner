@@ -68,6 +68,46 @@ describe("property taxes by statement lines", () => {
     expect(by.get("propA")?.taxesDue).toBe(200);
     expect(by.get(UNASSIGNED)?.taxesDue).toBe(300); // 100 + 150 + the 50 gap
   });
+  it("a payment follows the bill: the part with no line in view stays in Unassigned", () => {
+    // What a member sees when the statement bills $1,000 but only the
+    // $400 line on their own property is visible to them. Paid in full,
+    // their property is paid $400, never the whole $1,000.
+    const inputs: IncomeInputs = {
+      ...emptyInputs(),
+      parcels: [{ id: "pa", property_id: "propA" }],
+      taxStatements: [{ id: "s1", tax_year: 2024, amount_due: 1000, entity_id: null }],
+      taxLines: [
+        { id: "l1", tax_statement_id: "s1", tax_year: 2024, tax_due: 400, parcel_id: "pa", line_type: "real_property" },
+      ],
+      taxPayments: [{ tax_statement_id: "s1", paid_date: "2024-12-15", amount: 1000 }],
+    };
+    const by = allocateToProperties(inputs, 2024);
+    expect(by.get("propA")?.taxesDue).toBe(400);
+    expect(by.get("propA")?.taxesPaid).toBeCloseTo(400, 6);
+    expect(by.get(UNASSIGNED)?.taxesDue).toBe(600);
+    expect(by.get(UNASSIGNED)?.taxesPaid).toBeCloseTo(600, 6);
+    // Half paid: half of each part.
+    const half = allocateToProperties(
+      { ...inputs, taxPayments: [{ tax_statement_id: "s1", paid_date: "2024-12-15", amount: 500 }] },
+      2024
+    );
+    expect(half.get("propA")?.taxesPaid).toBeCloseTo(200, 6);
+    expect(half.get(UNASSIGNED)?.taxesPaid).toBeCloseTo(300, 6);
+  });
+  it("lines that add up to more than the header still take the whole payment", () => {
+    const inputs: IncomeInputs = {
+      ...emptyInputs(),
+      parcels: [{ id: "pa", property_id: "propA" }],
+      taxStatements: [{ id: "s1", tax_year: 2024, amount_due: 300, entity_id: null }],
+      taxLines: [
+        { id: "l1", tax_statement_id: "s1", tax_year: 2024, tax_due: 400, parcel_id: "pa", line_type: "real_property" },
+      ],
+      taxPayments: [{ tax_statement_id: "s1", paid_date: "2024-12-15", amount: 300 }],
+    };
+    const by = allocateToProperties(inputs, 2024);
+    expect(by.get("propA")?.taxesPaid).toBe(300);
+    expect(by.get(UNASSIGNED)?.taxesPaid ?? 0).toBe(0);
+  });
 });
 
 // A 500-acre crop share lease at 25%: 100 ac corn x 180 bu x $4.50
