@@ -1,9 +1,27 @@
 # Turnrow Landowner: Project Summary
 
 2026-11-14 (PRE-ROLLOUT REVIEW before inviting the rest of the family;
-branch pre-rollout-review, NOT YET ON MAIN; migrations 0052 and 0053
-WRITTEN BUT NOT APPLIED). Eight read-only section reviews, then fixes.
-Where this entry disagrees with older text below, this entry is current.
+LIVE since that afternoon: migrations 0052 and 0053 APPLIED, main
+deployed, the live isolation test passed). Eight read-only section
+reviews, then fixes. Where this entry disagrees with older text below,
+this entry is current.
+
+SAME AFTERNOON, AFTER IT WENT LIVE. Data corrected: the two tax year 2026
+Morgan statements (accounts 1066 and 678) carry due 2026-10-01 and
+delinquent 2027-01-01; the 2023 Lawrence statement for account 311600 now
+adds up (the bill lists three parcels a second time on page 2, and those
+amounts were added to their lines: 312.00, 313.80, 338.40, plus 68.40 =
+1,032.60). Left as they are: Colbert 2020 to 2023 have no lines because
+those notices are postcards that print only a total and "Parcel Count 2";
+the 42 unmatched Lawrence lines are 9 parcels that are not in the app;
+27 income records still read Check. FARM SYNC: at 18:00 UTC that day,
+before the deploy, Turnrow Grain answered all three connections with no
+fields and no farming entities (the 12:00 UTC run was normal; the cause
+is on the farm side). The sync never deletes, so the 2026 crop rows
+stayed, but each connection's entities went to [] and three stand-in
+tenants named "Turnrow Farm" were made. They were removed, and
+syncTenantsFromEntities now makes the whole-operation tenant only for a
+connection that has no tenant at all (lib/farmSyncTenants.test.ts).
 
 SECURITY. (1) assistant_query (0022) could be called over REST by any
 signed-in account, even one with no organization (signup is open at the
@@ -24,8 +42,9 @@ farm connect, checked before the one-time share code is redeemed);
 price-recipe and timber-scan/vision gained the hourly limit (kind
 "extract") and input caps; proxy.ts answers a signed-out /api call with a
 JSON 401. (4) Route errors are plain sentences; upstream text goes to the
-log. After 0052 is applied run RLS_TEST=1 npx vitest run
-lib/entityScope.live.test.ts (it now tries the escapes and file access).
+log. RLS_TEST=1 npx vitest run lib/entityScope.live.test.ts tries the
+escapes and file access against the live project; it passed after 0052
+was applied.
 
 0053: the five composite ON DELETE SET NULL keys that had no column list
 (payments.expected_payment_id, timber_sales.buyer_tenant_id,
@@ -80,7 +99,7 @@ newestBenchmarks filters to the program year first.
 
 TAXES. lib/tax.ts draftDates / statementDateProblem: due and delinquent
 dates must fit the tax year (bills that print no year made the reader
-guess; two 2026 Morgan statements were saved with 2025 dates, still to be
+guess; two 2026 Morgan statements were saved with 2025 dates, since
 corrected in the data); taxTools.ts tells the reader to return null
 instead. lastDayToPay (delinquent_date is the first late day),
 allocationBasis (payments spread over the whole statement, not the lines
