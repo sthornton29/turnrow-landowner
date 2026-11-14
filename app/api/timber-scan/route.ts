@@ -19,8 +19,8 @@ import {
   despeckle,
   maskToPolygons,
   type GridPolygon,
-  type TimberClass,
 } from "@/lib/timberScan/raster";
+import { MIN_PROPOSAL_ACRES, summarizeProposals, withoutSavedStands } from "@/lib/timberScan/proposals";
 import type { ScanProposal, ScanResult } from "@/lib/timberScan/types";
 
 // CropScape clips the national raster on demand: two sequential slow
@@ -50,7 +50,11 @@ export async function POST(request: Request) {
   if (session instanceof NextResponse) return session;
   const { supabase } = session;
 
-  const body = await request.json();
+  const body = ((await request.json().catch(() => null)) ?? {}) as {
+    property_id?: unknown;
+    year?: unknown;
+    force?: unknown;
+  };
   const propertyId = String(body.property_id ?? "");
   const requestedYear = body.year ? Number(body.year) : undefined;
   const force = Boolean(body.force);
@@ -74,6 +78,38 @@ export async function POST(request: Request) {
     );
   }
 
+  // The stands saved on this property RIGHT NOW. A proposal never
+  // covers ground that is already a saved stand, and that has to hold
+  // for a cached scan too: after someone saves three of five proposals,
+  // reopening the page must not offer those three again.
+  const { data: stands, error: standsError } = await supabase
+    .from("timber_stands_geo")
+    .select("boundary_geojson")
+    .eq("property_id", propertyId);
+  if (standsError) {
+    return NextResponse.json(
+      { error: "Could not load this property's saved stands. Try again." },
+      { status: 502 }
+    );
+  }
+  const standShapes = (stands ?? [])
+    .map((s) => toMultiPolygon(s.boundary_geojson))
+    .filter((s): s is MultiPolygon => s !== null);
+  let standsUnion: AreaFeature | null = null;
+  try {
+    standsUnion =
+      standShapes.length === 0
+        ? null
+        : standShapes.length === 1
+          ? feat(standShapes[0])
+          : union(fc(standShapes.map(feat)));
+  } catch {
+    return NextResponse.json(
+      { error: "One of this property's saved stands has a shape the scan cannot read. Open it on the map and re-save its boundary, then scan again." },
+      { status: 422 }
+    );
+  }
+
   // Cached scan (Rescan sends force to refresh).
   if (!force) {
     let query = supabase
@@ -85,20 +121,15 @@ export async function POST(request: Request) {
     if (requestedYear) query = query.eq("cdl_year", requestedYear);
     const { data: cached } = await query;
     if (cached && cached.length > 0) {
-      return NextResponse.json({ ...(cached[0].result as ScanResult), cached: true });
+      const result = withoutSavedStands(cached[0].result as ScanResult, standsUnion);
+      return NextResponse.json({ ...result, cached: true });
     }
   }
 
-  const [{ data: stands }, { data: fields }] = await Promise.all([
-    supabase
-      .from("timber_stands_geo")
-      .select("boundary_geojson")
-      .eq("property_id", propertyId),
-    supabase
-      .from("fields_geo")
-      .select("id, name, boundary_geojson")
-      .eq("property_id", propertyId),
-  ]);
+  const { data: fields } = await supabase
+    .from("fields_geo")
+    .select("id, name, boundary_geojson")
+    .eq("property_id", propertyId);
 
   try {
     const bbox = bboxOf([boundary]);
@@ -118,16 +149,6 @@ export async function POST(request: Request) {
         }
       }
     }
-
-    const standShapes = (stands ?? [])
-      .map((s) => toMultiPolygon(s.boundary_geojson))
-      .filter((s): s is MultiPolygon => s !== null);
-    const standsUnion =
-      standShapes.length === 0
-        ? null
-        : standShapes.length === 1
-          ? feat(standShapes[0])
-          : union(fc(standShapes.map(feat)));
 
     const fieldShapes = (fields ?? [])
       .map((f) => toMultiPolygon(f.boundary_geojson))
@@ -160,7 +181,7 @@ export async function POST(request: Request) {
         }
         if (!clipped) continue;
         const acres = round1(area(clipped) / ACRE_M2);
-        if (acres < 0.2) continue;
+        if (acres < MIN_PROPOSAL_ACRES) continue;
 
         let agOverlapM2 = 0;
         for (const field of fieldShapes) {
@@ -181,18 +202,10 @@ export async function POST(request: Request) {
     }
 
     proposals.sort((a, b) => b.acres - a.acres);
-    const byClass = { pine: 0, hardwood: 0, mixed: 0, wetland: 0 } as Record<
-      TimberClass,
-      number
-    >;
-    for (const p of proposals) byClass[p.cls] = round1(byClass[p.cls] + p.acres);
     const result: ScanResult = {
       year: grid.year,
       generated_at: new Date().toISOString(),
-      summary: {
-        woodedAcres: round1(proposals.reduce((s, p) => s + p.acres, 0)),
-        byClass,
-      },
+      summary: summarizeProposals(proposals),
       proposals,
     };
 
@@ -208,10 +221,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ...result, cached: false });
   } catch (err) {
-    const status = err instanceof CdlError ? err.status : 502;
+    // CdlError messages are written for the person scanning; anything
+    // else goes to the log and a plain sentence goes to the screen.
+    if (err instanceof CdlError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    console.error("timber-scan failed", err instanceof Error ? err.message : err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "The scan failed." },
-      { status }
+      { error: "The scan did not finish. Try again in a few minutes." },
+      { status: 502 }
     );
   }
 }
