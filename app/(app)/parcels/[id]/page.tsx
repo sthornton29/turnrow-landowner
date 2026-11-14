@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars } from "@/lib/format";
 import { allocateByLines } from "@/lib/tax";
 import {
   ActionLink,
@@ -122,7 +122,7 @@ export default async function ParcelSummaryPage({
                     {l.tax_year}
                   </Link>
                   <span className="text-gray-500">
-                    {header?.county ? `${header.county} · ` : ""}due {header?.due_date ?? "n/a"}
+                    {header?.county ? `${header.county} · ` : ""}due {formatDate(header?.due_date) || "n/a"}
                     {header?.account_number ? ` · account ${header.account_number}` : ""}
                   </span>
                   <span className="ml-auto tabular-nums text-gray-700">
