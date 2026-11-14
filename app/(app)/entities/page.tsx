@@ -115,7 +115,7 @@ export default async function EntitiesPage() {
             ))}
           </ul>
           <p className="mt-1.5 text-xs text-gray-500">
-            Assign these from the property page, or the Properties list.
+            Open a property and set Held by on its page to assign it.
           </p>
         </section>
       ) : null}

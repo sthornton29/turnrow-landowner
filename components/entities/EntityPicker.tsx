@@ -126,7 +126,10 @@ export default function EntityPicker({
         }}
         className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
       >
-        <option value="">No entity</option>
+        {/* A property with no entity is visible to admins only, so a
+            member who is not an admin is not offered a choice that would
+            take the property out of their own view. */}
+        {canCreate || !value ? <option value="">No entity</option> : null}
         {entities.map((entity) => (
           <option key={entity.id} value={entity.id}>
             {entity.name}

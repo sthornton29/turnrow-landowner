@@ -216,7 +216,10 @@ export default function MappingClient({
                   disabled={savingId === m.id}
                   className="min-w-52 rounded-lg border border-gray-300 px-2 py-1.5 text-sm disabled:opacity-60"
                 >
-                  <option value="">Not mapped</option>
+                  {/* Unmatching or ignoring a field takes it out of a
+                      member's own view, and the save is refused for
+                      anyone but an admin, so only admins are offered it. */}
+                  {isAdmin || valueOf(m) === "" ? <option value="">Not mapped</option> : null}
                   <optgroup label="Your ag fields">
                     {fields.map((f) => (
                       <option key={f.id} value={`field:${f.id}`}>
@@ -231,7 +234,7 @@ export default function MappingClient({
                       </option>
                     ))}
                   </optgroup>
-                  <option value="ignore">Ignore this field</option>
+                  {isAdmin || valueOf(m) === "ignore" ? <option value="ignore">Ignore this field</option> : null}
                 </select>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_CLASSES[m.status]}`}
@@ -266,7 +269,9 @@ export default function MappingClient({
         })}
         {mappings.length === 0 ? (
           <li className="rounded-xl border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
-            No shared fields found yet. Try {'"'}Check for new shared fields{'"'}.
+            {isAdmin
+              ? `No shared fields found yet. Try "Check for new shared fields".`
+              : "None of your farmer's fields are matched to land you can see yet. An admin on your account does the matching."}
           </li>
         ) : null}
       </ul>
