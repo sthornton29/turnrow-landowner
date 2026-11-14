@@ -8,7 +8,8 @@
     "build": "next build",
     "help:build": "node scripts/build-help.mjs",
     "start": "next start",
-    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -28,7 +29,7 @@
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "mapbox-gl": "^3.28.1",
-    "next": "^16.3.1",
+    "next": "^16.4.6",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "proj4": "^2.21.0",
