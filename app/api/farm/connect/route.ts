@@ -4,7 +4,9 @@ import { encryptSecret } from "@/lib/farmCrypto";
 import { FarmApiError, redeemShareCode } from "@/lib/farmApi";
 import { syncConnection } from "@/lib/farmSync";
 
-export const maxDuration = 60;
+// The first sync now covers two crop years (the current one and the one
+// before it), so it gets more room than a single year needed.
+export const maxDuration = 180;
 
 // Redeem a farmer's one-time share code, store the minted key encrypted,
 // and run the first sync (mapping suggestions included).

@@ -12,11 +12,29 @@ import union from "@turf/union";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 import { createClient } from "@/lib/supabase/client";
-import { formatAcres, formatNumber } from "@/lib/format";
-import { bboxOf } from "@/lib/geo/normalize";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatNumber, plural } from "@/lib/format";
+import { bboxOf, fitBoundsOf } from "@/lib/geo/normalize";
 import { ACRE_M2, TIMBER_CLASSES, type TimberClass } from "@/lib/timberScan/raster";
 import type { ScanProposal, ScanResult } from "@/lib/timberScan/types";
 import type { StandType } from "@/types/db";
+
+// A sentence written for the person scanning (from the server, or from
+// here). Anything else that goes wrong is reworded before it is shown.
+class ScanMessage extends Error {}
+
+// The reply as JSON, or null when it is not JSON: when the platform cuts
+// a slow request off it answers with a plain page, and reading that as
+// JSON used to put "Unexpected token ..." on the screen.
+async function readReply(res: Response): Promise<(Record<string, unknown> & { error?: string }) | null> {
+  const text = await res.text().catch(() => "");
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown> & { error?: string }) : null;
+  } catch {
+    return null;
+  }
+}
 
 // DRAFT colors only: these mark unconfirmed proposals over satellite and
 // disappear once saved, when stands take the normal timber styling.
@@ -112,9 +130,16 @@ export default function TimberScanClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ property_id: property.id, force }),
         });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "The scan failed.");
-        const result = body as ScanResult & { cached: boolean };
+        const body = await readReply(res);
+        if (!res.ok || !body) {
+          throw new ScanMessage(
+            body?.error ??
+              (res.status === 504 || res.status === 408 || res.ok
+                ? "The scan took too long and was cut off. The USDA land cover service is sometimes slow; try again in a few minutes."
+                : "The scan did not finish. Try again in a few minutes.")
+          );
+        }
+        const result = body as unknown as ScanResult & { cached: boolean };
         setScan(result);
         setCachedNote(result.cached);
         setProposals(
@@ -130,7 +155,13 @@ export default function TimberScanClient({
         setSelectedId(null);
         setMergePickId(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "The scan failed.");
+        // Our own sentences pass through; anything else (a dropped
+        // connection, a browser error) gets a plain one.
+        setError(
+          err instanceof ScanMessage
+            ? err.message
+            : friendlyDbError(err as Error, "The scan did not finish. Try again in a few minutes.")
+        );
       } finally {
         setLoading(false);
       }
@@ -260,7 +291,9 @@ export default function TimberScanClient({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || didFitRef.current) return;
-    const box = bboxOf([property.boundary]);
+    // fitBoundsOf leaves out any position that is not longitude and
+    // latitude, so one bad saved shape cannot make the fit throw.
+    const box = fitBoundsOf([property.boundary]);
     if (box) {
       map.fitBounds(box, { padding: 40, duration: 0 });
       didFitRef.current = true;
@@ -442,17 +475,19 @@ export default function TimberScanClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ geometry: target.geometry }),
         });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "Suggestion failed.");
-        if (body.suggestion === "planted_pine" || body.suggestion === "natural_pine") {
+        const body = await readReply(res);
+        if (!res.ok || !body) throw new ScanMessage(body?.error ?? "The suggestion did not come back. Set planted or natural yourself.");
+        const suggestion: StandType | null =
+          body.suggestion === "planted_pine" || body.suggestion === "natural_pine" ? body.suggestion : null;
+        if (suggestion) {
           setProposals((prev) =>
             prev.map((p) =>
               p.id === id
                 ? {
                     ...p,
                     aiSuggested: true,
-                    aiNote: `AI suggests ${body.suggestion === "planted_pine" ? "planted" : "natural"} (rows ${body.row_pattern_visible}, ${body.confidence} confidence)`,
-                    form: { ...p.form, standType: body.suggestion },
+                    aiNote: `AI suggests ${suggestion === "planted_pine" ? "planted" : "natural"} (rows ${String(body.row_pattern_visible)}, ${String(body.confidence)} confidence)`,
+                    form: { ...p.form, standType: suggestion },
                   }
                 : p
             )
@@ -507,7 +542,7 @@ export default function TimberScanClient({
         .select("id")
         .single();
       if (err || !data) {
-        failures.push(`${p.form.name}: ${err?.message ?? "insert failed"}`);
+        failures.push(`${p.form.name}: ${friendlyDbError(err, "it could not be created")}`);
         continue;
       }
       const { error: gErr } = await supabase.rpc("set_geometry", {
@@ -516,7 +551,15 @@ export default function TimberScanClient({
         p_geojson: p.geometry,
       });
       if (gErr) {
-        failures.push(`${p.form.name}: geometry failed (${gErr.message})`);
+        // The stand went in but its shape did not. Take it back out so a
+        // second try does not add a second stand with no boundary; the
+        // proposal stays on the list to try again.
+        const { error: delErr } = await supabase.from("timber_stands").delete().eq("id", data.id);
+        failures.push(
+          `${p.form.name}: ${friendlyDbError(gErr, "its shape could not be stored")}${
+            delErr ? " A stand with no boundary was left behind; delete it from the Timber page before trying again." : ""
+          }`
+        );
         continue;
       }
       saved++;
@@ -528,7 +571,11 @@ export default function TimberScanClient({
     }
     setSaving(false);
     if (failures.length > 0) {
-      setError(`Saved ${saved}; problems: ${failures.slice(0, 3).join("; ")}`);
+      setError(
+        `${saved > 0 ? `Saved ${formatNumber(saved)}. ` : ""}${plural(failures.length, "stand")} did not save and ${
+          failures.length === 1 ? "is" : "are"
+        } still on the list: ${failures.slice(0, 3).join("; ")}${failures.length > 3 ? "; and more" : ""}`
+      );
     } else {
       setToast(
         `Saved ${formatNumber(saved)} timber stand${saved === 1 ? "" : "s"} to ${property.name}.`
@@ -558,9 +605,19 @@ export default function TimberScanClient({
       </div>
 
       {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </p>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <p>{error}</p>
+          {/* A first scan that failed has nothing on screen to rescan
+              from, so the way to try again lives with the message. */}
+          {!scan && !loading ? (
+            <button
+              onClick={() => runScan(false)}
+              className="mt-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 font-medium text-red-700 hover:bg-red-100"
+            >
+              Try again
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {toast ? (
         <p className="flex items-center gap-2 rounded-lg border border-kelly-100 bg-kelly-50 p-3 text-sm font-medium text-pine-900">
