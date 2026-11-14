@@ -110,6 +110,7 @@ import {
   cropColor,
   cropLegend,
   harvestState,
+  seasonYear,
   yieldPerAcre,
   yieldUnitLabel,
   type FarmFieldDataRow,
@@ -512,7 +513,9 @@ export default function MapView({
     byField: Record<string, FarmActivityInfo[]>;
     byProperty: Record<string, FarmActivityInfo[]>;
     legend: Array<{ label: string; color: string }>;
-  }>({ byField: {}, byProperty: {}, legend: [] });
+    // The crop year shown (this year, or last until planting starts).
+    year: number;
+  }>({ byField: {}, byProperty: {}, legend: [], year: new Date().getFullYear() });
 
   const [mode, setMode] = useState<MapMode>("view");
   const modeRef = useRef<MapMode>("view");
@@ -799,11 +802,13 @@ export default function MapView({
       supabase.from("easements_geo").select("*").order("name"),
       supabase.from("assets_geo").select("*").eq("is_active", true).order("name"),
       supabase.from("field_mappings").select("*").eq("status", "confirmed"),
-      supabase.from("farm_field_data").select("*").eq("crop_year", currentYear),
+      // This year and last: the map shows one season (seasonYear below),
+      // and until the tenant plants in spring that is still last year's.
+      supabase.from("farm_field_data").select("*").in("crop_year", [currentYear - 1, currentYear]),
       supabase
         .from("farm_projected_yields")
-        .select("farm_connection_id, remote_field_id, crop, yield_per_acre, unit")
-        .eq("crop_year", currentYear),
+        .select("farm_connection_id, remote_field_id, crop, crop_year, yield_per_acre, unit")
+        .in("crop_year", [currentYear - 1, currentYear]),
       supabase.from("farm_connections").select("id, label"),
       supabase.from("entities").select("id, name").order("name"),
       supabase.from("cemeteries_geo").select("*").order("name"),
@@ -838,7 +843,12 @@ export default function MapView({
       return;
     }
 
-    // Current-year farm activity keyed to local fields / properties
+    // One season's farm activity keyed to local fields / properties: this
+    // year once the tenant has plantings in it, otherwise last year, so
+    // the crops do not vanish from the map on January 1 (the same rule
+    // as the Farm Data page, lib/farmDisplay.ts seasonYear).
+    const farmRows = (farmData.data as FarmFieldDataRow[]) ?? [];
+    const season = seasonYear(farmRows, currentYear);
     const connectionLabel = new Map(
       ((connections.data as Array<{ id: string; label: string }>) ?? []).map((c) => [c.id, c.label])
     );
@@ -856,11 +866,12 @@ export default function MapView({
           farm_connection_id: string;
           remote_field_id: string;
           crop: string;
+          crop_year: number;
           yield_per_acre: number | null;
           unit: string | null;
         }>) ?? []
       )
-        .filter((p) => p.yield_per_acre !== null)
+        .filter((p) => p.yield_per_acre !== null && Number(p.crop_year) === season)
         .map((p) => [
           `${p.farm_connection_id}|${p.remote_field_id}|${p.crop}`,
           `${Math.round(Number(p.yield_per_acre) * 10) / 10} ${p.unit === "lbs_per_ac" ? "lbs/ac" : "bu/ac"} projected`,
@@ -869,7 +880,8 @@ export default function MapView({
     const byField: Record<string, FarmActivityInfo[]> = {};
     const byProperty: Record<string, FarmActivityInfo[]> = {};
     const crops: string[] = [];
-    for (const row of ((farmData.data as FarmFieldDataRow[]) ?? [])) {
+    for (const row of farmRows) {
+      if (Number(row.crop_year) !== season) continue;
       const mapping = mappingByKey.get(`${row.farm_connection_id}|${row.remote_field_id}`);
       if (!mapping) continue;
       const perAcre = yieldPerAcre(row);
@@ -901,7 +913,7 @@ export default function MapView({
         ];
       }
     }
-    setFarmActivity({ byField, byProperty, legend: cropLegend(crops) });
+    setFarmActivity({ byField, byProperty, legend: cropLegend(crops), year: season });
     setLoading(false);
   }, [supabase]);
 
@@ -4503,7 +4515,7 @@ export default function MapView({
                 onChange={(e) => setCropsOn(e.target.checked)}
                 className="h-4 w-4 accent-kelly-500"
               />
-              Crops
+              Crops ({farmActivity.year})
             </label>
             {cropsOn ? (
               <div className="mt-1 space-y-0.5">
@@ -5175,6 +5187,7 @@ export default function MapView({
                 ? (farmActivity.byProperty[selected.id] ?? null)
                 : null
           }
+          farmActivityYear={farmActivity.year}
           assetChildren={
             selected.entityType === "asset" &&
             (selectedRow as AssetGeo).asset_type === "grain_bin_site"

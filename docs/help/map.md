@@ -21,7 +21,7 @@ The Layers box (top left on a computer) turns each kind of thing on or off: Prop
 - **Cemeteries** are a muted violet with a "C" marker: at the center of a traced plot, or on its own for a single pin.
 - **Timber types** get their own legend while the Timber layer is on (planted pine, natural pine, hardwood, mixed, other; only the types you have).
 - **Easements** show a legend by family: Utility, Access / transport, Drainage / flowage, Conservation, and Other easements, listing only the families you have recorded. Railroads get a tie pattern, conservation easements a hatch.
-- **Crops** appears when a connected tenant has shared this year's plantings on fields matched to your ag fields; it recolors ag fields by this year's crop.
+- **Crops** appears when a connected tenant has shared plantings on fields matched to your ag fields; it recolors ag fields by crop for the year shown beside it: this year once the tenant has planted, and last year until then.
 - **By entity** appears when you have more than one entity; it recolors property outlines by owner.
 - **Maintenance issues** are amber, red when marked high severity, and gray once resolved; a pin, or the center of a traced area, shows an exclamation mark. See the Maintenance issues topic.
 
@@ -57,5 +57,5 @@ On a weak signal a banner says the map could not load, with a **Retry** button. 
 
 - **Why do my acres differ from the deed?** Map acres are computed from the drawn shape. County records often carry deeded acres that differ slightly; a parcel's panel shows both when the county supplied them.
 - **A label is hiding something.** Turn off **Other names** or **Property names** under Labels while you work. The shapes stay.
-- **Can I see last year's crop?** The Crops layer shows the current year only; the Farm Data page shows earlier years.
+- **Can I see last year's crop?** The Crops layer shows one season, named beside the switch: this year once your tenant has planted, and last year until then. The Farm Data page shows earlier years.
 - **How do I delete a property?** From the property page, not the map, and only as an admin. See "Tapping things" above.

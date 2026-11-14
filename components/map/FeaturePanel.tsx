@@ -387,6 +387,7 @@ export default function FeaturePanel({
   propertyId = null,
   entityName = null,
   farmActivity = null,
+  farmActivityYear,
   assetChildren = null,
   parentAssetName = null,
   isAdmin = false,
@@ -409,6 +410,9 @@ export default function FeaturePanel({
   propertyId?: string | null;
   entityName?: string | null; // holding entity, shown for properties
   farmActivity?: FarmActivityInfo[] | null;
+  // The crop year that activity is for (this year, or last year until
+  // the tenant has planted).
+  farmActivityYear?: number;
   // A bin site's child bins (name + capacity), and a child's parent
   // name, resolved by the map from its loaded asset list.
   assetChildren?: Array<{ id: string; name: string; capacityBu: number | null }> | null;
@@ -806,7 +810,7 @@ export default function FeaturePanel({
           {farmActivity && farmActivity.length > 0 ? (
             <div className="rounded-lg border border-kelly-100 bg-kelly-50 p-2.5">
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-pine-900">
-                Farm activity ({new Date().getFullYear()})
+                Farm activity ({farmActivityYear ?? new Date().getFullYear()})
               </p>
               {farmActivity.map((a, i) => (
                 <div key={i} className="text-sm text-gray-800">
