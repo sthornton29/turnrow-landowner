@@ -132,9 +132,47 @@ curves continue the prior course, parseAngle, metersPerDegree(lat),
 aliquot clauses with extra words warn instead of plotting as if absent,
 the point of beginning must be confirmed, typed REPLACE / SAVE.
 
+SECOND PASS (what the help audit turned up in the app itself). A member
+who is not an admin is no longer offered what the database refuses: New
+property and Create new entity (plotter, county import), + New entity and
+No entity (EntityPicker canCreate), Not mapped / Ignore this field (field
+mapping), Add document on a tenant (EntityDocuments canAdd), Delete
+statement, and /taxes/reread (requireAdmin). Removing a cost-share
+payment, a bid, or a selling cost confirms first, as does marking an
+income record received. County import: the merged outline runs only for a
+property whose own parcels were added or updated (updatedOnTarget). A
+Cruised entry can be tied to a sale (lib/standActivities.ts linksSale).
+Government payments: a row with no rate reads "no estimate yet, counted as
+$0.00" and lib/gov/govProjection.ts gives the real reason (nothing passes
+arcFlatRatePerAcre, so "flat estimate" was never true). Tax payments in
+lib/income.ts and on the parcel page follow the bill (the part with no
+line in view stays in Unassigned), so a member's paid figures match an
+admin's. The map's Crops layer, the panel's farm activity, and the ag
+field page show ONE season (seasonYear: this year once planted, else last
+year) and name it. components/gov/AdminProgramParams.tsx rows are keyed by
+year and save only a changed number (a year switch used to leave last
+year's numbers in the boxes, and a tap out saved them under the new
+year). PaymentsSection takes the lease and marks rows after an ended
+lease "No longer expected". The Import page box accepts dropped files.
+The RMA crop on a lease is a list of the five RMA crops.
+
+STILL OPEN after the second pass: timber income on the Income page splits
+by stand acres even when the sale uses manual percentages (lib/income.ts
+sharesFor); a pay as cut sale cannot record an advance (needs settlements
+that draw it down, not a relaxed guard); answering "Not enrolled" drops
+the current use finding and its deadline (lib/taxReport.ts ~427);
+changing a statement's entity leaves entity_accounts with the old one;
+is_homestead is stored and unused; an income record marked Received
+cannot be set back, and Add a record cannot enter an owed one;
+auto-fill fills a blank price even when the method is Manual (a typed
+number is never replaced); farm_connections.last_error keeps the raw
+reason on purpose (farmSyncScopes.test.ts) and is shown as is; a property
+made by file import gets no entity; the ops replay check is not a claim.
+
 HELP. Every topic in docs/help was checked against the code on 2026-11-14
-(34 corrected, signing-in, tenants, parcels, and ag-fields added; 38
-topics). lib/helpMarkdown.tsx also renders "1. " numbered steps. The help
+(34 corrected; signing-in, tenants, parcels, ag-fields, wetlands,
+pastures, pollinator-habitats, cemeteries, and roads added; 43 topics, so
+every page has one). lib/helpMarkdown.tsx also renders "1. " numbered steps. The help
 chat (app/api/support-chat) sends the rules and the digest as one cached
 system block and the current page's topic as a second, uncached one: the
 digest is about 170 KB, so keep anything that changes per request out of
