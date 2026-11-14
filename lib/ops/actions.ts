@@ -221,8 +221,12 @@ const setExpectedPayments: Action = {
       changes: same ? 0 : table.length,
       path: `/leases/${String(lease.id)}/breakdown`,
       async write() {
-        if (replaced.length) await must(ctx.client.from("expected_payments").delete().eq("organization_id", ctx.orgId).in("id", replaced.map((e) => e.id as string)), "remove the unpaid installments");
+        // Add the new installments BEFORE removing the ones they replace.
+        // The two calls are not one transaction: if the second fails,
+        // the year briefly shows both sets (visible, and fixed by
+        // running the action again) instead of losing its schedule.
         await must(ctx.client.from("expected_payments").insert(installments.map((x) => ({ organization_id: ctx.orgId, lease_id: lease.id, timber_sale_id: null, year, label: x.label, due_date: x.due_date, expected_amount: x.amount }))), "add the installments");
+        if (replaced.length) await must(ctx.client.from("expected_payments").delete().eq("organization_id", ctx.orgId).in("id", replaced.map((e) => e.id as string)), "remove the unpaid installments");
         return { lease: lease.name, year, removed: replaced.length, added: installments.length, total, kept: kept.length };
       },
     };
