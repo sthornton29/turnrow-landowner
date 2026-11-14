@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { canPlotBoundary, type DocType, type ScanKind } from "@/lib/documents";
 import { createOrUpdateFarmsFromExtraction, normalizeFsaExtraction } from "@/lib/gov/fsaImport";
 import { openDocument } from "../classify";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { nameMentioned } from "@/lib/documentMatch";
 
 // Step 3 confirmation: what was saved, and the type-specific next
@@ -19,6 +20,7 @@ export default function SavedPanel({
   storagePath,
   propertyId,
   title,
+  warning = null,
   placeNames = [],
   savedProperties = [],
   onUploadAnother,
@@ -32,6 +34,8 @@ export default function SavedPanel({
   storagePath: string;
   propertyId: string | null;
   title: string;
+  // The document saved, but a follow-up step did not (its property links).
+  warning?: string | null;
   // Learn names: place names the reader saw that match none of the
   // saved properties' names or aliases become one-tap aliases.
   placeNames?: string[];
@@ -45,6 +49,7 @@ export default function SavedPanel({
   const [learned, setLearned] = useState<Record<string, string>>({});
   const [learnTarget, setLearnTarget] = useState<Record<string, string>>({});
   const [learnError, setLearnError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   const learnable = savedProperties.length === 0 ? [] : learnableNames(placeNames, savedProperties);
 
@@ -59,7 +64,7 @@ export default function SavedPanel({
       source_document_id: documentId,
     });
     if (error && !error.message.includes("duplicate")) {
-      setLearnError(error.message);
+      setLearnError(friendlyDbError(error, "Could not remember that name. Please try again."));
       return;
     }
     setLearned((m) => ({ ...m, [alias]: savedProperties.find((p) => p.id === pid)?.name ?? "" }));
@@ -103,7 +108,7 @@ export default function SavedPanel({
           "."
       );
     } catch (e) {
-      setFarmResult("Could not save the FSA farms: " + (e instanceof Error ? e.message : "unknown error"));
+      setFarmResult(friendlyDbError(e instanceof Error ? e : null, "Could not save the FSA farms. Please try again."));
     } finally {
       setFarmBusy(false);
     }
@@ -115,6 +120,14 @@ export default function SavedPanel({
         <p className="text-sm font-semibold text-pine-900">Saved: {title}</p>
         <p className="text-xs text-gray-700">The document, its type, attachments, and reviewed fields are stored together.</p>
       </div>
+      {warning ? (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {warning}{" "}
+          <Link href={`/documents/${documentId}`} className="font-medium underline">
+            Open the document
+          </Link>
+        </p>
+      ) : null}
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested next</p>
         <div className="flex flex-wrap gap-2">
@@ -140,7 +153,7 @@ export default function SavedPanel({
           ) : null}
           <button
             type="button"
-            onClick={() => openDocument(supabase, storagePath)}
+            onClick={async () => setOpenError(await openDocument(supabase, storagePath))}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Open file
@@ -160,6 +173,7 @@ export default function SavedPanel({
             Done
           </button>
         </div>
+        {openError ? <p className="text-xs text-red-600">{openError}</p> : null}
         {farmResult ? (
           <p className="text-xs text-gray-700">
             {farmResult}{" "}

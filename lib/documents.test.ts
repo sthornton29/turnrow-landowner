@@ -8,8 +8,12 @@ import {
   DOC_TYPE_LABELS,
   EXTRACTED_FIELDS,
   canPlotBoundary,
+  documentSearchText,
   extractedHighlights,
+  matchesEveryWord,
   scanKindFor,
+  unsureNotes,
+  unsureSet,
 } from "./documents";
 
 // The list migration 0020's check constraint allows, as widened by 0039.
@@ -119,5 +123,91 @@ describe("extracted highlights", () => {
   it("returns nothing for empty extractions and skips blank values", () => {
     expect(extractedHighlights("deed_warranty", null)).toEqual([]);
     expect(extractedHighlights("appraisal", { parties: "", amount: null })).toEqual([]);
+  });
+});
+
+describe("document search", () => {
+  it("matches when every word appears, in any order", () => {
+    const title = "Warranty Deed - Smith to Jones (2014)";
+    expect(matchesEveryWord(title, "smith deed")).toBe(true);
+    expect(matchesEveryWord(title, "  JONES   warranty ")).toBe(true);
+    expect(matchesEveryWord(title, "smith to jones")).toBe(true);
+    expect(matchesEveryWord(title, "smith lease")).toBe(false);
+    expect(matchesEveryWord(title, "")).toBe(true);
+    expect(matchesEveryWord(title, "   ")).toBe(true);
+  });
+
+  it("builds the search line from the type, the read values, and the highlights", () => {
+    const text = documentSearchText("deed_warranty", {
+      scan_kind: "deed",
+      grantor: "John Smith",
+      grantee: "Jane Jones",
+      consideration: 250000,
+      legal_description: "The NW1/4 of SE1/4 lying south of Sandy Branch",
+      spatial: {
+        reference_label: "Sec 31, T4S R7W, Huntsville PM",
+        polygon: { type: "MultiPolygon", coordinates: [[[[-87.4321, 34.5678], [-87.4, 34.5]]]] },
+        matches: [{ entity_type: "property", name: "Shop Area", overlap_acres: 399.6 }],
+      },
+      legal_description_extraction: { source_text: "Beginning at an iron pin", aliquot: { tracts: [{ section: 31 }] } },
+    });
+    for (const found of [
+      "warranty deed",
+      "john smith",
+      "jane jones",
+      "250000",
+      "consideration $250,000.00",
+      "sandy branch",
+      "sec 31, t4s r7w",
+      "shop area",
+      "beginning at an iron pin",
+    ]) {
+      expect(text, found).toContain(found);
+    }
+    // Map coordinates are not sent or searched.
+    expect(text).not.toContain("87.4321");
+    expect(text).not.toContain("multipolygon");
+    expect(text).toBe(text.toLowerCase());
+    expect(matchesEveryWord(text, "smith sandy branch deed")).toBe(true);
+  });
+
+  it("still names the type when nothing was read", () => {
+    expect(documentSearchText("survey_plat", null)).toBe("survey plat survey_plat");
+    expect(documentSearchText(null, undefined)).toBe("other");
+  });
+});
+
+describe("unsure fields", () => {
+  it("reduces a path to the field the form knows", () => {
+    const set = unsureSet([
+      "grantor",
+      "fields.grantee",
+      "extraction.fields.recording_ref",
+      "fields.farms[0].farm_number",
+      "farms[1].base_acres",
+      "fields.exceptions[2].description",
+    ]);
+    expect([...set].sort()).toEqual(
+      ["exceptions", "farms[0].farm_number", "farms[1].base_acres", "grantee", "grantor", "recording_ref"].sort()
+    );
+  });
+
+  it("keeps a sentence whole and shows it as a note, not a field", () => {
+    const list = [
+      "fields.grantor",
+      "legal_description",
+      "Only the first 90 of 240 pages were read",
+      "Only the first 90 of 240 pages were read",
+      "notary_name",
+    ];
+    expect(unsureSet(list).has("Only the first 90 of 240 pages were read")).toBe(true);
+    expect(unsureNotes("deed", list)).toEqual([
+      "Only the first 90 of 240 pages were read",
+      "Unsure about: notary name",
+    ]);
+    // A field of this form, or a farm card, is never repeated as a note.
+    expect(unsureNotes("deed", ["fields.grantor", "consideration"])).toEqual([]);
+    expect(unsureNotes("fsa_156ez", ["farms[0].farm_number", "fields.farms[2].county"])).toEqual([]);
+    expect(unsureNotes("title_insurance", ["exceptions[2].description"])).toEqual([]);
   });
 });

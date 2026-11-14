@@ -11,7 +11,7 @@ export const metadata = { title: "Document" };
 // and the upload footer. Session client only: RLS scopes everything.
 export default async function DocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
   const { data: doc } = await supabase.from("documents").select("*").eq("id", id).single();
   if (!doc) notFound();
   const row = doc as DocumentRow;
@@ -45,6 +45,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
       primary={primary}
       fsaFarm={farm.data ? { id: farm.data.id as string, farmNumber: String(farm.data.farm_number) } : null}
       orgId={profile.organization_id!}
+      isAdmin={isAdmin}
     />
   );
 }

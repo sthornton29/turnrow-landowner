@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { verifyMatches, type MatchableEntity, type MatchableParcel, type MatchableProperty } from "./documentMatch";
+import {
+  CONFIDENT_SCORE,
+  isConfident,
+  verifyMatches,
+  type MatchableEntity,
+  type MatchableParcel,
+  type MatchableProperty,
+} from "./documentMatch";
 
 const properties: MatchableProperty[] = [
   { id: "river", name: "River Place", county: "Lawrence", state: "AL", fsa_numbers: ["1234"], acres: 320 },
@@ -96,6 +103,33 @@ describe("verifyMatches", () => {
     );
     expect(ambiguous.verified).toEqual([]);
     expect(ambiguous.downgraded[0].name).toBe("Hill Farm");
+  });
+
+  it("a county match alone is a suggestion, never a pre-checked property", () => {
+    const r = verifyMatches(
+      [{ name: "River Place", confidence: "high", signal: "county", value: "Lawrence", reason: "" }],
+      { counties: ["Lawrence"], states: ["AL"] }, properties, parcels, entities, null, propertyEntity
+    );
+    // Still offered, with its reason...
+    expect(r.verified.map((v) => v.propertyId)).toEqual(["river"]);
+    expect(r.verified[0].reasons).toEqual(["The only property in Lawrence County"]);
+    // ...but below the score that pre-checks a row, so nothing is chosen for the person.
+    expect(r.verified[0].score).toBeLessThan(CONFIDENT_SCORE);
+    expect(isConfident(r.verified[0])).toBe(false);
+    expect(r.preselect).toEqual([]);
+  });
+
+  it("a county match still adds to a real signal on the same property", () => {
+    const r = verifyMatches(
+      [
+        { name: "River Place", confidence: "high", signal: "parcel", value: "12-03-07-0-000-004.000", reason: "" },
+        { name: "River Place", confidence: "low", signal: "county", value: "Lawrence", reason: "" },
+      ],
+      { counties: ["Lawrence"], parcel_numbers: ["12-03-07-0-000-004.000"] },
+      properties, parcels, entities, null, propertyEntity
+    );
+    expect(r.preselect).toEqual(["river"]);
+    expect(r.verified[0].reasons).toHaveLength(2);
   });
 
   it("ignores names that are not the owner's properties", () => {

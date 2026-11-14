@@ -73,6 +73,12 @@ describe("suggestProperties", () => {
     expect(CONFIDENT_SCORE).toBe(50);
   });
 
+  it("prints acres with commas and one decimal in its reasons", () => {
+    const big = [{ id: "big", name: "Big Tract", county: "Lawrence", state: "AL", fsa_numbers: null, acres: 1689 }];
+    const s = suggestProperties({ acres: 1700.25 }, big, []);
+    expect(s[0].reasons).toEqual(["About the same acreage (1,689.0 vs 1,700.3)"]);
+  });
+
   it("handles missing hints", () => {
     expect(suggestProperties(null, props, parcels)).toEqual([]);
     expect(suggestProperties({}, props, parcels)).toEqual([]);

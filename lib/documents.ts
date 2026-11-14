@@ -357,3 +357,91 @@ export function extractedHighlights(
   }
   return out;
 }
+
+// ---------------------------------------------------------------- unsure fields
+
+// The reader names an unsure field by key, sometimes with a path around
+// it ("fields.grantor", "fields.farms[0].farm_number",
+// "exceptions[2].description"). The review form looks fields up by
+// their own key ("grantor", "farms[0].farm_number", "exceptions"), so
+// each name is reduced to that: the last segment of a dotted path, or
+// the table a cell belongs to. Anything with a space in it is a
+// sentence, not a field name, and is kept whole.
+function unsureKey(raw: string): string {
+  const s = raw.trim();
+  if (/\s/.test(s)) return s;
+  const farm = s.match(/farms\[\d+\].*$/);
+  if (farm) return farm[0];
+  const head = s.replace(/^(?:.*\.)?fields\./, "").split("[")[0];
+  return head.split(".").pop() ?? head;
+}
+
+// The keys the review form turns amber.
+export function unsureSet(list: string[]): Set<string> {
+  return new Set(list.map(unsureKey));
+}
+
+// Unsure entries that do NOT point at a field on this form: notes from
+// the reader such as "Only the first 90 of 240 pages were read". They
+// have no input to turn amber, so the screen shows them as text.
+export function unsureNotes(scanKind: ScanKind, list: string[]): string[] {
+  const keys = new Set((EXTRACTED_FIELDS[scanKind] ?? []).map((f) => f.key));
+  const out: string[] = [];
+  for (const raw of list) {
+    const key = unsureKey(raw);
+    if (key === "" || keys.has(key) || key.startsWith("farms[")) continue;
+    const note = /\s/.test(key) ? key : `Unsure about: ${key.replace(/_/g, " ")}`;
+    if (!out.includes(note)) out.push(note);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- search
+
+// True when EVERY word of the query appears somewhere in the text, in
+// any order: "smith deed" finds "Warranty Deed - Smith to Jones". An
+// empty query matches everything.
+export function matchesEveryWord(haystack: string, query: string): boolean {
+  const hay = haystack.toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((word) => hay.includes(word));
+}
+
+// Map shapes are long lists of coordinates nobody searches for.
+const UNSEARCHED_KEYS = new Set(["polygon", "coordinates", "geometry"]);
+
+function collectSearchText(value: unknown, out: Set<string>): void {
+  if (typeof value === "string") {
+    const t = value.trim().toLowerCase();
+    if (t) out.add(t);
+  } else if (typeof value === "number") {
+    if (Number.isFinite(value)) out.add(String(value));
+  } else if (Array.isArray(value)) {
+    if (value.length > 0 && value.every((x) => typeof x === "number")) return; // a coordinate
+    for (const x of value) collectSearchText(x, out);
+  } else if (value && typeof value === "object") {
+    for (const [k, x] of Object.entries(value)) {
+      if (!UNSEARCHED_KEYS.has(k)) collectSearchText(x, out);
+    }
+  }
+}
+
+// The words a document can be found by, from its type and what was read
+// off it: the type's name, every piece of text and every number stored
+// in `extracted` (each once), and the highlight lines, lowercased. The
+// Documents page builds this on the server and sends the phone this one
+// line per document in place of the whole extracted record.
+export function documentSearchText(
+  docType: string | null | undefined,
+  extracted: Record<string, unknown> | null | undefined
+): string {
+  const type = (docType ?? "other") as DocType;
+  const out = new Set<string>();
+  collectSearchText([DOC_TYPE_LABELS[type] ?? "", type], out);
+  collectSearchText(extracted ?? null, out);
+  collectSearchText(extractedHighlights(type, extracted), out);
+  return [...out].join(" ");
+}

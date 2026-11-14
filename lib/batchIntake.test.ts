@@ -158,4 +158,30 @@ describe("runPool", () => {
     expect(peak).toBe(3);
     expect(seen.sort()).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
+
+  it("starts nothing more once told to stop, and lets running items finish", async () => {
+    let stop = false;
+    const started: number[] = [];
+    const finished: number[] = [];
+    await runPool(
+      [1, 2, 3, 4, 5, 6, 7],
+      3,
+      async (n) => {
+        started.push(n);
+        await new Promise((r) => setTimeout(r, 5));
+        finished.push(n);
+        // The dialog closes while the first three are saving.
+        if (n === 1) stop = true;
+      },
+      () => stop
+    );
+    expect(started.sort()).toEqual([1, 2, 3]);
+    expect(finished.sort()).toEqual([1, 2, 3]);
+  });
+
+  it("starts nothing at all when already stopped", async () => {
+    const started: number[] = [];
+    await runPool([1, 2, 3], 2, async (n) => void started.push(n), () => true);
+    expect(started).toEqual([]);
+  });
 });

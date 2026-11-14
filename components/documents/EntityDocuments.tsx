@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
 import { type DocType } from "@/lib/documents";
 import { displayTitle } from "@/lib/documentTitle";
+import { formatDate } from "@/lib/format";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 import DocTypeChip from "./DocTypeChip";
 import { deleteDocumentEverywhere, uploadDocument } from "./classify";
@@ -30,11 +32,15 @@ export default function EntityDocuments({
   entityType,
   entityId,
   label,
+  isAdmin,
 }: {
   orgId: string;
   entityType: DocumentEntityType;
   entityId: string;
   label?: string; // what the intake shows as "Adding to ..."
+  // Pass it from the page when known. Left out, the careful path is
+  // taken (a member who may not be an admin).
+  isAdmin?: boolean;
 }) {
   const supabase = createClient();
   const [docs, setDocs] = useState<DocumentRow[]>([]);
@@ -44,11 +50,15 @@ export default function EntityDocuments({
   const [intakeOpen, setIntakeOpen] = useState(false);
   // A bulk upload with read but unsaved documents asks before closing.
   const intakeDirty = useRef(false);
+  // While a save is running the dialog stays open: closing it mid-save
+  // would stop the save partway through.
+  const [intakeSaving, setIntakeSaving] = useState(false);
   const closeIntake = useCallback(() => {
+    if (intakeSaving) return;
     if (intakeDirty.current && !window.confirm("Close the upload? Documents that were read but not saved will be discarded.")) return;
     intakeDirty.current = false;
     setIntakeOpen(false);
-  }, []);
+  }, [intakeSaving]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const isProperty = entityType === "property";
   const [busy, setBusy] = useState(false);
@@ -187,8 +197,8 @@ export default function EntityDocuments({
   // Photo delete (gallery only; documents are deleted from their page).
   async function removePhoto(doc: DocumentRow) {
     if (!window.confirm(`Delete ${displayTitle(doc)}?`)) return;
-    const err = await deleteDocumentEverywhere(supabase, doc);
-    if (err) setError("Could not delete. " + err);
+    const err = await deleteDocumentEverywhere(supabase, doc, { seesEveryDocument: isAdmin === true });
+    if (err) setError(err);
     load();
   }
 
@@ -217,7 +227,6 @@ export default function EntityDocuments({
               ref={photoInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               multiple
               className="hidden"
               onChange={(e) => uploadPhotos(e.target.files)}
@@ -226,9 +235,12 @@ export default function EntityDocuments({
         ) : null}
       </div>
 
-      {intakeOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
-          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl md:max-w-5xl md:rounded-2xl md:p-6">
+      {/* Drawn on the page body, above the phone's bottom tab bar (z-40).
+          Inside the page the sheet sat in a lower layer, and its bottom
+          strip (the Save buttons) was under that bar. */}
+      {intakeOpen ? createPortal(
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
+          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-5xl md:rounded-2xl md:p-6">
             <div className="mb-3 flex items-start justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Add a document</h2>
@@ -236,8 +248,10 @@ export default function EntityDocuments({
               </div>
               <button
                 onClick={closeIntake}
+                disabled={intakeSaving}
                 aria-label="Close"
-                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                title={intakeSaving ? "Saving. Wait for it to finish before closing." : "Close"}
+                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -252,6 +266,7 @@ export default function EntityDocuments({
                 label: contextLabel || "this record",
                 propertyId: contextPropertyId,
               }}
+              isAdmin={isAdmin === true}
               onSaved={() => load()}
               onClose={() => {
                 intakeDirty.current = false;
@@ -260,9 +275,11 @@ export default function EntityDocuments({
               onDirtyChange={(d) => {
                 intakeDirty.current = d;
               }}
+              onSavingChange={setIntakeSaving}
             />
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -286,7 +303,7 @@ export default function EntityDocuments({
               <button
                 onClick={() => removePhoto(doc)}
                 aria-label="Delete photo"
-                className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
+                className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -322,7 +339,7 @@ export default function EntityDocuments({
                           </span>
                         ))
                       : null}
-                    <span>{new Date(doc.created_at).toLocaleDateString()}</span>
+                    <span>{formatDate(doc.created_at)}</span>
                   </div>
                 </Link>
               </li>

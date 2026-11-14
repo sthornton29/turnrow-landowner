@@ -171,3 +171,98 @@ describe("resolveDescription", () => {
     expect(r.polygon).toBeNull();
   });
 });
+
+// The parser must never plot a different area than the words describe
+// without saying so. Anything beyond a clean chain of quarters and
+// halves is left alone (nothing cut, nothing shrunk) and called out.
+describe("words the parser does not understand", () => {
+  const share = (text: string) => {
+    const parsed = parseAliquot(text);
+    return { parsed, ratio: resolveDescription(parsed, section).acres / acresOf(section) };
+  };
+  const warned = (warnings: string[], quoted: string) =>
+    warnings.some((w) => w.includes(`"${quoted}"`) && w.includes("does not account"));
+
+  it("a partial carve-out is not cut as the whole quarter (79 acres stays 80, not 40)", () => {
+    const { parsed, ratio } = share(
+      "N1/2 of SE1/4 of Section 12, T4S R8W, less one acre in the NW corner of the NW1/4 of SE1/4"
+    );
+    expect(parsed.parts).toEqual([["N", "SE"]]);
+    expect(parsed.exceptions).toEqual(["one acre in the NW corner of the NW1/4 of SE1/4"]);
+    expect(parsed.exceptionParts).toEqual([]);
+    expect(ratio).toBeCloseTo(80 / 640, 3);
+    expect(warned(parsed.warnings, "one acre in the NW corner of the NW1/4 of SE1/4")).toBe(true);
+  });
+
+  it("never reads \"more or less\" as an exception", () => {
+    const { parsed, ratio } = share(
+      "NW1/4 of SE1/4, containing 40 acres, more or less, and the NE1/4 of SW1/4 of Section 12, T4S R8W"
+    );
+    expect(parsed.parts).toEqual([["NW", "SE"], ["NE", "SW"]]);
+    expect(parsed.exceptions).toEqual([]);
+    expect(parsed.exceptionParts).toEqual([]);
+    expect(parsed.warnings).toEqual([]);
+    expect(ratio).toBeCloseTo(80 / 640, 3);
+    const tail = parseAliquot("NE1/4 of Section 9, T4S R8W, containing 160 acres, more or less, in Lawrence County");
+    expect(tail.exceptions).toEqual([]);
+    expect(tail.warnings).toEqual([]);
+  });
+
+  it("warns, quoting the words, when a part carries a qualifier, and plots the part in full", () => {
+    const cases: Array<[string, string]> = [
+      ["North 10 acres of the NE1/4 of Section 9, T4S R8W", "North 10 acres of the NE1/4"],
+      ["W 1/4 of the NE1/4 of Section 9, T4S R8W", "W 1/4 of the NE1/4"],
+      ["East 330 feet of the NE1/4 of Section 9, T4S R8W", "East 330 feet of the NE1/4"],
+      ["that part of the NE1/4 lying north of the road, Section 9, T4S R8W", "that part of the NE1/4 lying north of the road"],
+    ];
+    for (const [text, quoted] of cases) {
+      const { parsed, ratio } = share(text);
+      expect(parsed.parts, text).toEqual([["NE"]]);
+      expect(ratio, text).toBeCloseTo(160 / 640, 3);
+      expect(warned(parsed.warnings, quoted), text).toBe(true);
+    }
+    // A qualifier set off by a comma is called out too.
+    const apart = parseAliquot("the NE1/4, that part lying north of the road, Section 9, T4S R8W");
+    expect(apart.parts).toEqual([["NE"]]);
+    expect(warned(apart.warnings, "that part lying north of the road")).toBe(true);
+  });
+
+  it("says nothing extra about a clean chain however it is worded", () => {
+    const clean: Array<[string, string[][]]> = [
+      ["the NE1/4 in Section 9, T4S R8W", [["NE"]]],
+      ["All of the Northwest Quarter of the Southeast Quarter of Section 12, T4S R8W", [["NW", "SE"]]],
+      ["W1/2 of NE1/4 and NW1/4 of Section 3, T5N, R2E", [["W", "NE"], ["NW"]]],
+      ["T4S R8W: the NW1/4 of SE1/4, containing 40 acres, lying in Section 12", [["NW", "SE"]]],
+    ];
+    for (const [text, parts] of clean) {
+      const p = parseAliquot(text);
+      expect(p.parts, text).toEqual(parts);
+      expect(p.warnings, text).toEqual([]);
+    }
+  });
+
+  it("reads each of several joined exceptions, not just the first", () => {
+    const { parsed, ratio } = share(
+      "NE1/4 Section 9, T4S R8W less and except the NE1/4 of NE1/4 of Section 9; the SW1/4 of NE1/4 of Section 9"
+    );
+    expect(parsed.parts).toEqual([["NE"]]);
+    expect(parsed.exceptions).toHaveLength(2);
+    expect(parsed.exceptionParts).toEqual([["NE", "NE"], ["SW", "NE"]]);
+    expect(ratio).toBeCloseTo(80 / 640, 3);
+    // Joined by "and", each with its own section recital.
+    const joined = parseAliquot(
+      "NE1/4 of Section 9, T4S R8W, less the NE1/4 of NE1/4 of said Section 9 and the SW1/4 of NE1/4 of said Section 9"
+    );
+    expect(joined.exceptionParts).toEqual([["NE", "NE"], ["SW", "NE"]]);
+  });
+
+  it("cuts the clean exception and leaves the worded one alone, with a warning", () => {
+    const { parsed, ratio } = share(
+      "NE1/4 Section 9, T4S R8W less and except the NE1/4 of NE1/4; the East 330 feet of the SW1/4 of NE1/4"
+    );
+    expect(parsed.exceptionParts).toEqual([["NE", "NE"]]);
+    expect(ratio).toBeCloseTo(120 / 640, 3);
+    expect(warned(parsed.warnings, "the East 330 feet of the SW1/4 of NE1/4")).toBe(true);
+    expect(parsed.warnings.filter((w) => w.includes("cut by hand"))).toHaveLength(1);
+  });
+});

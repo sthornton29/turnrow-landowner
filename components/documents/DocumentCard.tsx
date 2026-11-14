@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { displayTitle } from "@/lib/documentTitle";
+import { formatDate } from "@/lib/format";
 import type { DocumentRow } from "@/types/db";
 import DocTypeChip from "./DocTypeChip";
 import DocTypeIcon from "./DocTypeIcon";
@@ -18,7 +19,8 @@ export default function DocumentCard({
   attachedLabel,
   onRenamed,
 }: {
-  doc: DocumentRow;
+  // Only what the card shows (the list page sends no more than this).
+  doc: Pick<DocumentRow, "id" | "entity_type" | "doc_type" | "title" | "file_name" | "created_at">;
   propertyNames: string[];
   // A non-property primary attachment ("Lease 2024 row crop", "Entity Smith Farms LLC").
   attachedLabel?: string | null;
@@ -105,7 +107,7 @@ export default function DocumentCard({
           {more > 0 ? <span className="rounded-full bg-kelly-50 px-2 py-0.5 font-medium text-pine-900">+{more}</span> : null}
           {attachedLabel ? <span className="truncate">{attachedLabel}</span> : null}
           {unfiled ? <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-900">Unfiled</span> : null}
-          <span className="ml-auto whitespace-nowrap">{new Date(doc.created_at).toLocaleDateString()}</span>
+          <span className="ml-auto whitespace-nowrap">{formatDate(doc.created_at)}</span>
         </div>
       </div>
     </>

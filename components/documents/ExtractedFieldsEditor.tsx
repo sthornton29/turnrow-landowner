@@ -25,6 +25,8 @@ export const inputClass =
 export const amberClass =
   "w-full rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-sm ring-2 ring-amber-100 focus:border-kelly-500 focus:outline-none";
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 // Seed editable values for a scan kind from an extraction object.
 export function initialValuesFor(
   scanKind: ScanKind,
@@ -290,6 +292,22 @@ export default function ExtractedFieldsEditor({
               onChange={(e) => set(f.key, e.target.value)}
               className={unsure.has(f.key) ? amberClass : inputClass}
             />
+          ) : f.input === "date" && String(values[f.key] ?? "").trim() !== "" && !ISO_DATE.test(String(values[f.key]).trim()) ? (
+            // A date box shows nothing for a value that is not a full
+            // date ("1987-03", "March 1987"), yet the value would still
+            // be saved. Show it as text, marked, so it is seen and fixed.
+            <>
+              <input
+                type="text"
+                value={String(values[f.key] ?? "")}
+                onChange={(e) => set(f.key, e.target.value)}
+                className={amberClass}
+              />
+              <p className="mt-1 text-xs text-amber-800">
+                This is not a full date. Type it as year-month-day (for example 1987-03-15), or clear it if the day is
+                not known.
+              </p>
+            </>
           ) : (
             <input
               type={f.input === "number" ? "number" : f.input === "date" ? "date" : "text"}

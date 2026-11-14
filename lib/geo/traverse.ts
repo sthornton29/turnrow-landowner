@@ -46,11 +46,15 @@ export interface CurveSpec {
   chordBearing?: string | number;
   chordLength?: number; // feet
   direction: "left" | "right";
-  delta?: number; // central angle, degrees
+  // Central angle: degrees, or the text as the deed writes it
+  // ("90°00'00\"", "12-30-15").
+  delta?: number | string;
 }
 
 export interface Call {
-  bearing: string | number; // text or azimuth degrees
+  // Text or azimuth degrees. A curve may leave it out: it then starts
+  // in the direction the course before it ended.
+  bearing?: string | number;
   distance: number; // in `unit` (default feet)
   unit?: Unit;
   curve?: CurveSpec;
@@ -65,6 +69,9 @@ export interface TraverseResult {
   areaAcres: number;
   adjusted: boolean;
   warnings: string[];
+  // Call numbers (1-based, as given) that could not be plotted and were
+  // left out of the figure. Each one also has a warning.
+  skippedCalls: number[];
 }
 
 const SQFT_PER_ACRE = 43560;
@@ -150,8 +157,23 @@ export function parseBearing(input: string | number): ParsedBearing | null {
   return null;
 }
 
-function azimuthOf(b: string | number): number | null {
+function azimuthOf(b: string | number | undefined): number | null {
+  if (b === undefined) return null;
   return parseBearing(b)?.azimuthDeg ?? null;
+}
+
+// A plain angle the way deeds write a curve's central angle
+// ("90°00'00\"", "12-30-15", "45.5", "Delta = 12°30'"), read with the
+// same degrees-minutes-seconds parser the bearings use. Degrees, or null.
+export function parseAngle(input: string | number): number | null {
+  if (typeof input === "number") return Number.isFinite(input) ? input : null;
+  const dms = parseDms(normalizeBearingText(input).replace(/^[^0-9]+/, ""));
+  return dms ? dms.deg : null;
+}
+
+// "1,234.5": one decimal with commas, for feet in messages.
+function oneDecimal(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 // ---------------------------------------------------------------- distances
@@ -200,9 +222,44 @@ interface Course {
   azimuthDeg: number; // direction of travel for this course (chord for curves)
   lengthFt: number; // straight-line length (chord for curves)
   weightFt: number; // length used for compass-rule weighting (arc for curves)
+  // The direction the line is heading where this course ENDS: its own
+  // bearing for a straight course; for a curve the outgoing tangent,
+  // which is not the chord bearing. A curve after it with no bearing of
+  // its own starts in this direction.
+  endTangentAz: number;
+  // False when a curve gave only a chord, so its outgoing tangent is not
+  // known and the chord bearing stands in for it.
+  endTangentKnown: boolean;
 }
 
-function courseFor(call: Call, prevTangentAz: number | null, index: number, warnings: string[]): Course | null {
+const wrap360 = (az: number) => ((az % 360) + 360) % 360;
+
+function hasText(v: string | number | undefined): boolean {
+  return v !== undefined && String(v).trim() !== "";
+}
+
+// A curve figure that was left out is fine. One that was given but is
+// not a usable number is ignored, with a warning that names the call.
+function curveFigure(
+  value: number | undefined,
+  label: string,
+  index: number,
+  warnings: string[]
+): number | null {
+  if (value === undefined) return null;
+  if (!Number.isFinite(value) || value <= 0) {
+    warnings.push(`Call ${index + 1}: the curve's ${label} is not a usable number, so it was ignored.`);
+    return null;
+  }
+  return value;
+}
+
+function courseFor(
+  call: Call,
+  prev: { az: number; known: boolean } | null,
+  index: number,
+  warnings: string[]
+): Course | null {
   const unitFactor = FEET_PER_UNIT[call.unit ?? "feet"];
   if (!Number.isFinite(unitFactor)) {
     warnings.push(
@@ -214,7 +271,11 @@ function courseFor(call: Call, prevTangentAz: number | null, index: number, warn
   if (!curve) {
     const az = azimuthOf(call.bearing);
     if (az === null) {
-      warnings.push(`Call ${index + 1}: could not read the bearing "${call.bearing}".`);
+      warnings.push(
+        hasText(call.bearing)
+          ? `Call ${index + 1}: could not read the bearing "${call.bearing}".`
+          : `Call ${index + 1}: no bearing was given.`
+      );
       return null;
     }
     const len = call.distance * unitFactor;
@@ -222,38 +283,84 @@ function courseFor(call: Call, prevTangentAz: number | null, index: number, warn
       warnings.push(`Call ${index + 1}: distance must be a positive number.`);
       return null;
     }
-    return { azimuthDeg: az, lengthFt: len, weightFt: len };
+    return { azimuthDeg: az, lengthFt: len, weightFt: len, endTangentAz: az, endTangentKnown: true };
   }
 
   // Curve: prefer the chord when given outright.
   const sign = curve.direction === "right" ? 1 : -1;
-  let chordAz = curve.chordBearing !== undefined ? azimuthOf(curve.chordBearing) : null;
-  let chordLen = curve.chordLength !== undefined ? curve.chordLength * unitFactor : null;
-  let deltaDeg = curve.delta ?? null;
-  const radius = curve.radius !== undefined ? curve.radius * unitFactor : null;
-  const arc = curve.arcLength !== undefined ? curve.arcLength * unitFactor : null;
+  const radiusIn = curveFigure(curve.radius, "radius", index, warnings);
+  const arcIn = curveFigure(curve.arcLength, "arc length", index, warnings);
+  const chordIn = curveFigure(curve.chordLength, "chord length", index, warnings);
+  const radius = radiusIn === null ? null : radiusIn * unitFactor;
+  const arc = arcIn === null ? null : arcIn * unitFactor;
+  let chordLen = chordIn === null ? null : chordIn * unitFactor;
 
-  if (deltaDeg === null && radius && arc) deltaDeg = (arc / radius) / DEG;
-  if (chordLen === null && radius && deltaDeg !== null) {
+  let deltaDeg: number | null = null;
+  if (hasText(curve.delta)) {
+    const d = parseAngle(curve.delta as string | number);
+    if (d === null || !(d > 0) || !(d < 360)) {
+      warnings.push(
+        `Call ${index + 1}: could not read the curve's delta angle "${curve.delta}", so it was ignored.`
+      );
+    } else {
+      deltaDeg = d;
+    }
+  }
+
+  let chordAz: number | null = null;
+  if (hasText(curve.chordBearing)) {
+    chordAz = azimuthOf(curve.chordBearing);
+    if (chordAz === null) {
+      warnings.push(`Call ${index + 1}: could not read the chord bearing "${curve.chordBearing}".`);
+    }
+  }
+
+  if (deltaDeg === null && radius !== null && arc !== null) deltaDeg = (arc / radius) / DEG;
+  // A chord and a radius fix the central angle too (the shorter arc).
+  if (deltaDeg === null && radius !== null && chordLen !== null && chordLen <= 2 * radius) {
+    deltaDeg = (2 * Math.asin(chordLen / (2 * radius))) / DEG;
+  }
+  if (chordLen === null && radius !== null && deltaDeg !== null) {
     chordLen = 2 * radius * Math.sin((deltaDeg * DEG) / 2);
   }
+
+  let endTangentAz: number;
+  let endTangentKnown = true;
   if (chordAz === null) {
-    // Tangent curve: incoming tangent is the previous course's bearing
-    // (or this call's own bearing when given), deflected by half delta.
-    const tangentAz = azimuthOf(call.bearing) ?? prevTangentAz;
+    // Tangent curve: it starts in the direction the course before it
+    // ended (or along this call's own bearing when one is given), and
+    // the chord is that direction deflected by half the central angle.
+    const own = hasText(call.bearing) ? azimuthOf(call.bearing) : null;
+    if (hasText(call.bearing) && own === null) {
+      warnings.push(
+        `Call ${index + 1}: could not read the bearing "${call.bearing}"; the curve was started from the course before it.`
+      );
+    }
+    const tangentAz = own ?? prev?.az ?? null;
     if (tangentAz === null || deltaDeg === null) {
       warnings.push(
         `Call ${index + 1}: curve needs a chord bearing and length, or a radius and arc length (with a tangent to follow).`
       );
       return null;
     }
-    chordAz = (((tangentAz + (sign * deltaDeg) / 2) % 360) + 360) % 360;
+    if (own === null && prev && !prev.known) {
+      warnings.push(
+        `Call ${index + 1}: the curve before it gives only a chord, so the direction this curve starts in is approximate. Enter its chord bearing to place it exactly.`
+      );
+    }
+    chordAz = wrap360(tangentAz + (sign * deltaDeg) / 2);
+    endTangentAz = wrap360(tangentAz + sign * deltaDeg);
+  } else if (deltaDeg !== null) {
+    endTangentAz = wrap360(chordAz + (sign * deltaDeg) / 2);
+  } else {
+    endTangentAz = chordAz;
+    endTangentKnown = false;
   }
   if (chordLen === null || !(chordLen > 0)) {
     warnings.push(`Call ${index + 1}: curve chord length could not be determined.`);
     return null;
   }
-  return { azimuthDeg: chordAz, lengthFt: chordLen, weightFt: arc ?? chordLen };
+  return { azimuthDeg: chordAz, lengthFt: chordLen, weightFt: arc ?? chordLen, endTangentAz, endTangentKnown };
 }
 
 function shoelace(points: Array<[number, number]>): number {
@@ -269,15 +376,25 @@ function shoelace(points: Array<[number, number]>): number {
 export function traverse(calls: Call[], opts: { forceClose?: boolean } = {}): TraverseResult {
   const warnings: string[] = [];
   const courses: Course[] = [];
-  let prevTangent: number | null = null;
+  const skippedCalls: number[] = [];
+  let prev: { az: number; known: boolean } | null = null;
   calls.forEach((call, i) => {
-    const c = courseFor(call, prevTangent, i, warnings);
-    if (c) {
-      courses.push(c);
-      // Outgoing tangent of a curve = chord bearing + half delta; the
-      // chord bearing is close enough for the next call's fallback.
-      prevTangent = c.azimuthDeg;
+    const c = courseFor(call, prev, i, warnings);
+    if (!c) {
+      skippedCalls.push(i + 1);
+      return;
     }
+    // Never let a figure that does not work out reach the map: one
+    // non-finite course would turn every later point into NaN.
+    if (![c.azimuthDeg, c.lengthFt, c.weightFt, c.endTangentAz].every(Number.isFinite)) {
+      warnings.push(`Call ${i + 1}: its figures do not work out, so it was skipped.`);
+      skippedCalls.push(i + 1);
+      return;
+    }
+    courses.push(c);
+    // A curve leaves in its outgoing tangent (chord bearing plus half
+    // the central angle), not along its chord.
+    prev = { az: c.endTangentAz, known: c.endTangentKnown };
   });
 
   const points: Array<[number, number]> = [[0, 0]];
@@ -330,7 +447,7 @@ export function traverse(calls: Call[], opts: { forceClose?: boolean } = {}): Tr
   if (!closed && !opts.forceClose && courses.length >= 3) {
     if (closureRatio < 5000) {
       warnings.push(
-        `Closure error ${closureDistanceFt.toFixed(1)} ft (1:${Math.round(closureRatio).toLocaleString("en-US")}) is poor; check the calls or force close.`
+        `Closure error ${oneDecimal(closureDistanceFt)} ft (1:${Math.round(closureRatio).toLocaleString("en-US")}) is poor; check the calls or force close.`
       );
     }
   }
@@ -344,20 +461,36 @@ export function traverse(calls: Call[], opts: { forceClose?: boolean } = {}): Tr
     areaAcres: areaSqFt / SQFT_PER_ACRE,
     adjusted,
     warnings,
+    skippedCalls,
   };
 }
 
 export function formatClosure(result: TraverseResult): string {
   if (result.closureRatio === Infinity) return "Closes exactly";
   const ratio = Math.round(result.closureRatio).toLocaleString("en-US");
-  return `Closure ${result.closureDistanceFt.toFixed(1)} ft, 1:${ratio}`;
+  return `Closure ${oneDecimal(result.closureDistanceFt)} ft, 1:${ratio}`;
 }
 
 // ---------------------------------------------------------------- georeference
 
 const FT_TO_M = 0.3048;
-const M_PER_DEG_LAT = 110574;
-const M_PER_DEG_LON_EQ = 111320;
+
+// WGS84 ellipsoid. A degree is not the same length everywhere: a degree
+// of latitude is about 110,574 m at the equator and 110,904 m at 33
+// north. Using the equator figure in Alabama put a one-mile call about
+// 16 ft long and made saved acreage about 0.4 percent high.
+const WGS84_A = 6378137;
+const WGS84_E2 = 0.00669437999014;
+
+// Meters in one degree of latitude and of longitude at a latitude.
+export function metersPerDegree(latDeg: number): { lat: number; lon: number } {
+  const phi = latDeg * DEG;
+  const w = 1 - WGS84_E2 * Math.sin(phi) ** 2;
+  return {
+    lat: (DEG * WGS84_A * (1 - WGS84_E2)) / Math.pow(w, 1.5),
+    lon: (DEG * WGS84_A * Math.cos(phi)) / Math.sqrt(w),
+  };
+}
 
 // Local feet -> WGS84 polygon on a tangent plane at the POB. rotationDeg
 // turns the whole figure about the POB, clockwise positive (a basis-of-
@@ -370,14 +503,15 @@ export function toGeoJSON(
   const rot = rotationDeg * DEG;
   const cosR = Math.cos(rot);
   const sinR = Math.sin(rot);
-  const latRad = pob[1] * DEG;
+  // Degree lengths at the point of beginning's own latitude.
+  const m = metersPerDegree(pob[1]);
   const ring: Position[] = points.map(([x, y]) => {
     // Clockwise rotation in an x-east, y-north frame.
     const rx = x * cosR + y * sinR;
     const ry = -x * sinR + y * cosR;
     return [
-      pob[0] + (rx * FT_TO_M) / (M_PER_DEG_LON_EQ * Math.cos(latRad)),
-      pob[1] + (ry * FT_TO_M) / M_PER_DEG_LAT,
+      pob[0] + (rx * FT_TO_M) / m.lon,
+      pob[1] + (ry * FT_TO_M) / m.lat,
     ];
   });
   const first = ring[0];

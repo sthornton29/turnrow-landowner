@@ -1,6 +1,6 @@
 "use client";
 
-import { DOC_TYPE_LABELS, scanKindFor } from "@/lib/documents";
+import { DOC_TYPE_LABELS, scanKindFor, unsureSet } from "@/lib/documents";
 import type { MatchableParcel, PropertySuggestion, SpatialEvidence } from "@/lib/documentMatch";
 import { staticMapUrl } from "@/lib/staticMap";
 import { formatAcres } from "@/lib/format";
@@ -30,6 +30,7 @@ export default function ConfirmScreen({
   entityWhy,
   entityName,
   context,
+  isAdmin = false,
   mismatch,
   onSwitchToMatch,
   onKeepBoth,
@@ -50,6 +51,8 @@ export default function ConfirmScreen({
   entityWhy: string | null;
   entityName: string | null;
   context: IntakeContextTarget | null;
+  // Only an admin may save with no property or record (Unfiled).
+  isAdmin?: boolean;
   // Context-aware entry: the AI's verified evidence points elsewhere.
   mismatch: { propertyId: string; name: string; why: string } | null;
   onSwitchToMatch: () => void;
@@ -63,7 +66,8 @@ export default function ConfirmScreen({
 }) {
   const scanKind = scanKindFor(draft.docType);
   const fitParcel = draft.extra?.entityType === "parcel" ? parcels.find((p) => p.id === draft.extra!.id) : undefined;
-  const unsure = new Set(result.unsure_fields);
+  // "fields.grantor" marks the grantor field (see unsureSet).
+  const unsure = unsureSet(result.unsure_fields);
   const conf = result.confidence ?? "low";
   const confCopy =
     conf === "high" ? "confident" : conf === "medium" ? "fairly confident" : "not very confident";
@@ -136,7 +140,9 @@ export default function ConfirmScreen({
         </label>
         {suggestions.length === 0 && !context ? (
           <p className="mb-1 text-xs text-gray-500">
-            Nothing on the page tied to one of your properties with confidence; pick below, or leave empty to file it as Unfiled.
+            {isAdmin
+              ? "Nothing on the page tied to one of your properties with confidence; pick below, or leave empty to file it as Unfiled."
+              : "Nothing on the page tied to one of your properties with confidence; pick below."}
           </p>
         ) : null}
         <PropertyMultiSelect
@@ -146,6 +152,12 @@ export default function ConfirmScreen({
           suggestions={suggestions}
           disabledIds={context?.entityType === "property" && !mismatch ? [context.entityId] : []}
         />
+        {!isAdmin && !context && draft.propertyIds.length === 0 && draft.extra === null && draft.entityId === null ? (
+          <p className="mt-1 text-xs font-medium text-amber-800">
+            Choose the property this belongs to. Only an admin can save a document that is not filed to a property or a
+            record.
+          </p>
+        ) : null}
       </div>
 
       {entityName ? (

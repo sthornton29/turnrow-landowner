@@ -42,6 +42,38 @@ describe("proposeTitle", () => {
       )
     ).toBe("Title Insurance - River Place ($250,000.00, 2014)");
   });
+  it("leaves the upload year off when nothing was read from the document", () => {
+    const opts = { uploadedAt: "2026-11-14T15:00:00Z", propertyName: "Home Place" };
+    expect(proposeTitle("other", null, "scan.pdf", opts)).toBe("Other - Home Place");
+    expect(proposeTitle("other", {}, "scan.pdf", opts)).toBe("Other - Home Place");
+    // An empty review form (every field blank) is still nothing read,
+    // whatever else is stored beside it.
+    expect(
+      proposeTitle(
+        "appraisal",
+        {
+          scan_kind: "generic",
+          unsure_fields: [],
+          pages_scanned: 3,
+          total_pages: 3,
+          title: null,
+          parties: "",
+          document_date: null,
+          amount: null,
+          summary: " ",
+        },
+        "scan.pdf",
+        opts
+      )
+    ).toBe("Appraisal - Home Place");
+    expect(proposeTitle("survey_plat", { stated_acres: null, surveyor: null }, "scan.pdf", opts)).toBe(
+      "Survey Plat - Home Place"
+    );
+    // The document's own date still shows, and so does the upload year
+    // once something was read.
+    expect(proposeTitle("other", { document_date: "1987-03-02" }, "scan.pdf", opts)).toBe("Other - Home Place (1987)");
+    expect(proposeTitle("other", { parties: "John Smith" }, "scan.pdf", opts)).toBe("Other - Home Place (2026)");
+  });
   it("falls back to the cleaned file name", () => {
     expect(proposeTitle("appraisal", null, "my_farm-appraisal (1).PDF")).toBe("Appraisal - my farm appraisal (1)");
     expect(proposeTitle("other", {}, "scan_0012.pdf")).toBe("Other - scan 0012");

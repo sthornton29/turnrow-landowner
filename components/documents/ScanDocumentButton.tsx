@@ -6,6 +6,7 @@ import { scanKindFor, type ScanKind } from "@/lib/documents";
 import type { DocumentRow } from "@/types/db";
 import Link from "next/link";
 import DocumentReview, { ExtractedSummary } from "./DocumentReview";
+import { extractStored } from "./classify";
 import {
   createOrUpdateFarmsFromExtraction,
   normalizeFsaExtraction,
@@ -112,23 +113,23 @@ export default function ScanDocumentButton({
     if (!kind) return;
     setBusy(true);
     setError(null);
-    try {
-      // Scan by storage path: the server fetches the file itself, so
-      // large packets never pass through the request body limit.
-      const fd = new FormData();
-      fd.append("storage_path", doc.storage_path);
-      fd.append("file_name", doc.file_name);
-      fd.append("content_type", doc.content_type ?? "application/pdf");
-      fd.append("kind", kind);
-      const res = await fetch("/api/extract", { method: "POST", body: fd });
-      const body = (await res.json()) as { extraction?: Record<string, unknown>; error?: string };
-      if (!res.ok || !body.extraction) throw new Error(body.error ?? "Extraction failed.");
-      setReview(body.extraction);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Extraction failed.");
-    } finally {
-      setBusy(false);
+    // Scan by storage path: the server fetches the file itself, so
+    // large packets never pass through the request body limit.
+    // extractStored never throws and always answers with a plain
+    // sentence, even when the platform sends back an error page.
+    const res = await extractStored({
+      storagePath: doc.storage_path,
+      fileName: doc.file_name,
+      contentType: doc.content_type ?? "application/pdf",
+      kind,
+      sizeBytes: doc.size_bytes,
+    });
+    setBusy(false);
+    if ("error" in res) {
+      setError(res.error);
+      return;
     }
+    setReview(res.extraction);
   }
 
   if (!kind && !existing) return null;

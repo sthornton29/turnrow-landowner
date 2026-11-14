@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DOC_GROUPS,
@@ -9,11 +10,12 @@ import {
   DOC_TYPES_BY_GROUP,
   DOC_TYPE_GROUP,
   DOC_TYPE_LABELS,
-  extractedHighlights,
+  matchesEveryWord,
   type DocGroup,
   type DocType,
 } from "@/lib/documents";
 import { displayTitle } from "@/lib/documentTitle";
+import { formatNumber, plural } from "@/lib/format";
 import type { DocumentEntityType, DocumentRow } from "@/types/db";
 import DocumentCard from "@/components/documents/DocumentCard";
 import IntakeFlow from "@/components/documents/intake/IntakeFlow";
@@ -30,6 +32,15 @@ export interface DocPropertyLink {
   document_id: string;
   property_id: string;
 }
+
+// What the list needs of each document, and nothing more: the columns
+// the cards and filters read, plus one line of search text built on the
+// server (lib/documents.ts documentSearchText) in place of the whole
+// extracted record, which is not sent to the browser.
+export type DocumentListRow = Pick<
+  DocumentRow,
+  "id" | "entity_type" | "entity_id" | "doc_type" | "title" | "file_name" | "title_reviewed" | "created_at"
+> & { search: string };
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-kelly-500 focus:outline-none";
@@ -51,14 +62,19 @@ export default function DocumentsClient(props: Parameters<typeof DocumentsInner>
 // live in the URL so Back from a document page restores the view.
 function DocumentsInner({
   orgId,
+  isAdmin,
   docs,
+  loadError = false,
   targets,
   properties,
   entities,
   links,
 }: {
   orgId: string;
-  docs: DocumentRow[];
+  isAdmin: boolean;
+  docs: DocumentListRow[];
+  // The documents query failed: say so, never "No documents yet".
+  loadError?: boolean;
   targets: AttachTarget[];
   properties: Array<{ id: string; name: string; entityId: string | null; county: string | null; state: string | null }>;
   entities: Array<{ id: string; name: string }>;
@@ -67,7 +83,10 @@ function DocumentsInner({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const q = params.get("q") ?? "";
+  const urlQ = params.get("q") ?? "";
+  // The search box filters from local state on every keystroke. The
+  // address bar follows a moment after typing stops (see below).
+  const [q, setQ] = useState(urlQ);
   const filter = params.get("filter") ?? ""; // p:<id> | e:<id> | unfiled
   const group = (params.get("group") ?? "") as DocGroup | "";
   const type = (params.get("type") ?? "") as DocType | "";
@@ -75,24 +94,50 @@ function DocumentsInner({
   const [uploadOpen, setUploadOpen] = useState(false);
   // A bulk upload with read but unsaved documents asks before closing.
   const uploadDirty = useRef(false);
+  // While a save is running the dialog stays open: closing it mid-save
+  // would stop the save partway through.
+  const [uploadSaving, setUploadSaving] = useState(false);
   const closeUpload = useCallback(() => {
+    if (uploadSaving) return;
     if (uploadDirty.current && !window.confirm("Close the upload? Documents that were read but not saved will be discarded.")) return;
     uploadDirty.current = false;
     setUploadOpen(false);
-  }, []);
+  }, [uploadSaving]);
 
+  // Filters live in the address bar, written with history.replaceState:
+  // Next keeps useSearchParams in step with it, and the page's server
+  // queries are NOT run again (router.replace re-ran all of them on
+  // every keystroke and every chip tap).
   const setParams = useCallback(
     (patch: Record<string, string>) => {
-      const next = new URLSearchParams(params.toString());
+      const next = new URLSearchParams(window.location.search);
       for (const [k, v] of Object.entries(patch)) {
         if (v) next.set(k, v);
         else next.delete(k);
       }
       const qs = next.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
     },
-    [params, pathname, router]
+    [pathname]
   );
+
+  // Search text -> address bar, once typing pauses. lastQ is what this
+  // component last put there, so a change that came from elsewhere
+  // (Back, a link) is told apart and copied into the box.
+  const lastQ = useRef(urlQ);
+  useEffect(() => {
+    if (q === lastQ.current) return;
+    const timer = setTimeout(() => {
+      lastQ.current = q;
+      setParams({ q });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, setParams]);
+  useEffect(() => {
+    if (urlQ === lastQ.current) return;
+    lastQ.current = urlQ;
+    setQ(urlQ);
+  }, [urlQ]);
 
   const targetByKey = useMemo(() => {
     const m = new Map<string, AttachTarget>();
@@ -110,7 +155,7 @@ function DocumentsInner({
   // Every property a document applies to: its links plus the property
   // its primary attachment sits on.
   const propsFor = useCallback(
-    (d: DocumentRow): string[] => {
+    (d: DocumentListRow): string[] => {
       const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
       const ids = new Set(linkedProps.get(d.id) ?? []);
       if (target?.propertyId) ids.add(target.propertyId);
@@ -118,12 +163,12 @@ function DocumentsInner({
     },
     [targetByKey, linkedProps]
   );
-  const isUnfiled = (d: DocumentRow) => d.entity_type === "organization" && propsFor(d).length === 0;
+  const isUnfiled = (d: DocumentListRow) => d.entity_type === "organization" && propsFor(d).length === 0;
 
   // Search + property/entity filter (the type rail is applied after, so
   // rail counts reflect these but not themselves).
   const base = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    const needle = q.trim();
     return docs.filter((d) => {
       const target = targetByKey.get(`${d.entity_type}:${d.entity_id}`);
       const docProps = propsFor(d);
@@ -140,14 +185,13 @@ function DocumentsInner({
         const hay = [
           displayTitle(d),
           d.file_name,
-          d.search_text ?? "",
+          d.search,
           target?.label ?? "",
           ...docProps.map((pid) => propertyName.get(pid) ?? ""),
-          ...extractedHighlights((d.doc_type ?? "other") as DocType, (d.extracted ?? null) as Record<string, unknown> | null),
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(needle)) return false;
+        ].join(" ");
+        // Every word must appear, in any order: "smith deed" finds
+        // "Warranty Deed - Smith to Jones".
+        if (!matchesEveryWord(hay, needle)) return false;
       }
       return true;
     });
@@ -182,9 +226,9 @@ function DocumentsInner({
   );
 
   // Group by: section headers only when chosen.
-  const sections = useMemo((): Array<{ key: string; label: string; docs: DocumentRow[] }> => {
+  const sections = useMemo((): Array<{ key: string; label: string; docs: DocumentListRow[] }> => {
     if (groupBy === "type") {
-      const m = new Map<string, DocumentRow[]>();
+      const m = new Map<string, DocumentListRow[]>();
       for (const d of filtered) {
         const t = d.doc_type ?? "other";
         m.set(t, [...(m.get(t) ?? []), d]);
@@ -194,9 +238,9 @@ function DocumentsInner({
         .map((t) => ({ key: t, label: DOC_TYPE_LABELS[t], docs: m.get(t)! }));
     }
     if (groupBy === "property") {
-      const m = new Map<string, DocumentRow[]>();
-      const unfiledDocs: DocumentRow[] = [];
-      const other: DocumentRow[] = [];
+      const m = new Map<string, DocumentListRow[]>();
+      const unfiledDocs: DocumentListRow[] = [];
+      const other: DocumentListRow[] = [];
       for (const d of filtered) {
         const ps = propsFor(d);
         if (ps.length === 0) {
@@ -240,7 +284,7 @@ function DocumentsInner({
     "inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium " +
     (active ? "border-kelly-500 bg-kelly-50 text-pine-900" : "border-gray-300 bg-white text-gray-700");
   const count = (n: number | undefined) => (
-    <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">{n ?? 0}</span>
+    <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">{formatNumber(n ?? 0)}</span>
   );
 
   const typesInGroup = group ? DOC_TYPES_BY_GROUP[group] : [];
@@ -251,7 +295,7 @@ function DocumentsInner({
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Documents</h1>
           <p className="text-sm text-gray-500">
-            {docs.length} document{docs.length === 1 ? "" : "s"} across the organization.
+            {plural(docs.length, "document")} across the organization.
             Deeds, surveys, FSA records, and everything else, findable by what they say.
           </p>
         </div>
@@ -286,7 +330,7 @@ function DocumentsInner({
         <input
           type="search"
           value={q}
-          onChange={(e) => setParams({ q: e.target.value })}
+          onChange={(e) => setQ(e.target.value)}
           placeholder="Search titles, extracted fields, and file names"
           className={inputClass + " sm:flex-1"}
         />
@@ -364,7 +408,7 @@ function DocumentsInner({
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
             <span>
-              {filtered.length} shown
+              {formatNumber(filtered.length)} shown
               {type ? ` in ${DOC_TYPE_LABELS[type]}` : group ? ` in ${DOC_GROUP_LABELS[group]}` : ""}
             </span>
             <span className="inline-flex items-center gap-1">
@@ -386,7 +430,11 @@ function DocumentsInner({
             </span>
           </div>
 
-          {docs.length === 0 ? (
+          {loadError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center">
+              <p className="text-sm font-medium text-red-800">Could not load your documents. Reload to try again.</p>
+            </div>
+          ) : docs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
               <p className="text-sm font-medium text-gray-800">No documents yet</p>
               <p className="mt-1 text-xs text-gray-500">
@@ -426,9 +474,11 @@ function DocumentsInner({
         </div>
       </div>
 
-      {uploadOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
-          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl md:max-w-5xl md:rounded-2xl md:p-6">
+      {/* Drawn on the page body, above the phone's bottom tab bar (z-40):
+          inside the page the sheet's Save buttons sat under that bar. */}
+      {uploadOpen ? createPortal(
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6">
+          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-5xl md:rounded-2xl md:p-6">
             <div className="mb-3 flex items-start justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Add a document</h2>
@@ -436,8 +486,10 @@ function DocumentsInner({
               </div>
               <button
                 onClick={closeUpload}
+                disabled={uploadSaving}
                 aria-label="Close"
-                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                title={uploadSaving ? "Saving. Wait for it to finish before closing." : "Close"}
+                className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -446,6 +498,7 @@ function DocumentsInner({
             </div>
             <IntakeFlow
               orgId={orgId}
+              isAdmin={isAdmin}
               onSaved={() => router.refresh()}
               onClose={() => {
                 uploadDirty.current = false;
@@ -454,9 +507,11 @@ function DocumentsInner({
               onDirtyChange={(d) => {
                 uploadDirty.current = d;
               }}
+              onSavingChange={setUploadSaving}
             />
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );

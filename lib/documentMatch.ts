@@ -6,6 +6,7 @@
 // Suggestions are pre-checked in the upload form only when confident;
 // the user always confirms. Unit-tested in documentMatch.test.ts.
 
+import { formatAcres, formatNumber } from "./format";
 import { normalizeOwnerName, ownerSimilarity } from "./ownerNames";
 
 export interface PropertyHints {
@@ -231,7 +232,7 @@ export function suggestProperties(
     if (acresHint !== null && p.acres !== null && p.acres > 0) {
       if (Math.abs(p.acres - acresHint) / acresHint <= 0.1) {
         score += SCORE.acres;
-        reasons.push(`About the same acreage (${p.acres.toFixed(1)} vs ${acresHint.toFixed(1)})`);
+        reasons.push(`About the same acreage (${formatAcres(p.acres)} vs ${formatAcres(acresHint)})`);
       }
     }
 
@@ -354,7 +355,7 @@ export function spatialSuggestions(
           parcelId: f.pc!.id,
           score: PARCEL_FIT_SCORE,
           reasons: [
-            `parcel ${f.pc!.parcel_number} (${Math.round(f.acres * 10) / 10} acres) on ${prop.name} fits the ${stated} acres described in ${spatial.reference_label ?? "the section"}`,
+            `parcel ${f.pc!.parcel_number} (${formatAcres(f.acres)} acres) on ${prop.name} fits the ${formatNumber(stated)} acres described in ${spatial.reference_label ?? "the section"}`,
           ],
         },
       ];
@@ -508,8 +509,11 @@ export function verifyMatches(
       else downgraded.push({ name: p.name, signal, reason: `"${printed || "?"}" does not match the entity that holds ${p.name}` });
       continue;
     }
-    // county (or unknown signal): only the unique-in-county rule counts.
-    if (uniqueInCounty(p)) add(p, CONFIDENT_SCORE, `The only property in ${p.county} County`);
+    // county (or unknown signal): only the unique-in-county rule counts,
+    // and only as a suggestion. A county alone says nothing about which
+    // tract a paper concerns (a neighbor's deed names the same county),
+    // so it stays below the score that pre-checks a property.
+    if (uniqueInCounty(p)) add(p, UNIQUE_COUNTY_SCORE, `The only property in ${p.county} County`);
     else downgraded.push({ name: p.name, signal: signal || "county", reason: reason || "County alone is not enough" });
   }
 

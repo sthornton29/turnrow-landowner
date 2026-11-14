@@ -66,12 +66,19 @@ function normalize(text: string): string {
 
 const TOKEN_RE = /\b(NE|NW|SE|SW|N|S|E|W)(4|2)\b/g;
 
-// Split a normalized clause on "and" / commas into part strings.
-function splitParts(norm: string): string[] {
-  return norm
-    .split(/\s*(?:\band\b|,|&)\s*/i)
-    .map((s) => s.trim())
-    .filter((s) => TOKEN_RE.test(s) && (TOKEN_RE.lastIndex = 0) === 0);
+// A quarter needs a two-letter corner and a half a one-letter side:
+// "N4" (a "north quarter") and "NW2" are not aliquot parts.
+function validToken(dir: string, frac: string): boolean {
+  return frac === "4" ? dir.length === 2 : dir.length === 1;
+}
+
+// Split a description on "and" / commas into its separate clauses, in
+// the words as written (so a warning can quote them).
+function clausesOf(text: string): string[] {
+  return text
+    .split(/\s*(?:\band\b|,|;|&)\s*/i)
+    .map((s) => s.replace(/\s+/g, " ").trim().replace(/\s+(?:of|in)$/i, ""))
+    .filter(Boolean);
 }
 
 function tokensOf(part: string): AliquotPart {
@@ -79,14 +86,38 @@ function tokensOf(part: string): AliquotPart {
   let m: RegExpExecArray | null;
   TOKEN_RE.lastIndex = 0;
   while ((m = TOKEN_RE.exec(part))) {
-    const dir = m[1] as AliquotToken;
-    const frac = m[2];
-    if (frac === "4" && dir.length === 1) continue; // "N4" is not a thing
-    if (frac === "2" && dir.length === 2) continue; // "NW2" is not a thing
-    out.push(dir);
+    if (!validToken(m[1], m[2])) continue;
+    out.push(m[1] as AliquotToken);
   }
   return out;
 }
+
+// One clause: its chain of quarters and halves, and whether it carries
+// anything MORE than that chain ("North 10 acres of", "W 1/4 of", "East
+// 330 feet of", "that part lying north of the road", "one acre in the
+// NW corner of"). Such words change the area and are not understood
+// here, so the caller must warn rather than plot as if they were absent.
+function readClause(clause: string): { part: AliquotPart; extra: boolean } {
+  const norm = normalize(clause);
+  const rest = norm
+    .replace(TOKEN_RE, (m, dir: string, frac: string) => (validToken(dir, frac) ? " " : m))
+    .replace(/\b(?:the|said|all|also|being|in|situated|located|lying)\b/gi, " ")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim();
+  return { part: tokensOf(norm), extra: rest !== "" };
+}
+
+// Recitals that sit beside a chain without changing it: the section,
+// township, and range, and a stated acreage ("containing 40 acres").
+function stripRecitals(text: string): string {
+  return text
+    .replace(/\b(?:of\s+)?(?:said\s+)?(?:section|sec\.?)\s*\d{1,2}\b/gi, " ")
+    .replace(/\b(?:township|twp\.?|t\.?)\s*\d{1,3}\s*-?\s*(?:north|south|n|s)\b\.?/gi, " ")
+    .replace(/\b(?:range|rge\.?|r\.?)\s*\d{1,3}\s*-?\s*(?:east|west|e|w)\b\.?/gi, " ")
+    .replace(/\bcontaining\s+[\d,.]+\s+acres?\b/gi, " ");
+}
+
+const LOT_RE = /\blots?\s+((?:\d+\s*(?:,|and|&)?\s*)+)/gi;
 
 function parseSectionTownshipRange(text: string): Pick<ParsedAliquot, "section" | "township" | "range"> {
   const sec = text.match(/\b(?:section|sec\.?)\s*(\d{1,2})\b/i);
@@ -103,35 +134,66 @@ export function parseAliquot(text: string): ParsedAliquot {
   const warnings: string[] = [];
   const str = parseSectionTownshipRange(text);
 
-  // Split off exception clauses.
+  // "containing 40 acres, more or less" hedges an acreage. Its "less" is
+  // never an exception (reading it as one turned every part after it
+  // into a cut-out).
+  const cleaned = text.replace(/\bmore\s+or\s+less\b/gi, " ");
+
+  // Split off exception clauses. Each exception is read on its own:
+  // several joined by semicolons, each with its own "of Section 9",
+  // are all kept.
   const exceptionRe = /\b(?:less\s+and\s+except|save\s+and\s+except|less\s+and\s+excepting|excepting|except|less)\b/i;
-  const pieces = text.split(exceptionRe);
+  const pieces = cleaned.split(exceptionRe);
   const main = pieces[0];
-  const exceptions = pieces.slice(1).map((s) => s.replace(/^[\s:,]+/, "").trim()).filter(Boolean);
+  const exceptions = pieces
+    .slice(1)
+    .flatMap((s) => s.split(";"))
+    .map((s) => s.replace(/^[\s:,]+/, "").replace(/[\s:,.]+$/, "").replace(/\s+/g, " "))
+    .filter(Boolean);
 
   // Lots.
   const lots: number[] = [];
-  const lotRe = /\blots?\s+((?:\d+\s*(?:,|and|&)?\s*)+)/gi;
   let lm: RegExpExecArray | null;
-  while ((lm = lotRe.exec(main))) {
+  LOT_RE.lastIndex = 0;
+  while ((lm = LOT_RE.exec(main))) {
     for (const n of lm[1].match(/\d+/g) ?? []) lots.push(Number(n));
   }
 
   // Strip the section/township/range tail before reading parts.
-  const body = main.split(/\b(?:section|sec\.?)\b/i)[0];
-  const norm = normalize(body);
-  const parts = splitParts(norm).map(tokensOf).filter((p) => p.length > 0);
+  const body = stripRecitals(main.split(/\b(?:section|sec\.?)\b/i)[0].replace(LOT_RE, " "));
+  const parts: AliquotPart[] = [];
+  // Words beyond a clean chain: plotted as if absent, so each is called out.
+  const notApplied: string[] = [];
+  for (const clause of clausesOf(body)) {
+    const read = readClause(clause);
+    if (read.part.length > 0) parts.push(read.part);
+    if (!read.extra) continue;
+    notApplied.push(
+      read.part.length > 0
+        ? `"${clause}" says more than plain quarters and halves. Only ${read.part
+            .map((t) => (t.length === 2 ? `${t}1/4` : `${t}1/2`))
+            .join(" of ")} was plotted, in full: the plotted area does not account for the rest of those words.`
+        : `"${clause}" was not understood, so the plotted area does not account for it.`
+    );
+  }
 
+  // An exception is cut out only when it is a clean chain of quarters
+  // and halves. Anything more ("one acre in the NW corner of the NW1/4
+  // of SE1/4", "a 1 acre cemetery") is NOT cut: cutting the whole
+  // quarter for a one-acre carve-out plotted 79 acres as 40.
   const exceptionParts: AliquotPart[] = [];
+  const notCut: string[] = [];
   for (const ex of exceptions) {
-    const exBody = ex.split(/\b(?:section|sec\.?)\b/i)[0];
-    for (const p of splitParts(normalize(exBody)).map(tokensOf)) {
-      if (p.length > 0) exceptionParts.push(p);
-    }
+    const reads = clausesOf(stripRecitals(ex)).map(readClause);
+    const clean = reads.length > 0 && reads.every((r) => r.part.length > 0 && !r.extra);
+    if (clean) exceptionParts.push(...reads.map((r) => r.part));
+    else notCut.push(ex);
   }
 
   if (parts.length === 0 && lots.length === 0) {
     warnings.push("No aliquot parts (quarters, halves) or lots were recognized in the description.");
+  } else {
+    warnings.push(...notApplied);
   }
   if (lots.length > 0) {
     warnings.push(
@@ -140,8 +202,10 @@ export function parseAliquot(text: string): ParsedAliquot {
   }
   if (str.section === null) warnings.push("No section number found.");
   if (!str.township || !str.range) warnings.push("Township and range were not both found.");
-  if (exceptions.length > exceptionParts.length) {
-    warnings.push("An exception clause was not an aliquot part and must be cut by hand.");
+  for (const ex of notCut) {
+    warnings.push(
+      `The exception "${ex}" is more than plain quarters and halves, so nothing was cut out for it: the plotted area does not account for it, and it must be cut by hand.`
+    );
   }
 
   return { parts, ...str, exceptions, exceptionParts, lots, warnings };

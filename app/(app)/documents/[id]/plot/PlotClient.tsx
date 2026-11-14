@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Geometry, MultiPolygon, Polygon } from "geojson";
 import { createClient } from "@/lib/supabase/client";
 import { formatAcres, formatNumber } from "@/lib/format";
+import { friendlyDbError } from "@/lib/dbErrors";
 import { displayTitle } from "@/lib/documentTitle";
-import { extractStored } from "@/components/documents/classify";
+import { extractStored, mergeExtracted } from "@/components/documents/classify";
 import {
   parseBearing,
   traverse,
@@ -127,7 +128,8 @@ interface Extraction {
         arc_length: number | null;
         chord_bearing: string | null;
         chord_length: number | null;
-        delta: number | null;
+        // "Central angle as written": text such as 90°00'00", or a number.
+        delta: number | string | null;
       } | null;
       note: string | null;
     }>;
@@ -173,37 +175,33 @@ function asUnit(u: string | null | undefined): Unit {
   return "feet";
 }
 
-function rowsToCalls(rows: CallRow[]): { calls: Call[]; bad: number } {
-  const calls: Call[] = [];
-  let bad = 0;
-  for (const r of rows) {
-    const d = Number(r.distance);
-    const hasBearing = parseBearing(r.bearing_text) !== null;
-    if (r.isCurve) {
-      const chordB = r.chord_bearing.trim();
-      const call: Call = {
-        bearing: hasBearing ? r.bearing_text : chordB || 0,
-        distance: Number.isFinite(d) && d > 0 ? d : Number(r.chord_length) || 0,
-        unit: r.unit,
-        curve: {
-          direction: r.direction,
-          radius: r.radius ? Number(r.radius) : undefined,
-          arcLength: r.arc_length ? Number(r.arc_length) : undefined,
-          chordBearing: chordB || undefined,
-          chordLength: r.chord_length ? Number(r.chord_length) : undefined,
-          delta: r.delta ? Number(r.delta) : undefined,
-        },
-      };
-      calls.push(call);
-      continue;
+// Every row becomes a call, readable or not, so the traverse numbers
+// its calls the way the grid does: it leaves out the ones it cannot
+// plot and says which, by the row's own number.
+function rowsToCalls(rows: CallRow[]): Call[] {
+  const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(/,/g, "")));
+  return rows.map((r): Call => {
+    if (!r.isCurve) {
+      return { bearing: r.bearing_text, distance: num(r.distance) ?? Number.NaN, unit: r.unit };
     }
-    if (!hasBearing || !(d > 0)) {
-      bad++;
-      continue;
-    }
-    calls.push({ bearing: r.bearing_text, distance: d, unit: r.unit });
-  }
-  return { calls, bad };
+    return {
+      // A curve with no bearing of its own starts where the course
+      // before it was heading. (Passing 0 here started it due north.)
+      bearing: r.bearing_text.trim() ? r.bearing_text : undefined,
+      distance: num(r.distance) ?? 0,
+      unit: r.unit,
+      curve: {
+        direction: r.direction,
+        radius: num(r.radius),
+        arcLength: num(r.arc_length),
+        chordBearing: r.chord_bearing.trim() || undefined,
+        chordLength: num(r.chord_length),
+        // The delta angle as written (degrees, minutes, seconds, with or
+        // without marks): the traverse reads it the way it reads a bearing.
+        delta: r.delta.trim() || undefined,
+      },
+    };
+  });
 }
 
 // ---------------------------------------------------------------- component
@@ -250,10 +248,11 @@ export default function PlotClient({
   );
   // The county the deed states: it pins the principal meridian and is
   // the reference for the county gate after resolution.
+  // Left empty when the text names no county: filling in the county of
+  // whichever property comes first in the alphabet looked like something
+  // read off the deed, and it picks the meridian.
   const [deedCounty, setDeedCounty] = useState<string>(
-    countyFromText(storedExtraction?.source_text ?? storedLegalText ?? "") ??
-      properties.find((p) => p.county)?.county ??
-      ""
+    countyFromText(storedExtraction?.source_text ?? storedLegalText ?? "") ?? ""
   );
   const [pobCounty, setPobCounty] = useState<string | null>(null);
   const meridianPlan = meridiansForCounty(defaultState, deedCounty);
@@ -356,18 +355,17 @@ export default function PlotClient({
         fileName: doc.file_name,
         contentType: doc.content_type ?? "application/pdf",
         kind: "legal_description",
+        sizeBytes: doc.size_bytes,
       });
       if ("error" in res) throw new Error(res.error);
       const x = res.extraction as unknown as Extraction;
       applyExtraction(x);
       // Keep the raw extraction on the document so re-opening this page
       // does not re-spend an extraction; the review edits live in state.
-      await supabase
-        .from("documents")
-        .update({ extracted: { ...stored, legal_description_extraction: x } })
-        .eq("id", doc.id);
+      // Laid over the latest stored value, not this page's copy of it.
+      await mergeExtracted(supabase, doc.id, { legal_description_extraction: x });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Extraction failed.");
+      setError(e instanceof Error ? e.message : "Reading the document did not work this time. Try again.");
     } finally {
       setExtracting(false);
     }
@@ -453,7 +451,7 @@ export default function PlotClient({
         );
       }
       if (cand.polygon.type === "MultiPolygon" && cand.polygon.coordinates.length > 1) {
-        notes.push("The section polygon had several parts; the largest was used.");
+        notes.push("The section came back in several parts and only the first part was used. Check the shape against the plat.");
       }
       const polygon =
         resolved.polygon ?? (parsed.parts.length === 0 ? toMultiPolygon(sectionPoly) : null);
@@ -562,11 +560,12 @@ export default function PlotClient({
 
   // ------------------------------------------------------ metes and bounds
 
-  const { calls: parsedCalls, bad: badCalls } = useMemo(() => rowsToCalls(calls), [calls]);
+  const parsedCalls = useMemo(() => rowsToCalls(calls), [calls]);
   const trav = useMemo(
     () => (parsedCalls.length >= 2 ? traverse(parsedCalls, { forceClose }) : null),
     [parsedCalls, forceClose]
   );
+  const badCalls = trav?.skippedCalls.length ?? 0;
   const mbPolygon = useMemo<MultiPolygon | null>(() => {
     if (!trav || !pob || trav.points.length < 3) return null;
     return toMultiPolygon(toGeoJSON(trav.points, pob, rotation));
@@ -574,7 +573,10 @@ export default function PlotClient({
 
   const useAliquot = kind === "aliquot" || kind === "mixed";
   const plotted: MultiPolygon | null = useAliquot ? aliquotPolygon : mbPolygon;
-  const plottedAcres = plotted ? approxAcres(plotted) : null;
+  // One acreage for a metes and bounds plot, wherever it is shown: the
+  // area of the traverse itself. (The map polygon's quick estimate
+  // differs from it in the first decimal on large tracts.)
+  const plottedAcres = plotted ? (useAliquot || !trav ? approxAcres(plotted) : trav.areaAcres) : null;
 
   // ------------------------------------------------------------- target
 
@@ -605,7 +607,7 @@ export default function PlotClient({
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [sourceText]);
   const acresGap =
-    statedAcres !== null && plottedAcres !== null && Math.abs(plottedAcres - statedAcres) / statedAcres > 0.25
+    statedAcres !== null && plottedAcres !== null && Math.abs(plottedAcres - statedAcres) / statedAcres > 0.05
       ? { stated: statedAcres, plotted: plottedAcres }
       : null;
   // A target that sits miles from the plotted tract is almost always the
@@ -623,9 +625,17 @@ export default function PlotClient({
     return { miles: toTarget.miles, nearest: nearest && nearest.miles < toTarget.miles ? nearest.name : null };
   }, [plotted, existingGeometry, properties]);
 
-  // POB helpers: start at the chosen property's centroid.
+  // POB helpers: the marker starts at the chosen property's centroid,
+  // only so the map has somewhere to look. That is a starting guess, not
+  // the point of beginning, so it stays unconfirmed: nothing can be
+  // saved until the person moves the marker or says this spot is right.
   const referenceGeometry: Geometry | null =
     existingGeometry ?? targetProperty?.boundary_geojson ?? null;
+  const [pobConfirmed, setPobConfirmed] = useState(false);
+  const placePob = (p: [number, number]) => {
+    setPob(p);
+    setPobConfirmed(true);
+  };
   useEffect(() => {
     if (pob || useAliquot) return;
     const c = centroidOf(referenceGeometry);
@@ -655,8 +665,71 @@ export default function PlotClient({
     ? nearestVertices(referenceGeometry, pob ?? refCentroid, 6)
     : [];
 
+  // ------------------------------------------------- what Save must repeat
+  //
+  // A wrong shape saved here is a wrong property line on the family's
+  // map. Everything the earlier steps flagged is gathered so the Save
+  // step shows it again, beside the button, and asks for a typed word
+  // before a flagged plot is saved or an existing boundary is replaced.
+  const saveWarnings: string[] = [];
+  if (useAliquot) {
+    tracts.forEach((t, i) => {
+      if (!t.polygon) {
+        saveWarnings.push(`Tract ${i + 1} was not resolved, so it is NOT part of this plot.`);
+        return;
+      }
+      for (const n of t.notes ?? []) saveWarnings.push(`Tract ${i + 1}: ${n}`);
+      if (t.distanceMi != null && t.distanceMi > PLOT_DISTANCE_WARN_MILES) {
+        saveWarnings.push(
+          `Tract ${i + 1} is ${formatNumber(t.distanceMi)} miles from your nearest boundary (${t.nearestName}). Check the township, range, directions, and county.`
+        );
+      }
+    });
+  } else if (trav) {
+    const g = closureGrade(trav.closureRatio);
+    if (g === "poor" || g === "fair") {
+      saveWarnings.push(
+        `${g === "poor" ? "Poor closure" : "Closure is only fair"}: the figure ends ${formatNumber(Math.round(trav.closureDistanceFt * 10) / 10)} ft from where it began (1:${formatNumber(Math.round(trav.closureRatio))})${
+          trav.adjusted ? ", and was forced closed by spreading that error over the courses" : ""
+        }.${g === "poor" ? " A call is probably misread or missing." : ""}`
+      );
+    }
+    // Each call that was left out or only approximated, by its number.
+    for (const w of trav.warnings) if (!w.startsWith("Closure error")) saveWarnings.push(w);
+    if (pob && pobCounty && deedCounty && !countyMatches(deedCounty, pobCounty)) {
+      saveWarnings.push(
+        `The point of beginning is pinned in ${pobCounty} County, but the deed describes land in ${deedCounty} County.`
+      );
+    }
+  }
+  // Does this save put a new line where one already is?
+  const replacing =
+    (targetMode === "replace_property" && !!targetProperty?.boundary_geojson) ||
+    (targetMode === "replace_parcel" && !!targetParcel?.boundary_geojson);
+  const replacingName =
+    targetMode === "replace_property" ? (targetProperty?.name ?? "") : targetMode === "replace_parcel" ? (targetParcel?.parcel_number ?? "") : "";
+  // The stated-acres gap and the far-from-target note have their own
+  // boxes on the Save step; they count here too.
+  const needsTypedConfirm = replacing || saveWarnings.length > 0 || acresGap !== null || targetDistance !== null;
+  const confirmWord = replacing ? "REPLACE" : "SAVE";
+  const [confirmText, setConfirmText] = useState("");
+  useEffect(() => {
+    setConfirmText("");
+  }, [targetMode, targetPropertyId, targetParcelId]);
+  const typed = confirmText.trim().toLowerCase();
+  const typedConfirmed =
+    !needsTypedConfirm || typed === confirmWord.toLowerCase() || (replacing && typed !== "" && typed === replacingName.trim().toLowerCase());
+  const pobReady = useAliquot || pobConfirmed;
+  const canSave = !!plotted && pobReady && typedConfirmed;
+
+  // A property or parcel created by a save whose boundary step then
+  // failed. Saving again writes to that one; it does not add another.
+  const createdRef = useRef<{ mode: "new_property" | "new_parcel"; id: string } | null>(null);
+  // The boundary saved but the document could not be linked to it.
+  const [linkFailed, setLinkFailed] = useState(false);
+
   async function save() {
-    if (!plotted) return;
+    if (!plotted || !canSave) return;
     setSaving(true);
     setError(null);
     try {
@@ -664,57 +737,57 @@ export default function PlotClient({
       let entityId: string;
       if (targetMode === "new_property") {
         if (!newName.trim()) throw new Error("Give the new property a name.");
-        const { data, error: iErr } = await supabase
-          .from("properties")
-          .insert({
-            organization_id: orgId,
-            name: newName.trim(),
-            county: newCounty.trim() || null,
-            state: newState.trim() || null,
-          })
-          .select("id")
-          .single();
-        if (iErr || !data) throw new Error(iErr?.message ?? "Could not create the property.");
+        const fields = {
+          name: newName.trim(),
+          county: newCounty.trim() || null,
+          state: newState.trim() || null,
+        };
+        const made = createdRef.current?.mode === "new_property" ? createdRef.current.id : null;
+        if (made) {
+          const { error: uErr } = await supabase.from("properties").update(fields).eq("id", made);
+          if (uErr) throw new Error(friendlyDbError(uErr, "Could not save the property. Please try again."));
+          entityId = made;
+        } else {
+          const { data, error: iErr } = await supabase
+            .from("properties")
+            .insert({ organization_id: orgId, ...fields })
+            .select("id")
+            .single();
+          if (iErr || !data) throw new Error(friendlyDbError(iErr, "Could not create the property. Please try again."));
+          createdRef.current = { mode: "new_property", id: data.id };
+          entityId = data.id;
+        }
         entityType = "property";
-        entityId = data.id;
       } else if (targetMode === "new_parcel") {
         if (!targetPropertyId) throw new Error("Pick the property this parcel belongs to.");
         if (!newName.trim()) throw new Error("Enter the parcel number.");
-        const { data, error: iErr } = await supabase
-          .from("parcels")
-          .insert({
-            organization_id: orgId,
-            property_id: targetPropertyId,
-            parcel_number: newName.trim(),
-            county: newCounty.trim() || null,
-          })
-          .select("id")
-          .single();
-        if (iErr || !data) throw new Error(iErr?.message ?? "Could not create the parcel.");
+        const fields = {
+          property_id: targetPropertyId,
+          parcel_number: newName.trim(),
+          county: newCounty.trim() || null,
+        };
+        const made = createdRef.current?.mode === "new_parcel" ? createdRef.current.id : null;
+        if (made) {
+          const { error: uErr } = await supabase.from("parcels").update(fields).eq("id", made);
+          if (uErr) throw new Error(friendlyDbError(uErr, "Could not save the parcel. Please try again."));
+          entityId = made;
+        } else {
+          const { data, error: iErr } = await supabase
+            .from("parcels")
+            .insert({ organization_id: orgId, ...fields })
+            .select("id")
+            .single();
+          if (iErr || !data) throw new Error(friendlyDbError(iErr, "Could not create the parcel. Please try again."));
+          createdRef.current = { mode: "new_parcel", id: data.id };
+          entityId = data.id;
+        }
         entityType = "parcel";
-        entityId = data.id;
       } else if (targetMode === "replace_property") {
         if (!targetProperty) throw new Error("Pick the property to replace.");
-        if (
-          !window.confirm(
-            `Replace the boundary of "${targetProperty.name}" (currently ${formatAcres(targetProperty.acres)} acres) with the plotted ${formatAcres(plottedAcres)} acres? The old boundary is not kept.`
-          )
-        ) {
-          setSaving(false);
-          return;
-        }
         entityType = "property";
         entityId = targetProperty.id;
       } else {
         if (!targetParcel) throw new Error("Pick the parcel to replace.");
-        if (
-          !window.confirm(
-            `Replace the boundary of parcel ${targetParcel.parcel_number} (currently ${formatAcres(targetParcel.acres)} acres) with the plotted ${formatAcres(plottedAcres)} acres? The old boundary is not kept.`
-          )
-        ) {
-          setSaving(false);
-          return;
-        }
         entityType = "parcel";
         entityId = targetParcel.id;
       }
@@ -723,7 +796,11 @@ export default function PlotClient({
         p_entity_id: entityId,
         p_geojson: plotted,
       });
-      if (gErr) throw new Error("Boundary save failed: " + gErr.message);
+      if (gErr) {
+        console.error("set_geometry failed:", gErr.message);
+        throw new Error(friendlyDbError(gErr, "The boundary could not be saved, so nothing on the map changed. Please try again."));
+      }
+      createdRef.current = null;
       const plotRecord = {
         kind,
         closure: trav
@@ -753,15 +830,19 @@ export default function PlotClient({
         saved_at: new Date().toISOString(),
         target: { entity_type: entityType, entity_id: entityId, mode: targetMode },
       };
-      const { error: dErr } = await supabase
-        .from("documents")
-        .update({
-          produced_boundary_type: entityType,
-          produced_boundary_id: entityId,
-          extracted: { ...stored, legal_description_plot: plotRecord },
-        })
-        .eq("id", doc.id);
-      if (dErr) throw new Error("Saved the boundary but could not link the document: " + dErr.message);
+      // Laid over the latest stored value (the extraction stored a few
+      // minutes ago on this same screen lives beside it), not over this
+      // page's copy from when it loaded.
+      const linked = await mergeExtracted(
+        supabase,
+        doc.id,
+        { legal_description_plot: plotRecord },
+        { columns: { produced_boundary_type: entityType, produced_boundary_id: entityId } }
+      );
+      // The boundary IS saved by now. A failed link is a note on the
+      // saved screen, not an error that invites saving a second time.
+      if ("error" in linked) console.error("plot link failed:", linked.error.message);
+      setLinkFailed("error" in linked);
       setSavedLink(`/map?focus=${entityType}:${entityId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
@@ -785,7 +866,7 @@ export default function PlotClient({
     hasExtraction &&
     ((useAliquot && tracts.length > 0) || (!useAliquot && calls.length >= 3));
   const gateFailed = useAliquot && tracts.some((t) => t.polygon && t.gateOk === false);
-  const canContinueFrom2 = !!plotted && !gateFailed;
+  const canContinueFrom2 = !!plotted && !gateFailed && pobReady;
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
@@ -1308,6 +1389,7 @@ export default function PlotClient({
                   setTargetTouched(true);
                   setTargetPropertyId(e.target.value);
                   setPob(null);
+                  setPobConfirmed(false);
                 }}
                 className={inputClass}
               >
@@ -1352,7 +1434,7 @@ export default function PlotClient({
               {cornerPicks.map((c) => (
                 <button
                   key={c.coord.join(",")}
-                  onClick={() => setPob(c.coord)}
+                  onClick={() => placePob(c.coord)}
                   className="rounded-full border border-gray-300 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50"
                 >
                   Use {cornerLabel(c.coord, refCentroid)}
@@ -1364,9 +1446,31 @@ export default function PlotClient({
             plotted={mbPolygon}
             existing={referenceGeometry}
             pob={pob}
-            onPobChange={setPob}
+            onPobChange={placePob}
             fitKey={`mb-${targetPropertyId}`}
           />
+          {pob && !pobConfirmed ? (
+            <div className="rounded-lg border border-amber-400 bg-amber-50 p-2 text-xs text-amber-900">
+              <p className="font-semibold">The marker has not been placed yet.</p>
+              <p className="mt-0.5">
+                It was put in the middle of the reference boundary only as a starting spot. The whole figure hangs from
+                this point, so tap the map or drag the marker to the true point of beginning. You cannot continue until
+                you do.
+              </p>
+              <button
+                type="button"
+                onClick={() => setPobConfirmed(true)}
+                className="mt-1.5 rounded-lg border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+              >
+                The marker is already on the point of beginning
+              </button>
+            </div>
+          ) : null}
+          {!pob ? (
+            <p className="rounded-lg border border-amber-400 bg-amber-50 p-2 text-xs font-medium text-amber-900">
+              Tap the map where the description begins to place the point of beginning. You cannot continue until you do.
+            </p>
+          ) : null}
           {pob ? (
             <p className="text-xs text-gray-500">
               POB {pob[1].toFixed(6)}, {pob[0].toFixed(6)}
@@ -1401,7 +1505,15 @@ export default function PlotClient({
           <h2 className="text-base font-semibold text-gray-900">Preview and save</h2>
           {savedLink ? (
             <div className="rounded-lg border border-kelly-200 bg-kelly-50 p-3 text-sm text-pine-900">
-              <p className="font-semibold">Boundary saved and linked to this document.</p>
+              <p className="font-semibold">
+                {linkFailed ? "Boundary saved." : "Boundary saved and linked to this document."}
+              </p>
+              {linkFailed ? (
+                <p className="mt-0.5 text-xs text-amber-900">
+                  The boundary is on the map, but this document could not be linked to it. You do not need to save
+                  again.
+                </p>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 <Link href={savedLink} className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-kelly-600">
                   View on map
@@ -1529,7 +1641,9 @@ export default function PlotClient({
                   The description says {formatAcres(acresGap.stated)} acres; the plot is {formatAcres(acresGap.plotted)} acres.
                   {useAliquot && tracts.every((t) => !t.aliquot_text || parseAliquot(t.aliquot_text).parts.length === 0)
                     ? " The tract is a portion of the section not defined by quarters (a creek, a road, or a deeded line), so the whole section is shown. Draw it by hand on the map or import the parcel from county records for the exact shape."
-                    : " Check the quarter calls against the deed."}
+                    : useAliquot
+                      ? " Check the quarter calls against the deed."
+                      : " Check the calls and their units against the deed."}
                 </p>
               ) : null}
               {targetDistance ? (
@@ -1567,13 +1681,50 @@ export default function PlotClient({
                 fitKey={`preview-${targetMode}-${targetPropertyId}-${targetParcelId}`}
               />
 
+              {saveWarnings.length > 0 ? (
+                <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+                  <p className="font-semibold">
+                    Check these before saving. This shape becomes a boundary line on your map.
+                  </p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {saveWarnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {!pobReady ? (
+                <p className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                  The point of beginning has not been placed. Go back and place it on the map before saving.
+                </p>
+              ) : null}
+              {needsTypedConfirm ? (
+                <div className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <p>
+                    {replacing
+                      ? `This replaces the boundary of ${targetMode === "replace_parcel" ? "parcel " : ""}${replacingName} (currently ${formatAcres(currentAcres)} acres) with the plotted ${formatAcres(plottedAcres)} acres. The old boundary is not kept.`
+                      : "This plot has the warnings shown above. Save it only if you have checked each one."}
+                  </p>
+                  <label className="mt-2 block text-xs font-medium">
+                    Type {confirmWord} to {replacing ? "replace the boundary" : "save it anyway"}
+                    <input
+                      value={confirmText}
+                      onChange={(e) => setConfirmText(e.target.value)}
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      className={inputClass + " mt-0.5 bg-white sm:w-56"}
+                    />
+                  </label>
+                </div>
+              ) : null}
+
               <div className="flex justify-between">
                 <button onClick={() => setStep(2)} className="text-sm font-medium text-gray-600 hover:underline">
                   &larr; Back
                 </button>
                 <button
                   onClick={save}
-                  disabled={saving || !plotted}
+                  disabled={saving || !canSave}
                   className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600 disabled:opacity-60"
                 >
                   {saving
@@ -1710,11 +1861,11 @@ function CallsGrid({
                     </select>
                   </label>
                   <label className="text-[11px] text-gray-600">
-                    Radius (ft)
+                    Radius ({r.unit === "feet" ? "ft" : r.unit})
                     <input value={r.radius} onChange={(e) => patch(r.id, { radius: e.target.value })} inputMode="decimal" className={cell} />
                   </label>
                   <label className="text-[11px] text-gray-600">
-                    Arc (ft)
+                    Arc ({r.unit === "feet" ? "ft" : r.unit})
                     <input value={r.arc_length} onChange={(e) => patch(r.id, { arc_length: e.target.value })} inputMode="decimal" className={cell} />
                   </label>
                   <label className="text-[11px] text-gray-600">
@@ -1722,12 +1873,12 @@ function CallsGrid({
                     <input value={r.chord_bearing} onChange={(e) => patch(r.id, { chord_bearing: e.target.value })} className={cell} />
                   </label>
                   <label className="text-[11px] text-gray-600">
-                    Chord (ft)
+                    Chord ({r.unit === "feet" ? "ft" : r.unit})
                     <input value={r.chord_length} onChange={(e) => patch(r.id, { chord_length: e.target.value })} inputMode="decimal" className={cell} />
                   </label>
                   <label className="text-[11px] text-gray-600">
                     Delta (deg)
-                    <input value={r.delta} onChange={(e) => patch(r.id, { delta: e.target.value })} inputMode="decimal" className={cell} />
+                    <input value={r.delta} onChange={(e) => patch(r.id, { delta: e.target.value })} placeholder="90 or 90°00'00&quot;" className={cell} />
                   </label>
                 </div>
               ) : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { scanKindFor, type DocType } from "@/lib/documents";
 import { proposeTitle } from "@/lib/documentTitle";
@@ -37,7 +37,14 @@ interface Saved {
   propertyId: string | null;
   propertyIds: string[];
   title: string;
+  // Saved, but something after the save needs a look (the property links).
+  warning: string | null;
 }
+
+// Why a member who is not an admin cannot save a document with no
+// property or record: Unfiled documents are admin-only.
+const NEEDS_PROPERTY =
+  "Choose the property this belongs to. Only an admin can save a document that is not filed to a property or a record.";
 
 // The single upload path: drop the file, confirm what the AI found,
 // save. Used by the Documents page (no context) and by every entity
@@ -47,17 +54,26 @@ interface Saved {
 export default function IntakeFlow({
   orgId,
   context = null,
+  isAdmin = false,
   onSaved,
   onClose,
   onDirtyChange,
+  onSavingChange,
 }: {
   orgId: string;
   context?: IntakeContextTarget | null;
+  // Admins may save a document with no property (Unfiled). Everyone
+  // else must choose a property or a record: row level security refuses
+  // an Unfiled save from them. Unknown is treated as not an admin.
+  isAdmin?: boolean;
   onSaved: (documentId: string) => void;
   onClose: () => void;
   // True while a bulk upload holds read documents that are not saved, so
   // the modal can ask before closing.
   onDirtyChange?: (dirty: boolean) => void;
+  // True while a save is running, so the modal can refuse to close: a
+  // save cut off by closing leaves documents half saved.
+  onSavingChange?: (saving: boolean) => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [step, setStep] = useState<Step>("upload");
@@ -73,6 +89,9 @@ export default function IntakeFlow({
   const [retrying, setRetrying] = useState(false);
   // Has the user changed the property selection since the AI pass?
   const [propsTouched, setPropsTouched] = useState(false);
+  // "Switch to manual, keep the AI's suggestions": the fields the AI was
+  // unsure of, so the manual form still marks them (null = nothing kept).
+  const [keptUnsure, setKeptUnsure] = useState<string[] | null>(null);
 
   // Matching context, loaded once: properties, parcels, entities and
   // their confirmed aliases (shared with the bulk upload). Session
@@ -114,33 +133,77 @@ export default function IntakeFlow({
   );
 
   // ---- step 1 -> 2: the AI pass
-  // The storage object uploaded for the current file (reused on save,
-  // removed if the user walks away without saving).
-  const uploadedPathRef = useRef<string | null>(null);
+  // Each file starts a new run. Whatever supersedes it (Skip the AI,
+  // Start over, closing the dialog) moves the number on, and the old run
+  // does nothing more when its upload or its read comes back: a late AI
+  // result must never replace the manual form or reopen a saved panel.
+  const runRef = useRef(0);
+  // The upload of the current file: where it is going, and a promise
+  // that settles with null (stored) or an error message. Save waits on
+  // this one instead of starting a second upload, and it is taken back
+  // out of storage if the person walks away without saving.
+  const uploadRef = useRef<{ path: string; done: Promise<string | null> } | null>(null);
+  const savingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  // Remove an unsaved upload from storage, once it has landed.
+  const discardUpload = useCallback(() => {
+    const up = uploadRef.current;
+    uploadRef.current = null;
+    if (!up) return;
+    up.done.then((err) => {
+      if (!err) supabase.storage.from("documents").remove([up.path]).then(() => undefined, () => undefined);
+    });
+  }, [supabase]);
+
+  // Closing the dialog before saving: "Nothing is stored until you
+  // confirm", so the unsaved upload goes. A save that is running keeps
+  // its file and settles it itself.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      runRef.current++;
+      if (!savingRef.current) discardUpload();
+    };
+  }, [discardUpload]);
+
+  useEffect(() => {
+    onSavingChange?.(step === "saving");
+  }, [step, onSavingChange]);
 
   async function handleFile(f: File) {
+    const run = ++runRef.current;
+    discardUpload();
     setFile(f);
     setError(null);
     setResult(null);
     setVerified(null);
+    setKeptUnsure(null);
     setHandoffDismissed(false);
     setMismatchDismissed(false);
     setStep("reading");
     // Upload FIRST (resumable over 6 MB), then the server reads the
     // file by path; the request body never carries the document.
     const path = intakeStoragePath(orgId, f);
-    const upErr = await uploadToStorage(supabase, path, f);
+    const done = uploadToStorage(supabase, path, f).catch(() => "Upload failed.");
+    uploadRef.current = { path, done };
+    const upErr = await done;
+    // A failed upload is forgotten, so Save uploads the file afresh.
+    if (upErr && uploadRef.current?.path === path) uploadRef.current = null;
+    if (run !== runRef.current) return;
     if (upErr) {
       setDraft(emptyDraft(context));
       setManualMessage(uploadErrorCopy(f.name, upErr));
       setStep("manual");
       return;
     }
-    uploadedPathRef.current = path;
     const res = await intakeFile(
       { storagePath: path, fileName: f.name, contentType: f.type || "application/pdf" },
-      intakeContextFrom(matching)
+      intakeContextFrom(matching),
+      f
     );
+    if (run !== runRef.current) return;
     if ("error" in res) {
       // Never a dead end: the manual form with the file attached.
       setDraft(emptyDraft(context));
@@ -192,6 +255,7 @@ export default function IntakeFlow({
   // re-seeded unless the user already changed them.
   async function retrySpatial() {
     if (!result) return;
+    const run = runRef.current;
     setRetrying(true);
     try {
       const res = await fetch("/api/spatial-match", {
@@ -208,6 +272,7 @@ export default function IntakeFlow({
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { spatial?: IntakeResult["spatial"] };
+      if (run !== runRef.current) return;
       if (!res.ok || !body.spatial) return;
       const next: IntakeResult = { ...result, spatial: body.spatial };
       const v = verifyMatches(
@@ -235,12 +300,25 @@ export default function IntakeFlow({
     }
   }
 
-  // Re-seed the fields when the user changes the type on the confirm screen.
+  // When the type changes on the confirm screen the fields follow the
+  // new type's form, filled from what the AI read. A field the person
+  // already corrected keeps their value; only untouched ones are
+  // re-seeded. Two types that share a form (two kinds of deed) change
+  // nothing at all.
   function changeDraft(next: Draft) {
     if (next.propertyIds !== draft.propertyIds) setPropsTouched(true);
     if (result && next.docType !== draft.docType) {
+      const oldKind = scanKindFor(draft.docType);
       const kind = scanKindFor(next.docType);
-      next = { ...next, values: kind ? initialValuesFor(kind, result.fields) : {} };
+      if (kind !== oldKind) {
+        const seeded = oldKind ? initialValuesFor(oldKind, result.fields) : {};
+        const values = kind ? initialValuesFor(kind, result.fields) : {};
+        for (const key of Object.keys(values)) {
+          const edited = key in next.values && JSON.stringify(next.values[key]) !== JSON.stringify(seeded[key]);
+          if (edited) values[key] = next.values[key];
+        }
+        next = { ...next, values };
+      }
     }
     setDraft(next);
   }
@@ -263,22 +341,47 @@ export default function IntakeFlow({
 
   // ---- manual path
   function goManual() {
+    // A read still in flight is abandoned: its result must not come back
+    // over the manual form (or over the saved panel after Save).
+    runRef.current++;
     const hasProposals = step === "confirm" && result !== null;
     let keep = false;
     if (hasProposals) {
       keep = window.confirm("Keep the AI's suggestions as starting values? OK keeps them, Cancel starts blank.");
     }
-    if (!keep) setDraft(emptyDraft(context));
+    if (!keep) {
+      setDraft(emptyDraft(context));
+      setSwitched(false);
+    }
+    // Kept values are still the AI's, not yet checked: the manual form
+    // shows them open, with the unsure ones still marked.
+    setKeptUnsure(keep && result ? result.unsure_fields : null);
     setResult(null);
     setVerified(null);
     setManualMessage(null);
     setStep("manual");
   }
 
+  // "Manual upload (no AI)" on the first screen: the file is chosen
+  // first, then the manual form opens with it. Nothing is read, and the
+  // file uploads on Save.
+  function startManual(f: File) {
+    runRef.current++;
+    discardUpload();
+    setFile(f);
+    setError(null);
+    setResult(null);
+    setVerified(null);
+    setKeptUnsure(null);
+    setDraft(emptyDraft(context));
+    setManualMessage(null);
+    setSwitched(false);
+    setStep("manual");
+  }
+
   // ---- step 3: save
   async function save() {
-    if (!file) return;
-    setStep("saving");
+    if (!file || savingRef.current) return;
     setError(null);
     const kind = scanKindFor(draft.docType);
     let extracted: Record<string, unknown> | null = null;
@@ -321,6 +424,14 @@ export default function IntakeFlow({
       entityType = "entity";
       entityId = entityMatch.id;
     }
+    // Unfiled is admin-only. Say so before anything is uploaded or
+    // saved, rather than let the database refuse it afterwards.
+    if (entityType === "organization" && !isAdmin) {
+      setError(NEEDS_PROPERTY);
+      return;
+    }
+    savingRef.current = true;
+    setStep("saving");
     // Title: the user's, else the AI's, else the pattern title built
     // from the reviewed fields (never a raw file name).
     const firstPropertyName = properties.find((p) => p.id === propertyIds[0])?.name ?? null;
@@ -337,6 +448,11 @@ export default function IntakeFlow({
         evidence[sug.propertyId] = sug.reasons.join("; ");
       }
     }
+    // The file may still be uploading (Skip the AI, then a quick Save):
+    // wait for that upload rather than start a second one. If it failed,
+    // uploadDocument uploads the file itself.
+    const up = uploadRef.current;
+    const storagePath = up && !(await up.done) ? up.path : null;
     const res = await uploadDocument(supabase, {
       orgId,
       entityType,
@@ -348,13 +464,21 @@ export default function IntakeFlow({
       propertyIds,
       evidence,
       extracted,
-      storagePath: uploadedPathRef.current,
-    });
+      storagePath,
+    }).catch(() => ({ error: `Could not save ${file.name}. Check your connection and try again.` }));
+    // Always released, whatever happened: the dialog cannot be closed
+    // while a save is running.
+    savingRef.current = false;
     if ("error" in res) {
+      // The dialog was closed while this ran and nothing was saved: the
+      // upload has no document, so it goes.
+      if (!mountedRef.current) discardUpload();
       setError(res.error);
       setStep(result ? "confirm" : "manual");
       return;
     }
+    // The file belongs to the saved document now: never clean it up.
+    uploadRef.current = null;
     const path = await supabase.from("documents").select("storage_path").eq("id", res.id).single();
     setSaved({
       id: res.id,
@@ -364,21 +488,21 @@ export default function IntakeFlow({
       propertyId: propertyIds[0] ?? null,
       propertyIds,
       title,
+      warning: res.warning ?? null,
     });
     setStep("saved");
     onSaved(res.id);
   }
 
   function reset() {
-    // Walking away from an unsaved file: drop its storage object.
-    if (uploadedPathRef.current && !saved) {
-      const stale = uploadedPathRef.current;
-      supabase.storage.from("documents").remove([stale]).then(() => undefined, () => undefined);
-    }
-    uploadedPathRef.current = null;
+    // Walking away from an unsaved file: drop its storage object. (After
+    // a save there is nothing here to drop; the file is the document's.)
+    runRef.current++;
+    discardUpload();
     setFile(null);
     setResult(null);
     setVerified(null);
+    setKeptUnsure(null);
     setDraft(emptyDraft(context));
     setManualMessage(null);
     setError(null);
@@ -388,6 +512,9 @@ export default function IntakeFlow({
   }
 
   const bigNote = file ? largeFileWarning(file) : null;
+  // After "Switch to <property>" the page's own record is no longer the
+  // attachment, so the forms stop showing it as one.
+  const formContext = switched ? null : context;
 
   if (batch) {
     return (
@@ -395,9 +522,11 @@ export default function IntakeFlow({
         orgId={orgId}
         files={batch}
         context={context}
+        isAdmin={isAdmin}
         matching={matching}
         onSaved={onSaved}
         onDirtyChange={onDirtyChange}
+        onSavingChange={onSavingChange}
         onDone={onClose}
         onStartOver={() => {
           onDirtyChange?.(false);
@@ -413,7 +542,7 @@ export default function IntakeFlow({
         <DropZone
           onFile={handleFile}
           onFiles={(files) => (files.length === 1 ? handleFile(files[0]) : setBatch(files))}
-          onManual={goManual}
+          onManual={startManual}
           intro={context ? `Adding to ${context.label}.` : null}
         />
       ) : null}
@@ -456,10 +585,12 @@ export default function IntakeFlow({
                 draft={draft}
                 onChange={setDraft}
                 properties={selectable}
-                context={context}
+                context={formContext}
+                isAdmin={isAdmin}
                 attachOptions={attachOptions}
                 loadAttachOptions={loadAttachOptions}
                 message={manualMessage}
+                keptUnsure={keptUnsure}
               />
             ) : result ? (
               <ConfirmScreen
@@ -472,7 +603,8 @@ export default function IntakeFlow({
                 conflict={verified?.conflict ?? false}
                 entityWhy={entityMatch?.why ?? null}
                 entityName={entityMatch?.name ?? null}
-                context={context}
+                context={formContext}
+                isAdmin={isAdmin}
                 mismatch={switched ? null : mismatch}
                 onSwitchToMatch={() => {
                   if (!mismatch) return;
@@ -534,6 +666,7 @@ export default function IntakeFlow({
           storagePath={saved.storagePath}
           propertyId={saved.propertyId}
           title={saved.title}
+          warning={saved.warning}
           placeNames={result?.property_hints?.place_names ?? []}
           savedProperties={properties
             .filter((p) => saved.propertyIds.includes(p.id))

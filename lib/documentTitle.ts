@@ -1,6 +1,6 @@
 import { normalizeFsaExtraction } from "@/lib/gov/fsaImport";
 import { formatDollars } from "@/lib/format";
-import { DOC_TYPE_LABELS, scanKindFor, type DocType } from "@/lib/documents";
+import { DOC_TYPE_LABELS, EXTRACTED_FIELDS, scanKindFor, type DocType } from "@/lib/documents";
 import type { DocumentRow } from "@/types/db";
 
 // Document titles, one generator for the intake fallback, the rescan,
@@ -75,11 +75,24 @@ export function proposeTitle(
   const prefix =
     docType === "fsa_156ez" ? "FSA-156EZ" : docType === "title_insurance" ? "Title Insurance" : titleCase(label);
   const e = extracted ?? {};
-  const fallbackYear = yearOf(opts.uploadedAt);
+  // The upload year stands in for a missing document date only when
+  // something was read from the document (any of its type's fields).
+  // With nothing read, a year in the title would be taken for the
+  // document's own year ("Other - Home Place (2026)" for a 1987 paper
+  // uploaded this year), so it is left off.
+  const kind = scanKindFor(docType);
+  const somethingRead =
+    kind === "fsa_156ez"
+      ? normalizeFsaExtraction(e).length > 0
+      : (kind ? EXTRACTED_FIELDS[kind] : []).some((f) => {
+          const v = e[f.key];
+          return Array.isArray(v) ? v.length > 0 : s(v) !== null;
+        });
+  const fallbackYear = somethingRead ? yearOf(opts.uploadedAt) : null;
   let body: string | null = null;
   let year: string | null = null;
   let yearInside = false;
-  switch (scanKindFor(docType)) {
+  switch (kind) {
     case "deed": {
       const from = party(e.grantor);
       const to = party(e.grantee);

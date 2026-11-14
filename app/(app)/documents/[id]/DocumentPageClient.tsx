@@ -13,6 +13,8 @@ import {
   type ScanKind,
 } from "@/lib/documents";
 import { displayTitle } from "@/lib/documentTitle";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDate } from "@/lib/format";
 import type { DocumentRow, DocumentVersionRow } from "@/types/db";
 import { ActionLink, RelatedSection, SummaryHeader } from "@/components/summary/Summary";
 import DocumentPreview from "@/components/documents/DocumentPreview";
@@ -25,6 +27,8 @@ import { SpatialEvidenceBlock } from "@/components/documents/intake/ConfirmScree
 import type { SpatialEvidence } from "@/lib/documentMatch";
 import {
   deleteDocumentEverywhere,
+  extractStored,
+  mergeExtracted,
   openDocument,
   renameDocument,
   replaceDocumentFile,
@@ -54,6 +58,7 @@ export default function DocumentPageClient({
   uploadedBy,
   primary,
   fsaFarm,
+  isAdmin,
 }: {
   doc: DocumentRow;
   links: Array<{ property_id: string; evidence: string | null }>;
@@ -63,6 +68,7 @@ export default function DocumentPageClient({
   primary: PrimaryAttachment | null;
   fsaFarm: { id: string; farmNumber: string } | null;
   orgId: string;
+  isAdmin: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -91,7 +97,7 @@ export default function DocumentPageClient({
     if (t === docType) return;
     const { error: err } = await supabase.from("documents").update({ doc_type: t }).eq("id", doc.id);
     if (err) {
-      setError("Could not change the type. " + err.message);
+      setError(friendlyDbError(err, "Could not change the type. Please try again."));
       return;
     }
     setRescanOffer(scanKindFor(t) ? t : null);
@@ -102,22 +108,22 @@ export default function DocumentPageClient({
     if (!kind) return;
     setScanBusy(true);
     setError(null);
-    try {
-      const fd = new FormData();
-      fd.append("storage_path", doc.storage_path);
-      fd.append("file_name", doc.file_name);
-      fd.append("content_type", doc.content_type ?? "application/pdf");
-      fd.append("kind", kind);
-      const res = await fetch("/api/extract", { method: "POST", body: fd });
-      const body = (await res.json()) as { extraction?: Record<string, unknown>; error?: string };
-      if (!res.ok || !body.extraction) throw new Error(body.error ?? "Extraction failed.");
-      setReview({ kind, extraction: body.extraction });
-      setRescanOffer(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Extraction failed.");
-    } finally {
-      setScanBusy(false);
+    // extractStored never throws and always answers with a plain
+    // sentence, even when the platform sends back an error page.
+    const res = await extractStored({
+      storagePath: doc.storage_path,
+      fileName: doc.file_name,
+      contentType: doc.content_type ?? "application/pdf",
+      kind,
+      sizeBytes: doc.size_bytes,
+    });
+    setScanBusy(false);
+    if ("error" in res) {
+      setError(res.error);
+      return;
     }
+    setReview({ kind, extraction: res.extraction });
+    setRescanOffer(null);
   }
 
   // ---- properties
@@ -144,11 +150,9 @@ export default function DocumentPageClient({
       });
       const body = (await res.json().catch(() => ({}))) as { spatial?: SpatialEvidence; error?: string };
       if (!res.ok || !body.spatial) throw new Error(body.error ?? "The check did not finish.");
-      const { error } = await supabase
-        .from("documents")
-        .update({ extracted: { ...(doc.extracted ?? {}), spatial: body.spatial } })
-        .eq("id", doc.id);
-      if (error) throw new Error(error.message);
+      // Laid over the latest stored value, not this page's copy of it.
+      const saved = await mergeExtracted(supabase, doc.id, { spatial: body.spatial });
+      if ("error" in saved) throw new Error(friendlyDbError(saved.error, "The check ran but could not be saved. Please try again."));
       router.refresh();
     } catch (e) {
       setRecheckError(e instanceof Error ? e.message : "The check did not finish.");
@@ -177,7 +181,7 @@ export default function DocumentPageClient({
       .update({ notes: notes.trim() || null })
       .eq("id", doc.id);
     if (err) {
-      setError("Could not save notes. " + err.message);
+      setError(friendlyDbError(err, "Could not save the notes. Please try again."));
       return;
     }
     setNotesDirty(false);
@@ -204,16 +208,19 @@ export default function DocumentPageClient({
   async function remove() {
     const where = linkedIds.length > 1 ? ` It is attached to ${linkedIds.length} properties; this removes it everywhere.` : "";
     if (!window.confirm(`Delete ${title}?${where} This cannot be undone.`)) return;
-    const err = await deleteDocumentEverywhere(supabase, doc);
+    const err = await deleteDocumentEverywhere(supabase, doc, { seesEveryDocument: isAdmin });
     if (err) {
-      setError("Could not delete. " + err);
+      setError(err);
       return;
     }
     router.push("/documents");
     router.refresh();
   }
-  async function downloadVersion(path: string) {
-    await openDocument(supabase, path);
+  // Download saves the file under its own name. openDocument opens its
+  // tab before it waits on anything, so it must be called straight from
+  // the tap (see classify.ts).
+  async function download(path: string, fileName: string) {
+    setError(await openDocument(supabase, path, { downloadName: fileName }));
   }
 
   const highlights = extractedHighlights(docType, (doc.extracted ?? null) as Record<string, unknown> | null);
@@ -453,7 +460,7 @@ export default function DocumentPageClient({
 
           {/* Utilities */}
           <section className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
-            <button onClick={() => openDocument(supabase, doc.storage_path)} className="font-medium text-gray-800 hover:underline">
+            <button onClick={() => download(doc.storage_path, doc.file_name)} className="font-medium text-gray-800 hover:underline">
               Download
             </button>
             <button onClick={() => replaceRef.current?.click()} disabled={replacing} className="font-medium text-gray-800 hover:underline disabled:opacity-60">
@@ -472,9 +479,9 @@ export default function DocumentPageClient({
                   <li key={v.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
                     <span className="min-w-0 flex-1 truncate text-gray-800">{v.file_name}</span>
                     <span className="text-xs text-gray-500">
-                      {formatSize(v.size_bytes)} · replaced {new Date(v.replaced_at).toLocaleDateString()}
+                      {formatSize(v.size_bytes)} · replaced {formatDate(v.replaced_at)}
                     </span>
-                    <button onClick={() => downloadVersion(v.storage_path)} className={linkBtn}>
+                    <button onClick={() => download(v.storage_path, v.file_name)} className={linkBtn}>
                       Download
                     </button>
                   </li>
@@ -485,14 +492,14 @@ export default function DocumentPageClient({
 
           <footer className="space-y-0.5 px-1 text-xs text-gray-500">
             <p>
-              Uploaded {uploadedBy ? `by ${uploadedBy} ` : ""}on {new Date(doc.created_at).toLocaleDateString()}
+              Uploaded {uploadedBy ? `by ${uploadedBy} ` : ""}on {formatDate(doc.created_at)}
             </p>
             <p>
               Original file: {doc.file_name}
               {doc.size_bytes ? ` (${formatSize(doc.size_bytes)})` : ""}
             </p>
             {extractionDates.length > 0 ? (
-              <p>Read on {extractionDates.map((d) => new Date(d).toLocaleDateString()).join(", ")}</p>
+              <p>Read on {extractionDates.map((d) => formatDate(d)).join(", ")}</p>
             ) : null}
           </footer>
         </div>

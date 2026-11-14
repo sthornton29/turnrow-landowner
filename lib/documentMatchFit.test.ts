@@ -36,6 +36,19 @@ describe("parcel fit on a whole-section tract", () => {
     expect(s[0].reasons[0]).toContain("07 09 31 0 000 003.000");
     expect(s[0].reasons[0]).toContain("120 acres");
   });
+  it("prints the parcel's acres and the stated acres with commas", () => {
+    const big: SpatialEvidence = {
+      ...wholeSection,
+      stated_acres: 1250,
+      matches: [
+        { entity_type: "parcel", id: "p3", name: "07 09 31 0 000 003.000", overlap_acres: 1234.56, pct_of_described: 90, pct_of_boundary: 100 },
+      ],
+    };
+    const s = spatialSuggestions(big, properties, parcels);
+    expect(s[0].reasons[0]).toBe(
+      "parcel 07 09 31 0 000 003.000 (1,234.6 acres) on Shop Area fits the 1,250 acres described in Sec 31, T4S R7W, Huntsville PM"
+    );
+  });
   it("falls back to shares when no parcel fits, pre-checking only the largest", () => {
     const s = spatialSuggestions({ ...wholeSection, stated_acres: 300 }, properties, parcels);
     expect(s.map((x) => [x.propertyId, x.score])).toEqual([["shop", 80], ["phin", 60]]);

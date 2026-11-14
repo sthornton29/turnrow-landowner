@@ -111,18 +111,24 @@ export default function BatchIntake({
   orgId,
   files,
   context,
+  isAdmin = false,
   matching,
   onSaved,
   onDirtyChange,
+  onSavingChange,
   onDone,
   onStartOver,
 }: {
   orgId: string;
   files: File[];
   context: IntakeContextTarget | null;
+  // Only an admin may save a row with no property (Unfiled).
+  isAdmin?: boolean;
   matching: MatchingContext;
   onSaved: (documentId: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  // True while Save is running, so the dialog refuses to close.
+  onSavingChange?: (saving: boolean) => void;
   onDone: () => void;
   onStartOver: () => void;
 }) {
@@ -131,6 +137,14 @@ export default function BatchIntake({
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const started = useRef(new Set<string>());
+  // The dialog went away (closed, Back, a new page). A save that is
+  // still running stops before its next row, and the rows it did not
+  // reach are cleaned up by the save itself.
+  const gone = useRef(false);
+  // Rows handed to the save that is running (saving now or waiting their
+  // turn). Their files must not be touched from outside the save: a row
+  // inserted after its file was removed is a document that will not open.
+  const inSave = useRef(new Set<string>());
   const [existing, setExisting] = useState<((name: string, size: number) => string | null) | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [saving, setSaving] = useState(false);
@@ -234,10 +248,20 @@ export default function BatchIntake({
         decide(null, uploadErrorCopy(file.name, upErr), null);
         return;
       }
+      // The dialog closed while this file was uploading: nothing is kept.
+      if (gone.current) {
+        supabase.storage.from("documents").remove([path]).then(() => undefined, () => undefined);
+        return;
+      }
       const res = await intakeFile(
         { storagePath: path, fileName: file.name, contentType: file.type || "application/pdf" },
-        intakeContextFrom(matching)
+        intakeContextFrom(matching),
+        file
       );
+      if (gone.current) {
+        supabase.storage.from("documents").remove([path]).then(() => undefined, () => undefined);
+        return;
+      }
       if ("error" in res) decide(null, res.error, path);
       else decide(res.result, null, path);
     },
@@ -281,23 +305,43 @@ export default function BatchIntake({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  // Leaving without saving: drop the storage objects of unsaved files.
+  // Leaving without saving: drop the storage objects of files that are
+  // not saved and not part of a running save.
   useEffect(() => {
+    gone.current = false;
     return () => {
-      const stale = rowsRef.current.filter((r) => r.storagePath && r.status !== "saved").map((r) => r.storagePath!);
+      gone.current = true;
+      const stale = rowsRef.current
+        .filter((r) => r.storagePath && r.status !== "saved" && r.status !== "saving" && !inSave.current.has(r.key))
+        .map((r) => r.storagePath!);
       if (stale.length > 0) supabase.storage.from("documents").remove(stale).then(() => undefined, () => undefined);
     };
   }, [supabase]);
 
+  useEffect(() => {
+    onSavingChange?.(saving);
+  }, [saving, onSavingChange]);
+
   // ---- saving the checked rows
   async function saveChecked() {
+    if (inSave.current.size > 0) return;
     const todo = rowsRef.current.filter((r) => r.checked && r.status !== "saved" && r.status !== "saving");
     if (todo.length === 0) return;
     setSaving(true);
+    inSave.current = new Set(todo.map((r) => r.key));
+    const savedKeys = new Set<string>();
     let lastId: string | null = null;
     await runPool(todo, SAVE_CONCURRENCY, async (row) => {
+      // The row as it is now. One that was removed, unchecked, or sent
+      // back to be read again while it waited its turn is not saved.
+      const current = rowsRef.current.find((r) => r.key === row.key);
+      if (!current || !current.checked || current.status === "queued" || current.status === "reading") return;
+      // Unfiled is admin-only: say so on the row before anything is saved.
+      if (!isAdmin && !context && current.propertyIds.length === 0) {
+        patch(row.key, { status: "failed", error: "Choose the property this belongs to. Only an admin can save a document without one." });
+        return;
+      }
       patch(row.key, { status: "saving", error: null });
-      const current = rowsRef.current.find((r) => r.key === row.key) ?? row;
       let entityType: DocumentEntityType = "organization";
       let entityId = orgId;
       let propertyIds = [...current.propertyIds];
@@ -329,14 +373,24 @@ export default function BatchIntake({
         evidence,
         extracted: null,
         storagePath: current.storagePath,
-      });
+      }).catch(() => ({ error: `Could not save ${current.file.name}. Check your connection and try again.` }));
       if ("error" in res) {
         patch(row.key, { status: "failed", error: res.error });
         return;
       }
-      patch(row.key, { status: "saved", savedId: res.id, checked: false, editingProps: false });
+      savedKeys.add(row.key);
+      patch(row.key, { status: "saved", savedId: res.id, checked: false, editingProps: false, error: res.warning ?? null });
       lastId = res.id;
-    });
+    }, () => gone.current);
+    inSave.current = new Set();
+    if (gone.current) {
+      // Closed mid-save. Every row that did not become a document (not
+      // reached, or failed) still has its uploaded file: remove those.
+      // Saved rows keep theirs.
+      const stale = todo.filter((r) => !savedKeys.has(r.key) && r.storagePath).map((r) => r.storagePath!);
+      if (stale.length > 0) supabase.storage.from("documents").remove(stale).then(() => undefined, () => undefined);
+      return;
+    }
     setSaving(false);
     // One refresh of the page behind the modal per batch, not per file.
     if (lastId) onSaved(lastId);
@@ -644,7 +698,9 @@ export default function BatchIntake({
                 <div className="col-start-2 min-w-0 md:col-start-auto">
                   <div className="flex flex-wrap items-center gap-1">
                     {r.propertyIds.length === 0 && !busy ? (
-                      <span className="text-xs text-amber-800">No property (saves as Unfiled)</span>
+                      <span className="text-xs text-amber-800">
+                        {isAdmin || context ? "No property (saves as Unfiled)" : "Choose the property this belongs to"}
+                      </span>
                     ) : null}
                     {r.propertyIds.map((id) => (
                       <span

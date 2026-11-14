@@ -1,6 +1,7 @@
 import { requireOrg } from "@/lib/auth";
+import { documentSearchText } from "@/lib/documents";
 import type { DocumentRow } from "@/types/db";
-import DocumentsClient, { type AttachTarget } from "./DocumentsClient";
+import DocumentsClient, { type AttachTarget, type DocumentListRow } from "./DocumentsClient";
 
 export const metadata = { title: "Documents" };
 
@@ -8,14 +9,22 @@ export const metadata = { title: "Documents" };
 // search, a property/entity filter, the taxonomy as a rail, and upload.
 // Loads small id/name lookups so each row can name and link what it is
 // attached to. Session client only: RLS scopes everything to the org.
+//
+// Only the columns the list uses are read, and `extracted` (the whole
+// record of what was read off each document, map shapes included) stays
+// on the server: each row carries one line of search text built from it
+// instead (documentSearchText), so a phone is not sent every document's
+// full extraction to show a list.
+const LIST_COLUMNS = "id, entity_type, entity_id, doc_type, title, file_name, title_reviewed, created_at, extracted";
+
 export default async function DocumentsPage() {
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
   const [
     docs, properties, parcels, fields, pastures, wetlands, habitats, stands, roads,
     easements, assets, leases, sales, entities, tenants, taxStatements, links,
     cemeteries, issues,
   ] = await Promise.all([
-    supabase.from("documents").select("*").order("created_at", { ascending: false }),
+    supabase.from("documents").select(LIST_COLUMNS).order("created_at", { ascending: false }),
     supabase.from("properties").select("id, name, entity_id, county, state").order("name"),
     supabase.from("parcels").select("id, parcel_number, property_id"),
     supabase.from("fields").select("id, name, property_id"),
@@ -109,10 +118,18 @@ export default async function DocumentsPage() {
     (r) => `/taxes?year=${statementYear.get(r.id)}&statement=${r.id}`
   );
 
+  type Loaded = Omit<DocumentListRow, "search"> & Pick<DocumentRow, "extracted">;
+  const rows: DocumentListRow[] = ((docs.data ?? []) as unknown as Loaded[]).map(({ extracted, ...d }) => ({
+    ...d,
+    search: documentSearchText(d.doc_type, extracted),
+  }));
+
   return (
     <DocumentsClient
       orgId={profile.organization_id!}
-      docs={(docs.data as DocumentRow[]) ?? []}
+      isAdmin={isAdmin}
+      docs={rows}
+      loadError={Boolean(docs.error)}
       targets={targets}
       properties={(properties.data ?? []).map((p) => ({
         id: p.id,

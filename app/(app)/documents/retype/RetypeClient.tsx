@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { DocType } from "@/lib/documents";
 import { displayTitle } from "@/lib/documentTitle";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatDate, plural } from "@/lib/format";
 import type { DocumentRow } from "@/types/db";
 import DocTypeChip from "@/components/documents/DocTypeChip";
 import { DocTypeSelect } from "@/components/documents/DocTypeSelect";
@@ -34,12 +36,16 @@ const ENTITY_LABEL: Record<string, string> = {
 export default function RetypeClient({ docs }: { docs: DocumentRow[] }) {
   const supabase = createClient();
   const router = useRouter();
-  // Chosen type per document; starts from the stored AI suggestion.
+  // Chosen type per document. Every row starts at Other, where it is
+  // now. A suggestion stored on the row is shown beside it but is NOT
+  // pre-selected: a document that already carries a suggestion and is
+  // still typed Other is one a person looked at and left as Other (at
+  // upload, on its page, or here). Pre-selecting it meant one tap on
+  // Apply undid that choice for every such document. A suggestion made
+  // in this visit (Classify all) is still filled in for review.
   const [choice, setChoice] = useState<Record<string, DocType>>(() => {
     const c: Record<string, DocType> = {};
-    for (const d of docs) {
-      c[d.id] = (d.ai_suggested_type as DocType | null) ?? "other";
-    }
+    for (const d of docs) c[d.id] = "other";
     return c;
   });
   const [suggested, setSuggested] = useState<Record<string, { type: DocType; reason: string | null }>>(() => {
@@ -88,7 +94,7 @@ export default function RetypeClient({ docs }: { docs: DocumentRow[] }) {
         .from("documents")
         .update({ doc_type: choice[d.id] })
         .eq("id", d.id);
-      if (err) setError("Some updates failed: " + err.message);
+      if (err) setError(friendlyDbError(err, "Some documents could not be updated. Please try again."));
     }
     setBusy(false);
     router.refresh();
@@ -102,7 +108,7 @@ export default function RetypeClient({ docs }: { docs: DocumentRow[] }) {
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Type your documents</h1>
           <p className="text-sm text-gray-500">
-            {docs.length} document{docs.length === 1 ? "" : "s"} still typed Other. Let the
+            {plural(docs.length, "document")} still typed Other. Let the
             AI suggest types, check each one, then Apply. Nothing changes until you apply.
           </p>
         </div>
@@ -142,7 +148,7 @@ export default function RetypeClient({ docs }: { docs: DocumentRow[] }) {
                   {displayTitle(d)}
                 </Link>
                 <p className="text-xs text-gray-500">
-                  {ENTITY_LABEL[d.entity_type] ?? d.entity_type} · {new Date(d.created_at).toLocaleDateString()}
+                  {ENTITY_LABEL[d.entity_type] ?? d.entity_type} · {formatDate(d.created_at)}
                   {suggested[d.id] ? (
                     <span className="ml-2 inline-flex items-center gap-1">
                       <DocTypeChip docType={suggested[d.id].type} suggested />

@@ -160,11 +160,20 @@ export function proposeBatchRow(i: BatchProposalInput): BatchProposal {
   return { status: review ? "review" : "ready", propertyIds: ids, notes };
 }
 
-// Runs fn over items with at most `limit` in flight, in order.
-export async function runPool<T>(items: T[], limit: number, fn: (item: T, index: number) => Promise<void>): Promise<void> {
+// Runs fn over items with at most `limit` in flight, in order. When
+// shouldStop is given it is asked before each item starts: once it says
+// yes, nothing further starts (items already running finish). The
+// batch save uses it so a closed dialog stops saving the rest.
+export async function runPool<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<void>,
+  shouldStop?: () => boolean
+): Promise<void> {
   let next = 0;
   const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
     while (next < items.length) {
+      if (shouldStop?.()) return;
       const i = next++;
       await fn(items[i], i);
     }

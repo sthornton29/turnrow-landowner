@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { EXTRACTED_FIELDS, type ScanKind } from "@/lib/documents";
+import { EXTRACTED_FIELDS, unsureNotes, unsureSet, type ExtractedFieldDef, type ScanKind } from "@/lib/documents";
+import { friendlyDbError } from "@/lib/dbErrors";
+import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
 import { normalizeFsaExtraction } from "@/lib/gov/fsaImport";
-import { recordExtraction } from "./classify";
+import { mergeExtracted, recordExtraction } from "./classify";
 import ExtractedFieldsEditor, {
   finalizeValues,
   initialValuesFor,
@@ -33,11 +35,13 @@ export default function DocumentReview({
   onConfirmed?: (scanKind: ScanKind, extracted: Record<string, unknown>) => void;
 }) {
   const supabase = createClient();
-  const unsure = new Set<string>(
-    Array.isArray(extraction.unsure_fields)
-      ? (extraction.unsure_fields as unknown[]).map(String)
-      : []
-  );
+  const unsureList = Array.isArray(extraction.unsure_fields)
+    ? (extraction.unsure_fields as unknown[]).map(String)
+    : [];
+  const unsure = unsureSet(unsureList);
+  // What the reader flagged that is not a field on this form, such as
+  // "Only the first 90 of 240 pages were read": shown as text below.
+  const notes = unsureNotes(scanKind, unsureList);
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     initialValuesFor(scanKind, extraction)
   );
@@ -50,17 +54,18 @@ export default function DocumentReview({
     const out = finalizeValues(scanKind, values);
     if (extraction.pages_scanned != null) out.pages_scanned = extraction.pages_scanned;
     if (extraction.total_pages != null) out.total_pages = extraction.total_pages;
-    const { error: err } = await supabase
-      .from("documents")
-      .update({
-        extracted: out,
-        extracted_at: new Date().toISOString(),
-        extraction_reviewed: true,
-      })
-      .eq("id", documentId);
+    // Laid over the latest stored value, never in place of it: the
+    // spatial evidence, the plot screen's extraction, and the plot
+    // record live under other keys of the same column. Only the fields
+    // of the form this document was last reviewed with are let go (a
+    // deed rescanned as a survey does not keep its grantor).
+    const saved = await mergeExtracted(supabase, documentId, out, {
+      columns: { extracted_at: new Date().toISOString(), extraction_reviewed: true },
+      dropKeys: (stored) => (EXTRACTED_FIELDS[stored.scan_kind as ScanKind] ?? []).map((f) => f.key),
+    });
     setBusy(false);
-    if (err) {
-      setError("Could not save. " + err.message);
+    if ("error" in saved) {
+      setError(friendlyDbError(saved.error, "Could not save. Please try again."));
       return;
     }
     await recordExtraction(supabase, documentId, scanKind);
@@ -89,6 +94,14 @@ export default function DocumentReview({
           chunks: extraction.chunks,
         }}
       />
+
+      {notes.length > 0 ? (
+        <ul className="list-disc space-y-0.5 rounded-lg border border-amber-300 bg-amber-50 py-2 pl-7 pr-3 text-xs text-amber-900">
+          {notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      ) : null}
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <div className="flex gap-2">
@@ -138,13 +151,13 @@ export function ExtractedSummary({
                     <dt className="text-gray-500">
                       Farm {String(farm.farm_number ?? "?")}
                       {farm.county ? ` (${String(farm.county)}${farm.state ? `, ${String(farm.state)}` : ""})` : ""}
-                      {farm.cropland_acres != null ? ` ${String(farm.cropland_acres)} cropland ac` : ""}
+                      {farm.cropland_acres != null ? ` ${acres(farm.cropland_acres)} cropland ac` : ""}
                     </dt>
                     <dd className="text-gray-900">
                       {rows.length === 0
                         ? "No base acres"
                         : rows
-                            .map((r) => `${String(r.commodity ?? "")} ${String(r.base_acres ?? "")} ac${r.plc_yield != null && r.plc_yield !== "" ? ` @ ${String(r.plc_yield)}` : ""}`)
+                            .map((r) => `${String(r.commodity ?? "")} ${acres(r.base_acres)} ac${r.plc_yield != null && r.plc_yield !== "" ? ` @ ${plain(r.plc_yield)}` : ""}`)
                             .join("; ")}
                     </dd>
                   </div>
@@ -186,11 +199,34 @@ export function ExtractedSummary({
           <div key={f.key} className={"flex justify-between gap-3" + (f.input === "textarea" ? " sm:col-span-2 flex-col" : "")}>
             <dt className="text-gray-500">{f.label}</dt>
             <dd className={"font-medium text-gray-900 " + (f.input === "textarea" ? "whitespace-pre-wrap" : "text-right")}>
-              {String(v)}
+              {shown(f, v)}
             </dd>
           </div>
         );
       })}
     </dl>
   );
+}
+
+// How a stored number reads on the page: acres with one decimal,
+// dollars as dollars, other numbers with commas. A value that is not a
+// number is shown as it is stored.
+function plain(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
+  return String(v ?? "").trim() !== "" && Number.isFinite(n) ? formatNumber(n) : String(v ?? "");
+}
+
+function acres(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
+  return String(v ?? "").trim() !== "" && Number.isFinite(n) ? formatAcres(n) : String(v ?? "");
+}
+
+const DOLLAR_FIELDS = new Set(["consideration", "policy_amount", "amount"]);
+
+function shown(f: ExtractedFieldDef, v: unknown): string {
+  if (f.input !== "number") return String(v);
+  const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
+  if (!Number.isFinite(n)) return String(v);
+  if (DOLLAR_FIELDS.has(f.key)) return formatDollars(n);
+  return f.key.endsWith("acres") ? formatAcres(n) : formatNumber(n);
 }

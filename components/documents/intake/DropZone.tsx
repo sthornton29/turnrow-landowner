@@ -64,13 +64,16 @@ export default function DropZone({
   onFile: (file: File) => void;
   // When set, several files (or a folder) can be chosen at once.
   onFiles?: (files: File[]) => void;
-  onManual: () => void;
+  // "Manual upload (no AI)": called with the file once one is chosen
+  // (the manual form has nothing to show without a file).
+  onManual: (file: File) => void;
   disabled?: boolean;
   intro?: string | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const manualRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [walking, setWalking] = useState(false);
 
@@ -193,11 +196,23 @@ export default function DropZone({
         <p className="text-xs text-gray-500">Prefer to type it in yourself?</p>
         <button
           type="button"
-          onClick={onManual}
-          className="w-full rounded-lg border-2 border-pine-800 bg-white px-4 py-2.5 text-sm font-semibold text-pine-900 hover:bg-kelly-50 sm:w-auto"
+          disabled={disabled || walking}
+          onClick={() => manualRef.current?.click()}
+          className="w-full rounded-lg border-2 border-pine-800 bg-white px-4 py-2.5 text-sm font-semibold text-pine-900 hover:bg-kelly-50 disabled:opacity-60 sm:w-auto"
         >
           Manual upload (no AI)
         </button>
+        <input
+          ref={manualRef}
+          type="file"
+          accept="application/pdf,image/*,.csv,.xlsx,.xls,.doc,.docx"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onManual(f);
+            e.target.value = "";
+          }}
+        />
       </div>
     </div>
   );

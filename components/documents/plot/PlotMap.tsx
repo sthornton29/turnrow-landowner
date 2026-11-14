@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import mapboxgl, { GeoJSONSource } from "mapbox-gl";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { bboxOf } from "@/lib/geo/normalize";
+import { fitBoundsOf } from "@/lib/geo/normalize";
 
 const KELLY = "#39b54a";
 
@@ -110,7 +110,7 @@ export default function PlotMap({
         const geoms = [plotted, existing, ...extras.map((x) => x.geometry)].filter(
           (g): g is Geometry => !!g
         );
-        const box = geoms.length > 0 ? bboxOf(geoms) : null;
+        const box = geoms.length > 0 ? fitBoundsOf(geoms) : null;
         if (box) map.fitBounds(box, { padding: 40, maxZoom: 17, duration: 400 });
       }
     };
