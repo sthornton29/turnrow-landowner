@@ -74,4 +74,34 @@ describe("syncTenantsFromEntities", () => {
     await syncTenantsFromEntities(client as never, conn, [], "Smith Farms");
     expect(rows).toHaveLength(1);
   });
+  // 2026-11-14: the farm software answered every share with no farming
+  // entities for a while, and each connection got a stray tenant named
+  // after the operation beside the entity tenants it already had.
+  it("a connection that already has a tenant gets no stand-in when the share comes back with no entities", async () => {
+    const { client, rows } = fakeTenants([
+      { id: "t1", name: "View Celeste Farm, LLC", farm_connection_id: "c1", farm_entity_id: "e1", farm_entity_name: "View Celeste Farm, LLC" },
+      // Another connection's tenant, and an unlinked tenant that happens
+      // to carry the operation's name: neither is touched.
+      { id: "t2", name: "Two Seasons Farm, LLC", farm_connection_id: "c2", farm_entity_id: "e9" },
+      { id: "t3", name: "Turnrow Farm", farm_connection_id: null, farm_entity_id: null },
+    ]);
+    const r = await syncTenantsFromEntities(client as never, conn, [], "Turnrow Farm");
+    expect(r).toEqual({ created: 0, linked: 0 });
+    expect(rows).toHaveLength(3);
+    expect(rows.find((x) => x.id === "t3")!.farm_connection_id).toBeNull();
+    // The entities come back: nothing new, the entity tenant refreshes.
+    const again = await syncTenantsFromEntities(client as never, conn, [{ id: "e1", name: "View Celeste Farm LLC" }], "Turnrow Farm");
+    expect(again).toEqual({ created: 0, linked: 0 });
+    expect(rows).toHaveLength(3);
+    expect(rows.find((x) => x.id === "t1")!.farm_entity_name).toBe("View Celeste Farm LLC");
+  });
+  it("a stand-in that already exists still refreshes its name", async () => {
+    const { client, rows } = fakeTenants([
+      { id: "t1", name: "Smith Farms", farm_connection_id: "c1", farm_entity_id: null, farm_entity_name: "Smith Farms" },
+    ]);
+    const r = await syncTenantsFromEntities(client as never, conn, [], "Smith Family Farms");
+    expect(r).toEqual({ created: 0, linked: 0 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].farm_entity_name).toBe("Smith Family Farms");
+  });
 });

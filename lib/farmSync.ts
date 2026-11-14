@@ -182,7 +182,8 @@ export async function refreshMappings(
 // ever deleted or unlinked here. Connections without entities (a
 // pre-entity farm API) link or create ONE tenant for the whole
 // operation (farm_entity_id null) so leases still have a tenant that
-// comes from the farm data.
+// comes from the farm data; a connection that already has a tenant
+// never gets that stand-in.
 export async function syncTenantsFromEntities(
   supabase: AnyClient,
   connection: { id: string; organization_id: string },
@@ -209,6 +210,13 @@ export async function syncTenantsFromEntities(
       );
       continue;
     }
+    // The whole-operation stand-in is only for a connection that has no
+    // tenant yet. A connection that already has tenants from its farming
+    // entities and then reports none (a share that comes back empty for
+    // a while, as all three did on 2026-11-14) keeps the tenants it has:
+    // a stand-in made then is a stray row named after the operation that
+    // nobody leases to.
+    if (e.id === null && tenants.some((t) => t.farm_connection_id === connection.id)) continue;
     const key = normalizeOwnerName(e.name).normalized;
     const byName = key
       ? tenants.find((t) => !t.farm_connection_id && normalizeOwnerName(t.name).normalized === key)
