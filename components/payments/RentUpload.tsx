@@ -18,7 +18,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { extractFile } from "@/components/documents/classify";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatAcres, formatDollars, formatNumber, todayISO } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars, formatNumber, todayISO } from "@/lib/format";
 import {
   CLUSTER_THRESHOLD,
   normalizeOwnerName,
@@ -752,7 +752,7 @@ export default function RentUpload({
                                   className="flex flex-wrap items-center gap-2 text-xs text-gray-700"
                                 >
                                   <span>
-                                    {e.label} · due {e.due_date} ·{" "}
+                                    {e.label} · due {formatDate(e.due_date)} ·{" "}
                                     {formatDollars(e.expected_amount - e.received_total)} open
                                   </span>
                                   <input

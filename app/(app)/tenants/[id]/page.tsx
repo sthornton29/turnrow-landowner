@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars } from "@/lib/format";
 import { insuranceBadge } from "@/lib/insurance";
 import { LEASE_STATUS_LABELS, type LeaseStatus } from "@/lib/leaseLogic";
 import EntityDocuments from "@/components/documents/EntityDocuments";
@@ -162,7 +162,7 @@ export default async function TenantDetailPage({
                   </Link>
                   <span className="text-sm capitalize text-gray-500">{l.lease_type}</span>
                   <span className="ml-auto text-sm text-gray-500">
-                    {l.start_date} to {l.end_date} ·{" "}
+                    {formatDate(l.start_date)} to {formatDate(l.end_date)} ·{" "}
                     {LEASE_STATUS_LABELS[l.status as LeaseStatus] ?? l.status}
                   </span>
                 </div>

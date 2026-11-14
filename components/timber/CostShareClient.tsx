@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars } from "@/lib/format";
 import { SEC126_LABELS, recaptureUntil } from "@/lib/reforestation";
 import type { CostShareAwardRow, CostSharePaymentRow } from "@/types/db";
 import CostShareForm from "./CostShareForm";
@@ -118,7 +118,7 @@ export function CostSharePayments({
             .map((p) => (
               <li key={p.id} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="font-mono text-xs text-gray-500">{p.received_date}</span>
+                  <span className="text-xs text-gray-500">{formatDate(p.received_date)}</span>
                   <span className="font-medium text-gray-900">{formatDollars(Number(p.amount))}</span>
                   {p.practice ? <span className="text-gray-600">{p.practice}</span> : null}
                   <select

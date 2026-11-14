@@ -511,8 +511,8 @@ export default function TimberSaleDetail({
         </div>
         <p className="mt-1 text-sm text-gray-500">
           {sale.buyer_name ? `Buyer: ${sale.buyer_name} · ` : ""}
-          {sale.contract_date ? `signed ${sale.contract_date} · ` : ""}
-          {sale.harvest_deadline ? `deadline ${sale.harvest_deadline} · ` : ""}
+          {sale.contract_date ? `signed ${formatDate(sale.contract_date)} · ` : ""}
+          {sale.harvest_deadline ? `deadline ${formatDate(sale.harvest_deadline)} · ` : ""}
           {sale.sale_acres ? `${formatAcres(sale.sale_acres)} contract acres · ` : ""}
           {sale.performance_deposit
             ? `deposit ${formatDollars(sale.performance_deposit)}`
@@ -878,12 +878,12 @@ export default function TimberSaleDetail({
                 {settlements.map((s) => (
                   <li key={s.id} className="py-2 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span>{s.settlement_date}</span>
+                      <span>{formatDate(s.settlement_date)}</span>
                       {s.period_start ? (
                         <span className="text-xs text-gray-500">
-                          ({s.period_start}
+                          ({formatDate(s.period_start)}
                           {s.period_end && s.period_end !== s.period_start
-                            ? ` to ${s.period_end}`
+                            ? ` to ${formatDate(s.period_end)}`
                             : ""}
                           )
                         </span>

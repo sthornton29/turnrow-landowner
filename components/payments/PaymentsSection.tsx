@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatDollars, todayISO } from "@/lib/format";
+import { formatDate, formatDollars, todayISO } from "@/lib/format";
 import {
   PAYMENT_STATUS_LABELS,
   STATUS_BADGE_CLASSES,
@@ -366,7 +366,7 @@ export default function PaymentsSection({
                 const status = paymentStatus(e.expected_amount, received, e.due_date, today);
                 return (
                   <tr key={e.id} className="border-b border-gray-100 last:border-0 align-top">
-                    <td className="whitespace-nowrap px-3 py-2">{e.due_date}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{formatDate(e.due_date)}</td>
                     <td className="px-3 py-2">
                       {e.label}
                       <span className="text-gray-400"> · {e.year}</span>
@@ -424,7 +424,7 @@ export default function PaymentsSection({
           <ul className="divide-y divide-gray-100 px-3 pb-2">
             {payments.map((p) => (
               <li key={p.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-                <span>{p.received_date}</span>
+                <span>{formatDate(p.received_date)}</span>
                 <span className="font-medium">{formatDollars(p.amount)}</span>
                 <span className="text-gray-500">
                   {[p.method, p.memo, p.expected_payment_id ? "" : "unscheduled"]

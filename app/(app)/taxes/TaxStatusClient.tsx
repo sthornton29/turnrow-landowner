@@ -996,7 +996,7 @@ export default function TaxStatusClient({
                         {` · ${sLines.length} line${sLines.length === 1 ? "" : "s"}`}
                         {parcelCount > 0 ? `, ${parcelCount} parcel${parcelCount === 1 ? "" : "s"}` : ""}
                         {unmatched > 0 ? <span className="ml-1 text-amber-800">{unmatched} unmatched</span> : null}
-                        {s.due_date ? ` · due ${s.due_date}` : ""}
+                        {s.due_date ? ` · due ${formatDate(s.due_date)}` : ""}
                       </span>
                     </span>
                     <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -1097,7 +1097,7 @@ export default function TaxStatusClient({
                           <ul className="space-y-1">
                             {statementPayments.map((p) => (
                               <li key={p.id} className="flex items-center gap-2">
-                                <span>{p.paid_date}</span>
+                                <span>{formatDate(p.paid_date)}</span>
                                 <span className="font-medium">{formatDollars(p.amount)}</span>
                                 <span className="text-gray-500">{[p.method, p.memo].filter(Boolean).join(" · ")}</span>
                                 <button onClick={() => deleteTaxPayment(p.id)} className="ml-auto text-xs font-medium text-red-600 hover:underline">

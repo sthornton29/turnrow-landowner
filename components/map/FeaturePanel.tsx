@@ -5,7 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
 import { uploadDocument } from "@/components/documents/classify";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars, formatNumber } from "@/lib/format";
 import {
   ASSET_TYPES,
   CONDITION_LABELS,
@@ -825,7 +825,7 @@ export default function FeaturePanel({
                     <p className="text-xs text-gray-600">Operated by {a.entity}</p>
                   ) : null}
                   <p className="text-xs text-gray-600">
-                    {a.planting_date ? `Planted ${a.planting_date} · ` : ""}
+                    {a.planting_date ? `Planted ${formatDate(a.planting_date)} · ` : ""}
                     {a.state === "complete"
                       ? "Harvested"
                       : a.state === "in_progress"

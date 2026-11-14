@@ -509,7 +509,7 @@ export default function BasisLedger({
               .sort((a, b) => b.entry_date.localeCompare(a.entry_date))
               .map((e) => (
                 <li key={e.id} className="flex flex-wrap items-baseline gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-                  <span className="w-24 font-mono text-xs text-gray-500">{e.entry_date}</span>
+                  <span className="w-24 text-xs text-gray-500">{formatDate(e.entry_date)}</span>
                   <span className="text-gray-900">{ENTRY_TYPE_LABELS[e.entry_type as EntryType] ?? e.entry_type}</span>
                   <span className="text-gray-500">{e.product ? productLabel(e.product) : "All products"}</span>
                   {Number(e.volume_change) !== 0 ? (

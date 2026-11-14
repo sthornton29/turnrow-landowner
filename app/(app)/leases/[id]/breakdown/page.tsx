@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars } from "@/lib/format";
 import { govShareRows, loadIncomeInputs } from "@/lib/income";
 import { explainLeaseYear } from "@/lib/leaseExplain";
 import { isGovShareLabel, LEASE_STATUS_LABELS, type LeaseStatus } from "@/lib/leaseLogic";
@@ -101,7 +101,7 @@ export default async function LeaseBreakdownPage({
 
   const dates =
     lease.start_date && lease.end_date
-      ? `${lease.start_date} to ${lease.end_date}`
+      ? `${formatDate(lease.start_date)} to ${formatDate(lease.end_date)}`
       : "No dates set";
 
   return (

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres } from "@/lib/format";
+import { formatAcres, formatDate } from "@/lib/format";
 import { LEASE_STATUS_LABELS, type LeaseStatus } from "@/lib/leaseLogic";
 import SectionTabs from "@/components/leases/SectionTabs";
 
@@ -82,7 +82,7 @@ export default async function LeasesPage() {
                   {tenantName.get(l.tenant_id) ?? "Unknown tenant"}
                   {" · "}
                   {formatAcres(acresByLease.get(l.id) ?? 0)} ac
-                  {l.start_date && l.end_date ? ` · ${l.start_date} to ${l.end_date}` : ""}
+                  {l.start_date && l.end_date ? ` · ${formatDate(l.start_date)} to ${formatDate(l.end_date)}` : ""}
                 </span>
               </div>
             </li>

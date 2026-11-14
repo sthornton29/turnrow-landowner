@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars } from "@/lib/format";
 import SectionTabs from "@/components/leases/SectionTabs";
 import SettlementUpload from "@/components/timber/SettlementUpload";
 
@@ -107,7 +107,7 @@ export default async function TimberSalesPage() {
                   {s.sale_type === "pay_as_cut"
                     ? ` · settled ${formatDollars(settledBySale.get(s.id) ?? 0)}`
                     : ""}
-                  {s.harvest_deadline ? ` · deadline ${s.harvest_deadline}` : ""}
+                  {s.harvest_deadline ? ` · deadline ${formatDate(s.harvest_deadline)}` : ""}
                 </span>
               </div>
             </li>

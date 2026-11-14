@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars } from "@/lib/format";
 import { PROGRAM_LABELS, SEC126_LABELS } from "@/lib/reforestation";
 import { TAX_CATEGORIES, TAX_NOTE, type TaxCategory } from "@/lib/standActivities";
 import { NO_ENTITY_KEY, buildTimberTaxSummary } from "@/lib/timberTaxSummary";
@@ -249,7 +249,7 @@ export default async function TimberTaxSummaryPage({
           <ul className="space-y-1 text-sm">
             {s.costShare.map((c, i) => (
               <li key={i} className="flex flex-wrap gap-x-3">
-                <span className="font-mono text-xs text-gray-500">{c.received_date}</span>
+                <span className="text-xs text-gray-500">{formatDate(c.received_date)}</span>
                 <span className="text-gray-900">{c.title}</span>
                 <span className="text-gray-500">{PROGRAM_LABELS[c.program] ?? c.program}</span>
                 <span className="text-gray-600">{SEC126_LABELS[c.choice]?.label ?? c.choice}</span>
@@ -266,7 +266,7 @@ export default async function TimberTaxSummaryPage({
           <ul className="space-y-1 text-sm">
             {s.expenses.map((e, i) => (
               <li key={i} className="flex flex-wrap gap-x-3">
-                <span className="font-mono text-xs text-gray-500">{e.paid_date}</span>
+                <span className="text-xs text-gray-500">{formatDate(e.paid_date)}</span>
                 <span className="text-gray-900">{e.what || "Cost"}</span>
                 <span className="text-gray-500">{e.propertyName}</span>
                 <span className="text-gray-600">{TAX_CATEGORIES[e.tax_category as TaxCategory]?.label ?? e.tax_category}</span>

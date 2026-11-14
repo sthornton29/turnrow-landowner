@@ -575,7 +575,7 @@ export default function LeaseDetail({
           ) : null}
         </div>
         <p className="mt-1 text-sm text-gray-500">
-          {lease.start_date} to {lease.end_date}
+          {formatDate(lease.start_date)} to {formatDate(lease.end_date)}
           {lease.auto_renew ? " · auto-renews" : ""}
           {lease.termination_notice_days
             ? ` · ${lease.termination_notice_days} day notice`

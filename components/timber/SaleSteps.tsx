@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars } from "@/lib/format";
 import {
   STAGES,
   STAGE_ORDER,
@@ -547,7 +547,7 @@ export default function SaleSteps({
           <ul className="mb-2 space-y-1 text-sm">
             {costs.map((c) => (
               <li key={c.id} className="flex flex-wrap gap-x-3">
-                <span className="font-mono text-xs text-gray-500">{c.paid_date}</span>
+                <span className="text-xs text-gray-500">{formatDate(c.paid_date)}</span>
                 <span className="text-gray-900">{[c.description, c.vendor].filter(Boolean).join(", ") || "Cost"}</span>
                 {properties.length > 1 ? (
                   <span className="text-gray-500">{properties.find((p) => p.id === c.property_id)?.name}</span>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars } from "@/lib/format";
 import { COST_SHARE_STATUS_LABELS, PROGRAM_LABELS } from "@/lib/reforestation";
 import type { CostShareAwardRow, CostSharePaymentRow } from "@/types/db";
 import { CostShareLauncher } from "@/components/timber/CostShareClient";
@@ -79,7 +79,7 @@ export default async function CostSharePage() {
                 {obligated || undecided > 0 ? (
                   <p className="mt-1 text-xs text-amber-800">
                     {[
-                      obligated ? `Practices must be kept up until ${a.obligations_until}` : null,
+                      obligated ? `Practices must be kept up until ${formatDate(a.obligations_until)}` : null,
                       undecided > 0 ? `${undecided} payment${undecided === 1 ? "" : "s"} with the tax choice not decided` : null,
                     ]
                       .filter(Boolean)

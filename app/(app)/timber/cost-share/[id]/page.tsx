@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatDollars } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars } from "@/lib/format";
 import { COST_SHARE_STATUS_LABELS, PROGRAM_LABELS } from "@/lib/reforestation";
 import { TAX_CATEGORIES, type TaxCategory } from "@/lib/standActivities";
 import type { CostShareAwardRow, CostSharePaymentRow } from "@/types/db";
@@ -100,7 +100,7 @@ export default async function CostShareAwardPage({ params }: { params: Promise<{
               const standId = c.activity_id ? standFor.get(c.activity_id) : null;
               return (
                 <li key={c.id} className="flex flex-wrap gap-x-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-                  <span className="font-mono text-xs text-gray-500">{c.paid_date}</span>
+                  <span className="text-xs text-gray-500">{formatDate(c.paid_date)}</span>
                   {standId ? (
                     <Link href={`/timber/${standId}`} className="text-gray-900 hover:underline">
                       {c.description ?? c.vendor ?? "Cost"}
