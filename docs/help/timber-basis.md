@@ -27,7 +27,7 @@ Each property has one timber basis account. Tap its name on the Timber basis pag
 
 ## At a sale
 
-A tract's page lists every timber sale on its stands with what this tract received (its share, when a sale covers more than one property), the selling costs tied to that sale, the depletion, and the approximate taxable gain. Selling costs count here only when they are linked to the sale: entered under **Selling costs** on the sale's page, or on a Thinned or Harvested entry with that sale picked.
+A tract's page lists every timber sale on its stands with what this tract received (its share, when a sale covers more than one property), the selling costs tied to that sale, the depletion, and the approximate taxable gain. Selling costs count here only when they are linked to the sale: entered under **Selling costs** on the sale's page, or on a Thinned, Harvested, or Cruised entry with that sale picked. A cost on work still marked **Planning to do it** is left out until the work is marked done, the same as on the tax summary.
 
 Depletion belongs to the tax year the timber was cut and paid for, so it is proposed and recorded one tax year at a time, from the settlements dated in that year. A sale whose settlements run across two years gets entries in both years. Settlements already covered by recorded depletion are not proposed again; only what has been cut since is.
 

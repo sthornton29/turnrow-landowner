@@ -52,7 +52,7 @@ Use the deadline printed on your notice and confirm it with the county Board of 
 
 The value each year's bill printed, by parcel, marked "market" when it is a market value printed beside a lower current use value. Where a market value is known for a parcel on current use, **Current use saves** shows about what current use saves a year.
 
-**Re-read bills for market and current use values** (the link under the report's title) reads each stored bill file again for everything it prints beyond the tax: market value, current use value, land and buildings, assessment ratio, tax district, millage, and timber acres. Tap **Read values** on a file, or **Read every unread file** at the top. Check what was read, then tap the save button under it, which names the count ("Save 12 lines"), or **Discard**. Tax amounts and parcel matches are never changed. New uploads read these values automatically.
+**Re-read bills for market and current use values** (the link under the report's title, shown to admins) reads each stored bill file again for everything it prints beyond the tax: market value, current use value, land and buildings, assessment ratio, tax district, millage, and timber acres. Tap **Read values** on a file, or **Read every unread file** at the top. Check what was read, then tap the save button under it, which names the count ("Save 12 lines"), or **Discard**. Tax amounts and parcel matches are never changed. New uploads read these values automatically.
 
 ## Dates to know and valuation notices
 

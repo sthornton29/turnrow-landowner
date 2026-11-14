@@ -24,7 +24,7 @@ Income with no land linked shows as **Unassigned (no land linked)** only under A
 
 ## By lease, and how each number is figured
 
-Between the by-type and by-property tables sits **by lease**: every lease with rent expected or received in the year, with a Basis chip (Projection, Schedule, or Incomplete; "Received only" when money came in with nothing expected) and expected, received, and outstanding.
+Between the by-type and by-property tables sits **by lease**: every lease with rent expected or received in the year, with a Basis chip (Projection, Schedule, or Incomplete; "Received only" when money came in with nothing expected) and expected, received, and outstanding. A lease still in Draft counts the same as an Active one, and its row is marked "Draft lease, counted as expected".
 
 Tap a lease (or its **How** link) to open its breakdown page: the year's expected, received, and still-to-come figures, a one-sentence summary, and then the arithmetic step by step. A crop share lease shows each crop as an equation: acres times yield is production, times price is crop value, times your share is your rent, less your share of expenses where the lease shares them. Cash rent shows leased acres times the rate (or the lump sum); a flex lease shows base rent plus the year's bonus estimate.
 

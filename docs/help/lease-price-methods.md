@@ -18,7 +18,7 @@ On a flex lease the rent is the base rate times leased acres plus a bonus estima
 
 - **Manual (enter prices yourself)**: you type the price.
 - **Tenant's average price (farm connection)**: the tenant's farm software shares their projected or final average price for the crop, if they turned that sharing on. It shows in the Tenant data panel.
-- **RMA insurance benchmark (public data)**: the public USDA crop insurance projected price, harvest price, or the average of the two, for a crop and state. In the lease terms, tap **+ Add crop benchmark** and enter the crop (corn, soybeans, wheat, cotton, or canola), the two-letter state, and which price to use. No connection needed. Each crop row then shows the benchmark with **Use this price**.
+- **RMA insurance benchmark (public data)**: the public USDA crop insurance projected price, harvest price, or the average of the two, for a crop and state. In the lease terms, tap **+ Add crop benchmark**, pick the crop from the list (corn, soybeans, wheat, cotton, or canola), enter the two-letter state, and choose which price to use. No connection needed. Each crop row then shows the benchmark with **Use this price**.
 - **Custom recipe (from the lease's pricing clause)**: a formula built once from the lease's pricing clause (for example the average of two elevator quotes less a basis). On the lease page tap **Set up recipe**, check the clause, tap **Design recipe**, review the description, inputs, and formula, then **Confirm and save recipe**. Each year, **Compute price** asks for any numbers you must type, shows the arithmetic, and offers **Use this price**. The same recipe and inputs always give the same number.
 
 ## Year assumptions
@@ -34,6 +34,6 @@ On a crop share lease, **Use**, **Use row**, and **Use all** fill the year's ent
 ## Common questions
 
 - **The RMA price is blank.** The card shows each price as yet to start, in discovery, or released. Before discovery starts there is no number. With the average chosen, the projected price is used alone until the harvest price starts. If RMA lists no offer for the crop in that state, the card says so.
-- **The RMA card says the crop is not mapped.** Type the benchmark's crop as corn, soybeans, wheat, cotton, or canola.
-- **I chose Tenant's average price and see no price.** The price shows in the Tenant data panel. The panel is missing when no land on the lease is matched to a connected tenant's fields, and the price reads Not shared when the farmer has price sharing off.
+- **The RMA card says the crop is not mapped.** The benchmark was saved under a crop name RMA does not cover; the lease terms show it as "not covered by RMA". Under **Edit lease terms**, pick corn, soybeans, wheat, cotton, or canola from the crop list.
+- **I chose Tenant's average price and see no price.** The price shows in the Tenant data panel. The panel is missing when no land on the lease is matched to a connected tenant's fields; an amber note on the lease page then says so and links to Farm connections. The price reads Not shared when the farmer has price sharing off.
 - **The tenant's price is for a different crop.** Prices match crops strictly. A crop the tenant planted that is not in the year's entries is marked "not in this year's crops" and never fills another crop's price.

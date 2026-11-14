@@ -16,7 +16,7 @@ You do not have to leave the Map. Tap **+ Add** and pick **Import a file** at th
 
 ## On the Import page
 
-- Tap **Tap to choose files** and pick one or more files. Dragging a file works on the Map, not on this page.
+- Tap **Tap to choose files** and pick one or more files, or on a computer drag the files onto that box and drop them.
 - Say what each shape is. An area can become a Property, Parcel, Ag field, Pasture/Grassland, Wetland (open), Pollinator habitat, Timber stand, or Cemetery. A line can become a Road, Underground pipe, or Fence. A point becomes an asset of the type you pick. Only admins are offered Property.
 - Give each one a name. For a parcel the name is its parcel number.
 - Each row suggests the property that contains it (a **Suggested from location** chip). Confirm or change it. Everything except a new property and an asset must be assigned to a property. Properties in the same batch save first so other rows can attach to them.

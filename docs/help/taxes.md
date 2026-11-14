@@ -27,7 +27,7 @@ A statement is how the county billed you: a county, the number it bills on (an a
 
 The page counts a parcel as covered for a year when a line links to it. Business personal property lines are never parcels: they count in what you owe and paid, under the statement's entity, but not in parcel coverage.
 
-A statement whose lines do not add up to its total shows an amber chip with both figures. It is never hidden. Saved lines cannot be edited. If a line was misread, delete the statement under **Details** and have an admin upload the bill again, correcting the line in the review before confirming. Deleting also removes the payments recorded on the statement, so note them first.
+A statement whose lines do not add up to its total shows an amber chip with both figures. It is never hidden. Saved lines cannot be edited. If a line was misread, have an admin delete the statement under **Details** and upload the bill again, correcting the line in the review before confirming. Deleting also removes the payments recorded on the statement, so note them first.
 
 ## Uploading statements
 
@@ -43,7 +43,7 @@ You then review the statements found. Each row shows the county, year, billing n
 
 Nothing saves without confirmation. Each confirmed statement files its source file in Documents under Property taxes, linked back to the statement.
 
-**Deleting a statement.** **Delete statement**, under **Details**, asks first. It then removes the statement with its lines, its recorded payments, and the files attached to it. When one uploaded PDF holds several statements, the file is kept for the others until the last of them is deleted.
+**Deleting a statement.** **Delete statement**, under **Details**, is for admins and asks first. It then removes the statement with its lines, its recorded payments, and the files attached to it. When one uploaded PDF holds several statements, the file is kept for the others until the last of them is deleted.
 
 **Additional bills.** Some years a county prints a parcel twice on one statement, its regular tax and an additional bill. Those are saved as one line for the parcel with the two amounts added together, since a parcel carries one line per tax year. The review shows which lines will be combined before you confirm.
 

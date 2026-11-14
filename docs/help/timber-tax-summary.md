@@ -27,7 +27,7 @@ The amber list names what to fix or ask about before the page goes to the accoun
 
 - A sale that took in money this year but has no timber stand linked. It is left out of the summary until its stands are linked on the sale page.
 - A sale on a property with no timber basis set up, or with proceeds this year and no depletion recorded.
-- Selling costs not linked to a timber sale. They are not counted. Pick the sale on the Thinned or Harvested entry the cost was entered with, or enter the cost under **Selling costs** on the sale page instead.
+- Selling costs not linked to a timber sale. They are not counted. Pick the sale on the Thinned, Harvested, or Cruised entry the cost was entered with, or enter the cost under **Selling costs** on the sale page instead.
 - Selling costs linked to a sale that has no stand on the cost's property. They are not counted either; check the stands linked on the sale page.
 - Selling costs paid in a year the sale brought in no money. They are counted in the year paid; ask your accountant which year they belong in.
 - Costs left out because the work they were entered on is not marked done. Costs on planned work are never counted; if the work is finished and paid, mark it done on the stand page.

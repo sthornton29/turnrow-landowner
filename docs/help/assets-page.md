@@ -25,4 +25,4 @@ Changing the **Type** keeps only the details the new type has a place for. Befor
 ## Common questions
 
 - **Where did the bin diameter field go?** Retired. Capacity in bushels is the number that matters for a bin; bins place as a pin (or a drawn outline), not a circle.
-- **Where do I place it?** Assets are placed from the Map. A bin added from its site's page says "No location yet". To place it, open the Map, tap the bin site, tap the new bin in the site's list, then **Move pin** and **Place here**.
+- **Where do I place it?** Assets are placed from the Map. A bin added from its site's page says "No location yet" with a **Place on map** link. The link opens the Map with the bin's panel up; press **Move pin**, line up the crosshair, and press **Place here**. You can also get there from the Map: tap the bin site, then the new bin in the site's list. A deactivated asset has to be reactivated first, because the map leaves inactive assets out.

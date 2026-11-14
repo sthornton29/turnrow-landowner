@@ -16,7 +16,7 @@ The controls sit behind two buttons at the top left. **Layers** opens a panel wi
 
 ## Layers and legend
 
-The Layers box (top left on a computer) turns each kind of thing on or off: Properties, Parcels, Ag Fields, Pastures/Grassland, Wetlands, Pollinator habitat, Timber, Cemeteries, Roads, Easements, and Assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Ag field names** for every other name label (ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets, and maintenance issues). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
+The Layers box (top left on a computer) turns each kind of thing on or off: Properties, Parcels, Ag Fields, Pastures/Grassland, Wetlands, Pollinator habitat, Timber, Cemeteries, Roads, Easements, and Assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Other names** for every other name label (ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets, and maintenance issues). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
 
 - **Cemeteries** are a muted violet with a "C" marker: at the center of a traced plot, or on its own for a single pin.
 - **Timber types** get their own legend while the Timber layer is on (planted pine, natural pine, hardwood, mixed, other; only the types you have).
@@ -27,7 +27,7 @@ The Layers box (top left on a computer) turns each kind of thing on or off: Prop
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on a computer, a sheet on a phone) with its acres or length, property, details, and notes. **View full page** opens its own page with documents (for a maintenance issue it opens the Maintenance list). The buttons depend on what you tapped:
+Tapping a feature opens a panel (a card on a computer, a sheet on a phone) with its acres or length, property, details, and notes. **View full page** opens its own page with documents. A maintenance issue has no page of its own, so its panel reads **View all issues** and opens the Maintenance list. The buttons depend on what you tapped:
 
 - **Edit details** changes the name and the other fields. An asset has **Open asset page** and **Quick edit name and notes** instead.
 - **Edit boundary**, **Edit line**, **Edit outline**, or **Move pin** changes the shape or the spot. See the Drawing topic.
@@ -56,6 +56,6 @@ On a weak signal a banner says the map could not load, with a **Retry** button. 
 ## Common questions
 
 - **Why do my acres differ from the deed?** Map acres are computed from the drawn shape. County records often carry deeded acres that differ slightly; a parcel's panel shows both when the county supplied them.
-- **A label is hiding something.** Turn off **Ag field names** or **Property names** under Labels while you work. The shapes stay.
+- **A label is hiding something.** Turn off **Other names** or **Property names** under Labels while you work. The shapes stay.
 - **Can I see last year's crop?** The Crops layer shows the current year only; the Farm Data page shows earlier years.
 - **How do I delete a property?** From the property page, not the map, and only as an admin. See "Tapping things" above.

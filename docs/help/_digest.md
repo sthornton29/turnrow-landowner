@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-14, version 0.1.0, build fbf536f. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-14, version 0.1.0, build 7ea8b2e. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -62,7 +62,27 @@ Changing the **Type** keeps only the details the new type has a place for. Befor
 ## Common questions
 
 - **Where did the bin diameter field go?** Retired. Capacity in bushels is the number that matters for a bin; bins place as a pin (or a drawn outline), not a circle.
-- **Where do I place it?** Assets are placed from the Map. A bin added from its site's page says "No location yet". To place it, open the Map, tap the bin site, tap the new bin in the site's list, then **Move pin** and **Place here**.
+- **Where do I place it?** Assets are placed from the Map. A bin added from its site's page says "No location yet" with a **Place on map** link. The link opens the Map with the bin's panel up; press **Move pin**, line up the crosshair, and press **Place here**. You can also get there from the Map: tap the bin site, then the new bin in the site's list. A deactivated asset has to be reactivated first, because the map leaves inactive assets out.
+
+# Cemetery pages  (page: /cemeteries)
+
+## What a cemetery page shows
+
+A cemetery on your land is kept as its own record, either a traced plot or a single pin, so everyone can see where it is. Open one from the Cemeteries list on its property's page, or tap it on the map and choose **View full page**.
+
+- **Acres** for a traced plot. A cemetery marked with a pin shows **Marked by a pin** and has no acres.
+- **Notes**, if any were entered. They are a good place for who is buried there, who looks after it, and how to reach it.
+- **Edit** opens the name and notes so you can change them; **Save** keeps the change.
+- **View on map** opens the map on this cemetery.
+- **Documents and photos**: **Add document** files a paper or photo on this cemetery.
+
+## Common questions
+
+- **How do I add a cemetery?** On the Map, tap **+ Add**, then **Cemetery**, and choose **Draw the plot** or **Drop a pin**.
+- **How do I change where it is?** Tap **View on map**. In the cemetery's panel, **Edit boundary** reshapes a traced plot and **Move pin** moves a pin.
+- **How do I move it to another property?** On the property page, under Cemeteries, use the Move link.
+- **How do I delete it?** From its panel on the map.
+- **Where do I record a family's right to visit?** As an easement of the cemetery access type. See the Easements topic.
 
 # Getting started  (page: /dashboard)
 
@@ -246,7 +266,7 @@ For metes and bounds the step is **Traverse and place**. The **error of closure*
 
 ### 3. Preview and save
 
-The plotted boundary is drawn over the current one with acres side by side (**Plotted**, **Current**, **Deeded**). Under **Save as**, choose **New property**, **New parcel**, **Replace property boundary**, or **Replace parcel boundary**. Starting a new property is for admins.
+The plotted boundary is drawn over the current one with acres side by side (**Plotted**, **Current**, **Deeded**). Under **Save as**, choose **New property**, **New parcel**, **Replace property boundary**, or **Replace parcel boundary**. **New property** is offered to admins only; other members save onto a property that already exists.
 
 Every warning from the earlier steps is listed again above the button, along with a note when the plotted acres are more than 5 percent off the acres the description states, or when the plot sits 2 miles or more from the boundary you picked. Two cases ask for a typed word before the button works:
 
@@ -524,7 +544,7 @@ You do not have to leave the Map. Tap **+ Add** and pick **Import a file** at th
 
 ## On the Import page
 
-- Tap **Tap to choose files** and pick one or more files. Dragging a file works on the Map, not on this page.
+- Tap **Tap to choose files** and pick one or more files, or on a computer drag the files onto that box and drop them.
 - Say what each shape is. An area can become a Property, Parcel, Ag field, Pasture/Grassland, Wetland (open), Pollinator habitat, Timber stand, or Cemetery. A line can become a Road, Underground pipe, or Fence. A point becomes an asset of the type you pick. Only admins are offered Property.
 - Give each one a name. For a parcel the name is its parcel number.
 - Each row suggests the property that contains it (a **Suggested from location** chip). Confirm or change it. Everything except a new property and an asset must be assigned to a property. Properties in the same batch save first so other rows can attach to them.
@@ -549,8 +569,8 @@ Search a county's public parcel map by owner name or parcel number, preview the 
 - In **All parcels for an owner**, results are ranked: groups matching your known entities pin to the top with the **Known entity** badge, then the closest matches to the name you typed. With a common surname, the distant matches fold behind one "Show N more distant matches" line (with their parcel and acre counts), so nothing is hidden, just deferred. A sort toggle (**Best match** or **Most acres**) and a **Hide 1-parcel owners** filter tidy the list further. Each group shows its name variants. **Not this owner** splits a variant out; tap **Merge** on two groups that are the same owner to join them.
 - A very common name shows what was found with a note that more names matched than could be listed; add another word (a first name, or the company's second word) for the full picture. The other two searches show at most 200 parcels and say so.
 - Tick **Include in import** on a group, or check single parcels in the list or tap them on the map.
-- In the panel that appears, choose **Existing property** or **New property**, and pick the entity beside **Held by entity**. Creating a new entity, or a new property with no entity, is for admins.
-- **Set property boundary to merged outline** makes the property's boundary the outline of all its parcels. The box starts ticked for a new property or one with no boundary yet. It starts unticked when the property already has a boundary, because the merged outline would replace it; tick it and a notice says so before you import.
+- In the panel that appears, choose **Existing property** or **New property**, and pick the entity beside **Held by entity**. **New property** and **Create new entity...** are offered to admins only. Other members add parcels to a property that already exists; with no property yet, the panel says an admin has to create one first.
+- **Set property boundary to merged outline** makes the property's boundary the outline of all its parcels. It is applied only when the import adds a parcel to that property or updates one of that property's own parcels. The box starts ticked for a new property or one with no boundary yet. It starts unticked when the property already has a boundary, because the merged outline would replace it; tick it and a notice says so before you import.
 - Tap **Confirm and import**. Parcels arrive with boundaries and deeded acres, and the page stays where it is so you can import the next batch. **Done, view on map** opens the map when you are finished.
 
 ## Parcels you already have
@@ -561,7 +581,7 @@ A selected parcel whose number is already in your records for that county is lis
 
 - **My county is not listed.** Upload a file instead (see Import files), draw by hand, or plot from a deed in Documents. Ask support to add the county; each one is verified live before it appears.
 - **Acres say "est."** The county published no deeded acres for that parcel, so the figure is worked out from its boundary. A row that says "no boundary returned" cannot be imported.
-- **The property's boundary did not change.** The merged outline is only set when its box is ticked during an import into that property. Otherwise draw or edit the boundary on the Map.
+- **The property's boundary did not change.** The merged outline is only set when its box is ticked during an import into that property. An import that only updates a parcel on a different property leaves the chosen property's boundary alone. Otherwise draw or edit the boundary on the Map.
 
 # Income views  (page: /income)
 
@@ -583,7 +603,7 @@ Income with no land linked shows as **Unassigned (no land linked)** only under A
 
 ## By lease, and how each number is figured
 
-Between the by-type and by-property tables sits **by lease**: every lease with rent expected or received in the year, with a Basis chip (Projection, Schedule, or Incomplete; "Received only" when money came in with nothing expected) and expected, received, and outstanding.
+Between the by-type and by-property tables sits **by lease**: every lease with rent expected or received in the year, with a Basis chip (Projection, Schedule, or Incomplete; "Received only" when money came in with nothing expected) and expected, received, and outstanding. A lease still in Draft counts the same as an Active one, and its row is marked "Draft lease, counted as expected".
 
 Tap a lease (or its **How** link) to open its breakdown page: the year's expected, received, and still-to-come figures, a one-sentence summary, and then the arithmetic step by step. A crop share lease shows each crop as an equation: acres times yield is production, times price is crop value, times your share is your rent, less your share of expenses where the lease shares them. Cash rent shows leased acres times the rate (or the lump sum); a flex lease shows base rent plus the year's bonus estimate.
 
@@ -716,7 +736,7 @@ On a flex lease the rent is the base rate times leased acres plus a bonus estima
 
 - **Manual (enter prices yourself)**: you type the price.
 - **Tenant's average price (farm connection)**: the tenant's farm software shares their projected or final average price for the crop, if they turned that sharing on. It shows in the Tenant data panel.
-- **RMA insurance benchmark (public data)**: the public USDA crop insurance projected price, harvest price, or the average of the two, for a crop and state. In the lease terms, tap **+ Add crop benchmark** and enter the crop (corn, soybeans, wheat, cotton, or canola), the two-letter state, and which price to use. No connection needed. Each crop row then shows the benchmark with **Use this price**.
+- **RMA insurance benchmark (public data)**: the public USDA crop insurance projected price, harvest price, or the average of the two, for a crop and state. In the lease terms, tap **+ Add crop benchmark**, pick the crop from the list (corn, soybeans, wheat, cotton, or canola), enter the two-letter state, and choose which price to use. No connection needed. Each crop row then shows the benchmark with **Use this price**.
 - **Custom recipe (from the lease's pricing clause)**: a formula built once from the lease's pricing clause (for example the average of two elevator quotes less a basis). On the lease page tap **Set up recipe**, check the clause, tap **Design recipe**, review the description, inputs, and formula, then **Confirm and save recipe**. Each year, **Compute price** asks for any numbers you must type, shows the arithmetic, and offers **Use this price**. The same recipe and inputs always give the same number.
 
 ## Year assumptions
@@ -732,8 +752,8 @@ On a crop share lease, **Use**, **Use row**, and **Use all** fill the year's ent
 ## Common questions
 
 - **The RMA price is blank.** The card shows each price as yet to start, in discovery, or released. Before discovery starts there is no number. With the average chosen, the projected price is used alone until the harvest price starts. If RMA lists no offer for the crop in that state, the card says so.
-- **The RMA card says the crop is not mapped.** Type the benchmark's crop as corn, soybeans, wheat, cotton, or canola.
-- **I chose Tenant's average price and see no price.** The price shows in the Tenant data panel. The panel is missing when no land on the lease is matched to a connected tenant's fields, and the price reads Not shared when the farmer has price sharing off.
+- **The RMA card says the crop is not mapped.** The benchmark was saved under a crop name RMA does not cover; the lease terms show it as "not covered by RMA". Under **Edit lease terms**, pick corn, soybeans, wheat, cotton, or canola from the crop list.
+- **I chose Tenant's average price and see no price.** The price shows in the Tenant data panel. The panel is missing when no land on the lease is matched to a connected tenant's fields; an amber note on the lease page then says so and links to Farm connections. The price reads Not shared when the farmer has price sharing off.
 - **The tenant's price is for a different crop.** Prices match crops strictly. A crop the tenant planted that is not in the year's entries is marked "not in this year's crops" and never fills another crop's price.
 
 # Signing in, your password, and getting connected  (page: /login)
@@ -806,7 +826,7 @@ The controls sit behind two buttons at the top left. **Layers** opens a panel wi
 
 ## Layers and legend
 
-The Layers box (top left on a computer) turns each kind of thing on or off: Properties, Parcels, Ag Fields, Pastures/Grassland, Wetlands, Pollinator habitat, Timber, Cemeteries, Roads, Easements, and Assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Ag field names** for every other name label (ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets, and maintenance issues). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
+The Layers box (top left on a computer) turns each kind of thing on or off: Properties, Parcels, Ag Fields, Pastures/Grassland, Wetlands, Pollinator habitat, Timber, Cemeteries, Roads, Easements, and Assets. Below a rule sits a separate **Maintenance issues** toggle: problems you have marked (washes, sinkholes, broken terraces, road washouts) live on their own layer in warning colors and can be hidden without touching the land view. A **Labels** section holds two switches: **Property names** for the big property labels and **Other names** for every other name label (ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets, and maintenance issues). Turning a name switch off hides only the text; boundaries and markers stay. At the bottom, **Neighbors** overlays the surrounding tax parcels and owners from county records (see the Neighbors topic). Your choices are remembered on this device. Parcels start off because they clutter the view.
 
 - **Cemeteries** are a muted violet with a "C" marker: at the center of a traced plot, or on its own for a single pin.
 - **Timber types** get their own legend while the Timber layer is on (planted pine, natural pine, hardwood, mixed, other; only the types you have).
@@ -817,7 +837,7 @@ The Layers box (top left on a computer) turns each kind of thing on or off: Prop
 
 ## Tapping things
 
-Tapping a feature opens a panel (a card on a computer, a sheet on a phone) with its acres or length, property, details, and notes. **View full page** opens its own page with documents (for a maintenance issue it opens the Maintenance list). The buttons depend on what you tapped:
+Tapping a feature opens a panel (a card on a computer, a sheet on a phone) with its acres or length, property, details, and notes. **View full page** opens its own page with documents. A maintenance issue has no page of its own, so its panel reads **View all issues** and opens the Maintenance list. The buttons depend on what you tapped:
 
 - **Edit details** changes the name and the other fields. An asset has **Open asset page** and **Quick edit name and notes** instead.
 - **Edit boundary**, **Edit line**, **Edit outline**, or **Move pin** changes the shape or the spot. See the Drawing topic.
@@ -846,7 +866,7 @@ On a weak signal a banner says the map could not load, with a **Retry** button. 
 ## Common questions
 
 - **Why do my acres differ from the deed?** Map acres are computed from the drawn shape. County records often carry deeded acres that differ slightly; a parcel's panel shows both when the county supplied them.
-- **A label is hiding something.** Turn off **Ag field names** or **Property names** under Labels while you work. The shapes stay.
+- **A label is hiding something.** Turn off **Other names** or **Property names** under Labels while you work. The shapes stay.
 - **Can I see last year's crop?** The Crops layer shows the current year only; the Farm Data page shows earlier years.
 - **How do I delete a property?** From the property page, not the map, and only as an admin. See "Tapping things" above.
 
@@ -982,7 +1002,7 @@ Tap anything on the map and press **KML** in its panel. You get a file with just
 
 - **Which format should I send?** KML unless the person asked for something else. GeoJSON is for GIS people.
 - **Can I export a shapefile?** Not directly. Export KML or GeoJSON; QGIS (free) and most GIS tools convert either to a shapefile.
-- **Will it import back in?** Mostly. Drop the same KML on the map, or choose it on the Import page (**Tap to choose files**), and each shape comes back with its name, ready to be given a type and saved again. Areas can come back as a property, parcel, ag field, pasture/grassland, wetland, pollinator habitat, timber stand, or cemetery; lines as a road, underground pipe, or fence; points as assets. Easements and maintenance issues have no import type, so those would have to be drawn again.
+- **Will it import back in?** Mostly. Drop the same KML on the map, or on the Import page drop it on the **Tap to choose files** box or tap that box to choose it, and each shape comes back with its name, ready to be given a type and saved again. Areas can come back as a property, parcel, ag field, pasture/grassland, wetland, pollinator habitat, timber stand, or cemetery; lines as a road, underground pipe, or fence; points as assets. Easements and maintenance issues have no import type, so those would have to be drawn again.
 - **Do hidden things export?** Not unless you include them. Export starts from the screen; use the item list to add anything the map is hiding. Items you add back from a layer that is switched off go in the file even though that layer stays hidden on the map.
 
 # Neighbors  (page: /map)
@@ -1034,6 +1054,46 @@ Counties print different numbers for the same parcel: the parcel number, a PPIN 
 - **How do I change the boundary?** Tap **View on map**, then **Edit boundary** in the parcel's panel.
 - **How do I delete a parcel?** From its panel on the map. Its tax identifiers, valuation history, and valuation notices are deleted with it. Tax statements that list it are kept, but that line then shows as not matched to a parcel.
 
+# Pasture and grassland pages  (page: /pastures)
+
+## What a pasture page shows
+
+A pasture or grassland is grazing or hay ground drawn inside a property. Open one from the Pastures/Grassland list on its property's page, or tap it on the map and choose **View full page**.
+
+- **Acres**, worked out from the drawn boundary.
+- **Notes**, if any were entered.
+- **Edit** opens the name and notes so you can change them; **Save** keeps the change.
+- **View on map** opens the map on this pasture.
+- **Documents and photos**: **Add document** files a paper or photo on this pasture.
+
+## Common questions
+
+- **How do I add a pasture?** On the Map, tap **+ Add**, then **Pasture/Grassland**, and draw it.
+- **How do I change the boundary?** Tap **View on map**, then **Edit boundary** in the pasture's panel.
+- **How do I move it to another property?** On the property page, under Pastures/Grassland, use the Move link.
+- **How do I delete it?** From its panel on the map.
+- **Is cropland a pasture?** No. Row crop ground is an ag field. See the Ag Fields topic.
+
+# Pollinator habitat pages  (page: /pollinator-habitats)
+
+## What a pollinator habitat page shows
+
+A pollinator habitat is ground planted or managed in wildflowers and native grasses for bees, butterflies, and other pollinators: a CRP CP-42 planting, an EQIP practice, a monarch waystation, or a field border. Open one from the Pollinator habitats list on its property's page, or tap it on the map and choose **View full page**.
+
+- **Acres**, worked out from the drawn boundary.
+- **Program**, **Year established**, **Seed mix**, and **Notes**, when they were entered.
+- **Edit** opens those details so you can change them; **Save** keeps the change.
+- **View on map** opens the map on this habitat.
+- **Photos and documents**: **Add document** files a photo or paper on this habitat. Adding photos through the season shows how the stand is coming along.
+
+## Common questions
+
+- **How do I add a pollinator habitat?** On the Map, tap **+ Add**, then **Pollinator habitat**, and draw it.
+- **Can I add photos from the field?** Yes. Tap the habitat on the map and choose **Add photos**. On a phone that opens the camera, and the pictures are filed on this page.
+- **How do I change the boundary?** Tap **View on map**, then **Edit boundary** in the habitat's panel.
+- **How do I move it to another property?** On the property page, under Pollinator habitats, use the Move link.
+- **How do I delete it?** From its panel on the map.
+
 # Properties, parcels, and entities  (page: /properties)
 
 ## Properties and parcels
@@ -1082,6 +1142,27 @@ To confirm, type the property's name and tap **Delete this property and everythi
 - **Can one property belong to two entities?** No. Split it into two properties if ownership is split.
 - **What are FSA numbers for?** They tie the property to USDA farm records and show on the map panel and the property page. A scanned FSA-156EZ uses them to link its farms and base acres to the right property. Government Payments has its own FSA farm records with base acres.
 - **Can I delete a property from the map?** No. The map panel links to the property page, where an admin deletes it.
+
+# Road pages  (page: /roads)
+
+## What a road page shows
+
+A road is a line drawn on a property: a gravel road, a dirt road, a paved drive, or a field road or turnrow. Open one from the Roads list on its property's page, or tap it on the map and choose **View full page**.
+
+- **Length** in feet and **Miles**, worked out from the drawn line.
+- **Road type** (Gravel, Dirt, Paved, Field road / turnrow, or Other) and **Notes**, when they were entered.
+- **Edit** opens the name, road type, and notes so you can change them; **Save** keeps the change.
+- **View on map** opens the map on this road.
+- **Documents and photos**: **Add document** files a paper or photo on this road.
+
+## Common questions
+
+- **How do I add a road?** On the Map, tap **+ Add**, then **Road**, and draw the line.
+- **How do I change where it runs?** Tap **View on map**, then **Edit line** in the road's panel, and drag its points.
+- **How do I move it to another property?** On the property page, under Roads, use the Move link.
+- **How do I delete it?** From its panel on the map.
+- **A road washed out. Where does that go?** Mark it on the map as a maintenance issue so it shows on Home until it is fixed. See the Maintenance issues topic.
+- **Is a public road or a neighbor's right of way a road here?** No. A right someone else holds across your land is an easement. See the Easements topic.
 
 # Settings  (page: /settings)
 
@@ -1176,7 +1257,7 @@ A statement is how the county billed you: a county, the number it bills on (an a
 
 The page counts a parcel as covered for a year when a line links to it. Business personal property lines are never parcels: they count in what you owe and paid, under the statement's entity, but not in parcel coverage.
 
-A statement whose lines do not add up to its total shows an amber chip with both figures. It is never hidden. Saved lines cannot be edited. If a line was misread, delete the statement under **Details** and have an admin upload the bill again, correcting the line in the review before confirming. Deleting also removes the payments recorded on the statement, so note them first.
+A statement whose lines do not add up to its total shows an amber chip with both figures. It is never hidden. Saved lines cannot be edited. If a line was misread, have an admin delete the statement under **Details** and upload the bill again, correcting the line in the review before confirming. Deleting also removes the payments recorded on the statement, so note them first.
 
 ## Uploading statements
 
@@ -1192,7 +1273,7 @@ You then review the statements found. Each row shows the county, year, billing n
 
 Nothing saves without confirmation. Each confirmed statement files its source file in Documents under Property taxes, linked back to the statement.
 
-**Deleting a statement.** **Delete statement**, under **Details**, asks first. It then removes the statement with its lines, its recorded payments, and the files attached to it. When one uploaded PDF holds several statements, the file is kept for the others until the last of them is deleted.
+**Deleting a statement.** **Delete statement**, under **Details**, is for admins and asks first. It then removes the statement with its lines, its recorded payments, and the files attached to it. When one uploaded PDF holds several statements, the file is kept for the others until the last of them is deleted.
 
 **Additional bills.** Some years a county prints a parcel twice on one statement, its regular tax and an additional bill. Those are saved as one line for the parcel with the two amounts added together, since a parcel carries one line per tax year. The review shows which lines will be combined before you confirm.
 
@@ -1295,7 +1376,7 @@ Use the deadline printed on your notice and confirm it with the county Board of 
 
 The value each year's bill printed, by parcel, marked "market" when it is a market value printed beside a lower current use value. Where a market value is known for a parcel on current use, **Current use saves** shows about what current use saves a year.
 
-**Re-read bills for market and current use values** (the link under the report's title) reads each stored bill file again for everything it prints beyond the tax: market value, current use value, land and buildings, assessment ratio, tax district, millage, and timber acres. Tap **Read values** on a file, or **Read every unread file** at the top. Check what was read, then tap the save button under it, which names the count ("Save 12 lines"), or **Discard**. Tax amounts and parcel matches are never changed. New uploads read these values automatically.
+**Re-read bills for market and current use values** (the link under the report's title, shown to admins) reads each stored bill file again for everything it prints beyond the tax: market value, current use value, land and buildings, assessment ratio, tax district, millage, and timber acres. Tap **Read values** on a file, or **Read every unread file** at the top. Check what was read, then tap the save button under it, which names the count ("Save 12 lines"), or **Discard**. Tax amounts and parcel matches are never changed. New uploads read these values automatically.
 
 ## Dates to know and valuation notices
 
@@ -1331,12 +1412,12 @@ Tenants are the people and operations that lease your land. Open the page from L
 - **Insurance**: tick **Insurance certificate on file** and enter **Insurance expires**. The badge then reads Insured through the date, Insurance expires (within 60 days), or Insurance expired. For a tenant with an active lease, Home lists a certificate that has expired or expires within 60 days, and a hunting lease that requires insurance when none is on file.
 - **Farming entity**: which of a connected farmer's farming entities this tenant is. Linked, leases with this tenant use that entity's fields and prices from the farm connection; otherwise the whole operation's. When every matched field on the tenant's leases belongs to one entity, the page suggests it with **Use this**. Or pick one from the list and tap **Save**. **Unlink** removes the link.
 - **Leases**: each lease with this tenant, with its type, dates, and status. Tap one to open it.
-- **Documents (insurance certificates, W-9s)**: **Add document** files paperwork on the tenant.
+- **Documents (insurance certificates, W-9s)**: for admins, **Add document** files paperwork on the tenant. Other members do not see that button.
 - **Delete tenant**: possible only when the tenant has no leases, and it asks first. Documents attached to the tenant stay in Documents but are no longer attached to a tenant. A timber sale that listed the tenant as buyer keeps the buyer's name.
 
 ## Who can see what
 
-Every member of your organization can see, add, and edit tenants, contact details included. Documents attached to a tenant are for admins. Other members see one only when it is also filed on a property they can see, and a document they try to attach to a tenant will not save. The leases listed on a tenant's page are only the ones on land you can see.
+Every member of your organization can see, add, and edit tenants, contact details included. Documents attached to a tenant are for admins. Other members see one only when it is also filed on a property they can see, and they are not offered **Add document** on a tenant's page. The leases listed on a tenant's page are only the ones on land you can see.
 
 ## Common questions
 
@@ -1369,7 +1450,7 @@ On a stand page, **Record work** asks "What happened here?" with plain buttons: 
 - **Year** (enough on its own) or an exact date.
 - **Which stands**: one burn or spray can cover several stands of the property; it then shows in each stand's history.
 - **More details** for the specifics: species, seedlings per acre and genetics for a planting; product and rate for a spray; burn manager and AFC permit number for a burn; buyer and kind of thinning; cause and acres for damage; the forester's value estimate for a cruise.
-- **Timber sale**: on a Thinned or Harvested entry, when the property's stands are part of a sale, pick the sale the work belongs to.
+- **Timber sale**: on a Thinned, Harvested, or Cruised entry, when the property's stands are part of a sale, pick the sale the work belongs to.
 - **Paperwork**: each history entry has its own documents (invoices, burn permits, cruise reports).
 
 Each suggestion under **Coming up** has its answers beside it: **Already done: record it** (opens the form, already filled in), **Schedule it** (planned work), or **Not needed** (the suggestion goes away). A suggestion marked Later offers only the last two. Not needed answers are kept at the bottom of the history behind a "Show ... marked not needed" link; **Delete** one there and the suggestion comes back.
@@ -1380,7 +1461,7 @@ Add each bill to the work it paid for (**+ Add a cost**): amount, date paid, who
 
 - Getting new trees growing (site prep, seedlings, planting, early spraying): **replanting cost**, which counts toward the Section 194 replanting deduction.
 - Upkeep of the woods (burning, firebreaks, spraying older trees, advice): **upkeep expense**.
-- Selling timber (the forester's sale fee, a cruise for the sale, legal): **selling expense**. It lowers the taxable gain on a sale only when the cost is tied to that sale: enter it under **Selling costs** on the sale's page, or on a Thinned or Harvested entry with the **Timber sale** picked. A selling cost with no sale is not counted, and the tax summary lists it so it is not lost.
+- Selling timber (the forester's sale fee, a cruise for the sale, legal): **selling expense**. It lowers the taxable gain on a sale only when the cost is tied to that sale: enter it under **Selling costs** on the sale's page, or on a Thinned, Harvested, or Cruised entry with the **Timber sale** picked. A selling cost with no sale is not counted, and the tax summary lists it so it is not lost.
 - Something that lasts (a road, culvert, bridge, gate): **lasting improvement**.
 - Not sure: left for the accountant.
 
@@ -1523,7 +1604,7 @@ Each property has one timber basis account. Tap its name on the Timber basis pag
 
 ## At a sale
 
-A tract's page lists every timber sale on its stands with what this tract received (its share, when a sale covers more than one property), the selling costs tied to that sale, the depletion, and the approximate taxable gain. Selling costs count here only when they are linked to the sale: entered under **Selling costs** on the sale's page, or on a Thinned or Harvested entry with that sale picked.
+A tract's page lists every timber sale on its stands with what this tract received (its share, when a sale covers more than one property), the selling costs tied to that sale, the depletion, and the approximate taxable gain. Selling costs count here only when they are linked to the sale: entered under **Selling costs** on the sale's page, or on a Thinned, Harvested, or Cruised entry with that sale picked. A cost on work still marked **Planning to do it** is left out until the work is marked done, the same as on the tax summary.
 
 Depletion belongs to the tax year the timber was cut and paid for, so it is proposed and recorded one tax year at a time, from the settlements dated in that year. A sale whose settlements run across two years gets entries in both years. Settlements already covered by recorded depletion are not proposed again; only what has been cut since is.
 
@@ -1597,7 +1678,7 @@ The amber list names what to fix or ask about before the page goes to the accoun
 
 - A sale that took in money this year but has no timber stand linked. It is left out of the summary until its stands are linked on the sale page.
 - A sale on a property with no timber basis set up, or with proceeds this year and no depletion recorded.
-- Selling costs not linked to a timber sale. They are not counted. Pick the sale on the Thinned or Harvested entry the cost was entered with, or enter the cost under **Selling costs** on the sale page instead.
+- Selling costs not linked to a timber sale. They are not counted. Pick the sale on the Thinned, Harvested, or Cruised entry the cost was entered with, or enter the cost under **Selling costs** on the sale page instead.
 - Selling costs linked to a sale that has no stand on the cost's property. They are not counted either; check the stands linked on the sale page.
 - Selling costs paid in a year the sale brought in no money. They are counted in the year paid; ask your accountant which year they belong in.
 - Costs left out because the work they were entered on is not marked done. Costs on planned work are never counted; if the work is finished and paid, mark it done on the stand page.
@@ -1606,3 +1687,23 @@ The amber list names what to fix or ask about before the page goes to the accoun
 - A sale whose holding period cannot be shown because the timber basis has no acquisition date.
 - A reminder that a trust gets amortization only, with no immediate replanting deduction.
 - When depletion is claimed, a reminder that Form T is likely needed.
+
+# Wetland pages  (page: /wetlands)
+
+## What a wetland page shows
+
+A wetland is open wet ground drawn inside a property: a marsh, a slough, a duck hole, or ground under a wetland easement. Forested bottomland is kept as a timber stand, not a wetland. Open a wetland from the Wetlands list on its property's page, or tap it on the map and choose **View full page**.
+
+- **Acres**, worked out from the drawn boundary.
+- **Notes**, if any were entered.
+- **Edit** opens the name and notes so you can change them; **Save** keeps the change.
+- **View on map** opens the map on this wetland.
+- **Documents and photos**: **Add document** files a paper or photo on this wetland.
+
+## Common questions
+
+- **How do I add a wetland?** On the Map, tap **+ Add**, then **Wetland**, and draw it.
+- **How do I change the boundary?** Tap **View on map**, then **Edit boundary** in the wetland's panel.
+- **How do I move it to another property?** On the property page, under Wetlands, use the Move link.
+- **How do I delete it?** From its panel on the map.
+- **Where do I record a wetland easement?** As an easement, so its holder, recording, and restrictions are kept. See the Easements topic.

@@ -30,7 +30,7 @@ For metes and bounds the step is **Traverse and place**. The **error of closure*
 
 ### 3. Preview and save
 
-The plotted boundary is drawn over the current one with acres side by side (**Plotted**, **Current**, **Deeded**). Under **Save as**, choose **New property**, **New parcel**, **Replace property boundary**, or **Replace parcel boundary**. Starting a new property is for admins.
+The plotted boundary is drawn over the current one with acres side by side (**Plotted**, **Current**, **Deeded**). Under **Save as**, choose **New property**, **New parcel**, **Replace property boundary**, or **Replace parcel boundary**. **New property** is offered to admins only; other members save onto a property that already exists.
 
 Every warning from the earlier steps is listed again above the button, along with a note when the plotted acres are more than 5 percent off the acres the description states, or when the plot sits 2 miles or more from the boundary you picked. Two cases ask for a typed word before the button works:
 

@@ -29,7 +29,7 @@ On a stand page, **Record work** asks "What happened here?" with plain buttons: 
 - **Year** (enough on its own) or an exact date.
 - **Which stands**: one burn or spray can cover several stands of the property; it then shows in each stand's history.
 - **More details** for the specifics: species, seedlings per acre and genetics for a planting; product and rate for a spray; burn manager and AFC permit number for a burn; buyer and kind of thinning; cause and acres for damage; the forester's value estimate for a cruise.
-- **Timber sale**: on a Thinned or Harvested entry, when the property's stands are part of a sale, pick the sale the work belongs to.
+- **Timber sale**: on a Thinned, Harvested, or Cruised entry, when the property's stands are part of a sale, pick the sale the work belongs to.
 - **Paperwork**: each history entry has its own documents (invoices, burn permits, cruise reports).
 
 Each suggestion under **Coming up** has its answers beside it: **Already done: record it** (opens the form, already filled in), **Schedule it** (planned work), or **Not needed** (the suggestion goes away). A suggestion marked Later offers only the last two. Not needed answers are kept at the bottom of the history behind a "Show ... marked not needed" link; **Delete** one there and the suggestion comes back.
@@ -40,7 +40,7 @@ Add each bill to the work it paid for (**+ Add a cost**): amount, date paid, who
 
 - Getting new trees growing (site prep, seedlings, planting, early spraying): **replanting cost**, which counts toward the Section 194 replanting deduction.
 - Upkeep of the woods (burning, firebreaks, spraying older trees, advice): **upkeep expense**.
-- Selling timber (the forester's sale fee, a cruise for the sale, legal): **selling expense**. It lowers the taxable gain on a sale only when the cost is tied to that sale: enter it under **Selling costs** on the sale's page, or on a Thinned or Harvested entry with the **Timber sale** picked. A selling cost with no sale is not counted, and the tax summary lists it so it is not lost.
+- Selling timber (the forester's sale fee, a cruise for the sale, legal): **selling expense**. It lowers the taxable gain on a sale only when the cost is tied to that sale: enter it under **Selling costs** on the sale's page, or on a Thinned, Harvested, or Cruised entry with the **Timber sale** picked. A selling cost with no sale is not counted, and the tax summary lists it so it is not lost.
 - Something that lasts (a road, culvert, bridge, gate): **lasting improvement**.
 - Not sure: left for the accountant.
 
