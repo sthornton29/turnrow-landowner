@@ -270,7 +270,19 @@ export default function IncomeRecordsClient({
                         Not counted as received
                         <select
                           value={r.basis}
-                          onChange={(e) => update(r.id, { basis: e.target.value })}
+                          onChange={(e) => {
+                            // Received cannot be changed back on this
+                            // page (the dropdown goes away), so it asks.
+                            if (
+                              e.target.value === "received" &&
+                              !window.confirm(
+                                `Mark this ${formatDollars(r.amount)} record as received? It will count as received in ${r.year}, and this cannot be changed back here.`
+                              )
+                            ) {
+                              return;
+                            }
+                            update(r.id, { basis: e.target.value });
+                          }}
                           className={`${sel} mt-0.5 block border-amber-300 bg-amber-50 text-amber-900`}
                           aria-label="How firm this figure is"
                         >

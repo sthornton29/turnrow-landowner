@@ -438,7 +438,8 @@ function DocumentsInner({
             <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
               <p className="text-sm font-medium text-gray-800">No documents yet</p>
               <p className="mt-1 text-xs text-gray-500">
-                Upload a deed, survey, or FSA-156EZ here, or from any property, lease, or sale page.
+                Upload a deed, survey, or FSA-156EZ here, or from a record{"'"}s page (a parcel, ag field,
+                timber stand, lease, timber sale, and others).
               </p>
             </div>
           ) : filtered.length === 0 ? (

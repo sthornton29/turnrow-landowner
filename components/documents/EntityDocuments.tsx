@@ -33,6 +33,7 @@ export default function EntityDocuments({
   entityId,
   label,
   isAdmin,
+  canAdd = true,
 }: {
   orgId: string;
   entityType: DocumentEntityType;
@@ -41,6 +42,10 @@ export default function EntityDocuments({
   // Pass it from the page when known. Left out, the careful path is
   // taken (a member who may not be an admin).
   isAdmin?: boolean;
+  // False where this viewer's document would be refused on save (a
+  // tenant's paperwork is admin-only): the list still shows, without
+  // "Add document".
+  canAdd?: boolean;
 }) {
   const supabase = createClient();
   const [docs, setDocs] = useState<DocumentRow[]>([]);
@@ -208,12 +213,14 @@ export default function EntityDocuments({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setIntakeOpen(true)}
-          className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600"
-        >
-          Add document
-        </button>
+        {canAdd ? (
+          <button
+            onClick={() => setIntakeOpen(true)}
+            className="rounded-lg bg-kelly-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-kelly-600"
+          >
+            Add document
+          </button>
+        ) : null}
         {quickPhotos ? (
           <>
             <button

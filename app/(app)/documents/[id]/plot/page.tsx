@@ -14,7 +14,7 @@ export default async function PlotBoundaryPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   const [{ data: doc }, { data: properties }, { data: parcels }] = await Promise.all([
     supabase.from("documents").select("*").eq("id", id).single(),
@@ -29,6 +29,7 @@ export default async function PlotBoundaryPage({
       document={doc as DocumentRow}
       properties={(properties as PropertyGeo[]) ?? []}
       parcels={(parcels as ParcelGeo[]) ?? []}
+      isAdmin={isAdmin}
     />
   );
 }

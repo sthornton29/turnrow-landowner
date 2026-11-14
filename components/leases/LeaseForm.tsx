@@ -31,6 +31,14 @@ import {
   type MatchableProperty,
 } from "@/lib/leaseLand";
 import { safeStorageName } from "@/lib/batchIntake";
+import { RMA_COMMODITY_CODES } from "@/lib/rma";
+
+// The crops RMA publishes benchmark prices for, as the lease form offers
+// them ("Corn", "Soybeans", ...). The price lookup takes exactly these
+// names (any letter case) and refuses anything else.
+const RMA_CROP_CHOICES = Object.keys(RMA_COMMODITY_CODES).map(
+  (crop) => crop.charAt(0).toUpperCase() + crop.slice(1)
+);
 
 export interface LeasePrefill {
   lease_type?: LeaseType | null;
@@ -796,10 +804,18 @@ export default function LeaseForm({
               </select>
               {(terms.price_method ?? "manual") === "rma_benchmark" ? (
                 <div className="space-y-1.5">
-                  {(terms.rma_config ?? []).map((row, i) => (
+                  {(terms.rma_config ?? []).map((row, i) => {
+                    // A crop saved before this was a list: shown as the
+                    // matching choice when it is one of them in another
+                    // letter case, otherwise kept as its own choice so
+                    // nothing is lost on edit.
+                    const knownCrop = RMA_CROP_CHOICES.find(
+                      (c) => c.toLowerCase() === (row.crop ?? "").trim().toLowerCase()
+                    );
+                    return (
                     <div key={i} className="flex flex-wrap items-center gap-1.5">
-                      <input
-                        value={row.crop}
+                      <select
+                        value={knownCrop ?? row.crop ?? ""}
                         onChange={(e) =>
                           setTerm(
                             "rma_config",
@@ -808,9 +824,19 @@ export default function LeaseForm({
                             )
                           )
                         }
-                        placeholder="Crop"
-                        className="w-28 rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
-                      />
+                        aria-label="Crop"
+                        className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">Choose a crop</option>
+                        {RMA_CROP_CHOICES.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                        {row.crop && !knownCrop ? (
+                          <option value={row.crop}>{row.crop} (not covered by RMA)</option>
+                        ) : null}
+                      </select>
                       <input
                         value={row.state}
                         onChange={(e) =>
@@ -856,7 +882,8 @@ export default function LeaseForm({
                         Remove
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={() =>

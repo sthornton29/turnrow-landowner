@@ -102,8 +102,13 @@ export default function CountyImportClient({
   knownAliases,
   entities,
   initial,
+  isAdmin = false,
 }: {
   orgId: string;
+  // A new property and a new entity are an admin's to create (the map
+  // and the file import follow the same rule), so only admins are
+  // offered "New property" and "Create new entity...".
+  isAdmin?: boolean;
   services: CountyGisService[];
   properties: Array<{
     id: string;
@@ -174,7 +179,7 @@ export default function CountyImportClient({
 
   // Assignment
   const [assignMode, setAssignMode] = useState<"existing" | "new">(
-    properties.length > 0 ? "existing" : "new"
+    properties.length > 0 || !isAdmin ? "existing" : "new"
   );
   const [propertyId, setPropertyId] = useState(properties[0]?.id ?? "");
   const [newPropertyName, setNewPropertyName] = useState("");
@@ -507,8 +512,9 @@ export default function CountyImportClient({
   // imported earlier in this session (so a later search still flags
   // them; the current results mark them with the Imported badge instead).
   const duplicates = useMemo(() => {
-    if (!service) return new Map<string, { id: string; parcel_number: string }>();
-    const map = new Map<string, { id: string; parcel_number: string }>();
+    type Existing = { id: string; parcel_number: string; property_id: string };
+    if (!service) return new Map<string, Existing>();
+    const map = new Map<string, Existing>();
     const county = countyKey(service.county);
     const pool = [...existingParcels, ...sessionParcels].filter(
       (p) => countyKey(p.county) === county || !p.county
@@ -619,14 +625,18 @@ export default function CountyImportClient({
     // in the records whose geometry was marked Update. A parcel number
     // that appears twice among the selected rows is added once.
     const toAdd: typeof importRows = [];
-    const toUpdate: Array<{ row: (typeof importRows)[number]; existingId: string }> = [];
+    const toUpdate: Array<{
+      row: (typeof importRows)[number];
+      existingId: string;
+      existingPropertyId: string;
+    }> = [];
     const numbersInBatch = new Set<string>();
     let repeats = 0;
     for (const row of importRows) {
       const dup = duplicates.get(row.localId);
       if (dup) {
         if ((dupChoices[row.localId] ?? "skip") === "update") {
-          toUpdate.push({ row, existingId: dup.id });
+          toUpdate.push({ row, existingId: dup.id, existingPropertyId: dup.property_id });
         }
         continue;
       }
@@ -754,12 +764,16 @@ export default function CountyImportClient({
     const failures: string[] = [];
     let importedCount = 0;
     let addedCount = 0;
+    // Updated parcels that belong to the target property. A parcel marked
+    // Update stays on the property it is already on, which may not be the
+    // one chosen in the form.
+    let updatedOnTarget = 0;
     const importedNow: string[] = [];
     const newSessionParcels: typeof sessionParcels = [];
 
     // Parcels already in the records, marked Update: refresh the
     // geometry (and provenance) on the existing parcel.
-    for (const { row, existingId } of toUpdate) {
+    for (const { row, existingId, existingPropertyId } of toUpdate) {
       const { error: gErr } = await supabase.rpc("set_geometry", {
         p_entity_type: "parcel",
         p_entity_id: existingId,
@@ -783,6 +797,7 @@ export default function CountyImportClient({
         .eq("id", existingId);
       await saveHarvestedIdentifiers(existingId, row.attributes);
       importedCount++;
+      if (existingPropertyId === targetPropertyId) updatedOnTarget++;
       importedNow.push(row.localId);
     }
 
@@ -842,8 +857,11 @@ export default function CountyImportClient({
       });
     }
 
-    // Merged property outline
-    if (targetPropertyId && mergeOutline && importedCount > 0) {
+    // Merged property outline: only for a property whose parcels changed
+    // in this import (a parcel added to it, or one of its own parcels
+    // updated). Updating a parcel on another property leaves the chosen
+    // property's boundary alone.
+    if (targetPropertyId && mergeOutline && addedCount + updatedOnTarget > 0) {
       const { error: mErr } = await supabase.rpc("set_property_boundary_from_parcels", {
         p_property_id: targetPropertyId,
       });
@@ -997,7 +1015,7 @@ export default function CountyImportClient({
           setPropertyId(filtered[0].id);
         } else {
           setPropertyId("");
-          if (assignMode === "existing") setAssignMode("new");
+          if (assignMode === "existing" && isAdmin) setAssignMode("new");
         }
       }
     } else if (!propertyId && localProperties.length > 0) {
@@ -1011,9 +1029,16 @@ export default function CountyImportClient({
     syncPropertyToEntity(value);
   }
 
-  // Shared assign-and-import panel (identical in both modes).
+  // Shared assign-and-import panel (identical in both modes). A member
+  // who is not an admin and has no property yet has nothing to import
+  // into (a new property is an admin's to create), so they get one line.
   const assignPanel =
-    selected.size > 0 ? (
+    selected.size === 0 ? null : !isAdmin && localProperties.length === 0 ? (
+      <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        You have no property to add these parcels to. An admin has to create
+        the property first.
+      </p>
+    ) : (
       <div className="space-y-3 rounded-xl border border-kelly-100 bg-kelly-50 p-4">
         <h2
           className="text-base font-semibold text-pine-900"
@@ -1042,15 +1067,17 @@ export default function CountyImportClient({
                 Existing property
               </button>
             ) : null}
-            <button
-              onClick={() => setAssignMode("new")}
-              className={
-                "px-3 py-2 text-sm font-medium " +
-                (assignMode === "new" ? "bg-kelly-500 text-white" : "text-gray-600")
-              }
-            >
-              New property
-            </button>
+            {isAdmin ? (
+              <button
+                onClick={() => setAssignMode("new")}
+                className={
+                  "px-3 py-2 text-sm font-medium " +
+                  (assignMode === "new" ? "bg-kelly-500 text-white" : "text-gray-600")
+                }
+              >
+                New property
+              </button>
+            ) : null}
           </div>
           {assignMode === "existing" ? (
             <select
@@ -1132,7 +1159,7 @@ export default function CountyImportClient({
                   {entity.name}
                 </option>
               ))}
-              <option value={ENTITY_NEW}>Create new entity...</option>
+              {isAdmin ? <option value={ENTITY_NEW}>Create new entity...</option> : null}
             </select>
           </div>
           {importEntityId === ENTITY_NEW ? (
@@ -1216,7 +1243,7 @@ export default function CountyImportClient({
           {importing ? "Importing..." : "Confirm and import"}
         </button>
       </div>
-    ) : null;
+    );
 
   // Appears once anything has been imported this session. The map focus
   // takes one entity, so a single touched property zooms to it; several

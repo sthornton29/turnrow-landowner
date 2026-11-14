@@ -12,7 +12,7 @@ export default async function CountyImportPage({
   searchParams: Promise<{ service?: string; mode?: string; q?: string; run?: string }>;
 }) {
   const { service, mode, q, run } = await searchParams;
-  const { supabase, profile } = await requireOrg();
+  const { supabase, profile, isAdmin } = await requireOrg();
 
   const [
     { data: services },
@@ -58,6 +58,7 @@ export default async function CountyImportPage({
       existingParcels={parcels ?? []}
       knownAliases={knownAliases}
       entities={entities ?? []}
+      isAdmin={isAdmin}
       initial={{
         serviceId: service,
         mode: mode === "entity" || mode === "owner" || mode === "parcel" ? mode : undefined,

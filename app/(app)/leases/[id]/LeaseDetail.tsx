@@ -140,6 +140,9 @@ export default function LeaseDetail({
   >([]);
   const [marketingPrices, setMarketingPrices] = useState<TenantPriceRow[]>([]);
   const [projectedYields, setProjectedYields] = useState<ProjectedYieldRow[]>([]);
+  // True once the first load has answered, so "no farm connection" is
+  // never said while the connections are still being read.
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     const wantsFarm =
@@ -178,6 +181,7 @@ export default function LeaseDetail({
     );
     setMarketingPrices((mp.data as TenantPriceRow[]) ?? []);
     setProjectedYields((py.data as ProjectedYieldRow[]) ?? []);
+    setLoaded(true);
   }, [supabase, lease.id, lease.lease_type, lease.rent_structure]);
 
   useEffect(() => {
@@ -482,12 +486,14 @@ export default function LeaseDetail({
 
   // A lease marked expired or terminated still expects every payment up
   // to its end date (lib/income.ts): ending it today is what stops the
-  // later ones.
+  // later ones. Generated rows drop out by LEASE YEAR, not by due date
+  // (lib/leaseLogic.ts isLapsedExpectedRow), so rows of the end year
+  // stay until the schedule is refreshed; the question says so.
   async function endLeaseToday() {
     if (headerBusy) return;
     if (
       !window.confirm(
-        `Set this lease's end date to today (${formatDate(todayISO())})? Rent due after today will no longer count as expected. You can change the date again under Edit lease terms.`
+        `Set this lease's end date to today (${formatDate(todayISO())})? Rent for later years stops counting as expected. If expected payments were already generated, this year's rows keep counting until ${isAdmin ? "you press" : "an admin presses"} Refresh expected payments. You can change the date again under Edit lease terms.`
       )
     ) {
       return;
@@ -622,7 +628,9 @@ export default function LeaseDetail({
         (lease.rent_structure === "flex" || lease.rent_structure === "crop_share") ? (
           <p className="mt-2 text-sm text-gray-700">
             <span className="font-medium">Government payments:</span>{" "}
-            {govTreatmentSentence(lease.terms)}
+            {/* The "not chosen yet" sentence carries its own label (the
+                Government Payments page shows it bare); drop it here. */}
+            {govTreatmentSentence(lease.terms).replace(/^Government payments: /, "")}
             {!govResolved.chosen || govResolved.needsReceivedVia ? (
               <>
                 {" "}
@@ -835,6 +843,18 @@ export default function LeaseDetail({
               savedEntriesByYear={savedEntriesByYear}
               onFill={handlePanelFill}
             />
+          ) : priceMethod === "tenant_average" && loaded ? (
+            // The tenant's price shows in the Tenant data panel, and
+            // there is no panel without a connection on this land.
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              No farm connection supplies the tenant{"'"}s average price for
+              this lease yet. Connect the tenant{"'"}s farm software and match
+              its fields under{" "}
+              <Link href="/farms" className="font-medium underline">
+                Farm connections
+              </Link>
+              , or choose another price method under Edit lease terms.
+            </p>
           ) : null}
           <div className="space-y-2">
             {years.map((year) => {
@@ -880,6 +900,7 @@ export default function LeaseDetail({
           leaseId={lease.id}
           computeExpected={computeExpected}
           canManageSchedule={isAdmin}
+          lease={lease}
         />
       </section>
 

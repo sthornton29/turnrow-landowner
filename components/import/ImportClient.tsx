@@ -55,6 +55,8 @@ export default function ImportClient({
   const [skipped, setSkipped] = useState<string[]>([]);
   const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  // True while a file is held over the box, so it lights up as the target.
+  const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<ImportSaveResult | null>(null);
 
@@ -156,11 +158,29 @@ export default function ImportClient({
         <span className="text-kelly-600">&rarr;</span>
       </Link>
 
-      <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-gray-300 bg-white px-4 py-8 text-center transition hover:border-kelly-500 hover:bg-kelly-50">
+      {/* Dropped files go through handleFiles, the same as chosen ones. */}
+      <label
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          handleFiles(e.dataTransfer.files);
+        }}
+        className={
+          "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-8 text-center transition hover:border-kelly-500 hover:bg-kelly-50 " +
+          (dragging ? "border-kelly-500 bg-kelly-50" : "border-gray-300 bg-white")
+        }
+      >
         <span className="text-sm font-medium text-gray-700">
           {parsing ? "Reading files..." : "Tap to choose files"}
         </span>
-        <span className="text-xs text-gray-500">.geojson, .json, .kml, .kmz, .zip</span>
+        <span className="text-xs text-gray-500">
+          Or drop files here. .geojson, .json, .kml, .kmz, .zip
+        </span>
         <input
           ref={fileInputRef}
           type="file"

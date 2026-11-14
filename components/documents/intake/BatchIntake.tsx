@@ -475,7 +475,7 @@ export default function BatchIntake({
         </div>
         <p className="mt-2 text-xs text-gray-600">
           Ready rows are checked for you. Fix anything marked Needs a look, then save. Saving stores the file, type,
-          title, and properties; open a document later and use Scan to pull its details (owners, dates, acres) with a
+          title, and properties; open a document later and use Scan this document to pull its details (owners, dates, acres) with a
           field-by-field review.
         </p>
       </div>

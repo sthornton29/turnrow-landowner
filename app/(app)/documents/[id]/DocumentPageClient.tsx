@@ -248,9 +248,6 @@ export default function DocumentPageClient({
             {docType === "fsa_156ez" ? (
               <ActionLink href="/gov-payments">{fsaFarm ? `View FSA farm ${fsaFarm.farmNumber}` : "View FSA farms"}</ActionLink>
             ) : null}
-            {doc.linked_easement_id ? (
-              <ActionLink href={`/easements/${doc.linked_easement_id}`}>View easement</ActionLink>
-            ) : null}
             {doc.produced_boundary_type && doc.produced_boundary_id ? (
               <ActionLink href={`/map?focus=${doc.produced_boundary_type}:${doc.produced_boundary_id}`}>
                 View boundary

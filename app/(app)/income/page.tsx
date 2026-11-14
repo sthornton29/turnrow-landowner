@@ -141,6 +141,9 @@ export default async function IncomePage({
       name: meta?.name ?? "Lease",
       tenant: meta ? (tenantName.get(meta.tenant_id) ?? null) : null,
       structure: lease ? STRUCTURE_LABELS[structureOf(lease)] : "Lease",
+      // A Draft lease counts as expected the same as an Active one
+      // (lib/income.ts); its row says so.
+      draft: lease?.status === "draft",
       expectedScoped: r.expected * r.scopeShare,
       receivedScoped: r.received * r.scopeShare,
       partial: r.scopeShare < 0.9999,
@@ -486,7 +489,9 @@ export default async function IncomePage({
                         {r.name}
                       </Link>
                       <p className="text-xs text-gray-500">
-                        {[r.tenant, r.structure].filter(Boolean).join(" · ")}
+                        {[r.tenant, r.structure, r.draft ? "Draft lease, counted as expected" : null]
+                          .filter(Boolean)
+                          .join(" · ")}
                         {r.partial ? " · part of this lease is outside the selected entities" : ""}
                       </p>
                     </td>

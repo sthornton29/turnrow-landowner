@@ -124,7 +124,8 @@ export default function TenantDataPanel({
       {blocksWithData.length === 0 ? (
         <p className="mt-2 text-xs text-gray-500">
           No tenant plantings are synced for this lease{"'"}s land and years
-          yet. The farm software shares the current crop year.
+          yet. The farm software shares the current crop year and the one
+          before it.
         </p>
       ) : (
         blocksWithData.map(({ year, rows }) => {

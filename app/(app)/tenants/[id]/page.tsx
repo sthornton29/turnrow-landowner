@@ -176,10 +176,18 @@ export default async function TenantDetailPage({
         <h2 className="mb-3 text-lg font-semibold text-gray-900">
           Documents (insurance certificates, W-9s)
         </h2>
+        {/* A tenant's paperwork is admin-only (anyone else's upload would
+            be refused on save), so only admins get "Add document". */}
+        {isAdmin ? null : (
+          <p className="mb-3 text-sm text-gray-500">
+            Tenant paperwork is kept by admins. Ask an admin to add a document here.
+          </p>
+        )}
         <EntityDocuments
           orgId={profile.organization_id!}
           entityType="tenant"
           entityId={tenant.id}
+          canAdd={isAdmin}
         />
       </section>
 

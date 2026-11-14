@@ -211,11 +211,15 @@ export default function PlotClient({
   document: doc,
   properties,
   parcels,
+  isAdmin = false,
 }: {
   orgId: string;
   document: DocumentRow;
   properties: PropertyGeo[];
   parcels: ParcelGeo[];
+  // A new property is an admin's to create (anyone else's would be
+  // refused on save), so only admins are offered "New property".
+  isAdmin?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const stored = (doc.extracted ?? {}) as Record<string, unknown>;
@@ -262,7 +266,7 @@ export default function PlotClient({
   ).filter((k) => MERIDIANS[k]);
 
   // Target
-  const [targetMode, setTargetMode] = useState<TargetMode>("new_property");
+  const [targetMode, setTargetMode] = useState<TargetMode>(isAdmin ? "new_property" : "new_parcel");
   // The target starts on the document's OWN property (or its parcel's
   // property), never the first name in the list: an alphabetical
   // default once pointed a Courtland deed at a property near Trinity,
@@ -1535,7 +1539,9 @@ export default function PlotClient({
                       ["replace_property", "Replace property boundary"],
                       ["replace_parcel", "Replace parcel boundary"],
                     ] as Array<[TargetMode, string]>
-                  ).map(([m, label]) => (
+                  )
+                    .filter(([m]) => isAdmin || m !== "new_property")
+                    .map(([m, label]) => (
                     <button
                       key={m}
                       type="button"
@@ -1551,6 +1557,11 @@ export default function PlotClient({
                     </button>
                   ))}
                 </div>
+                {!isAdmin && properties.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-amber-800">
+                    There is no property to save this boundary on yet. An admin has to create the property first.
+                  </p>
+                ) : null}
               </div>
 
               {targetMode === "new_property" ? (
