@@ -254,7 +254,7 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     if (e.geom_geojson && e.width_ft != null) {
       rows.push(["Width", `${formatNumber(e.width_ft)} ft (informational)`]);
     }
-    if (e.expiration_date) rows.push(["Expires", e.expiration_date]);
+    if (e.expiration_date) rows.push(["Expires", formatDate(e.expiration_date)]);
     if (e.elevation_ft != null) rows.push(["Flowage elevation", `${formatNumber(e.elevation_ft)} ft`]);
     push("Program", e.program);
     push("Restrictions", e.restrictions);
@@ -266,8 +266,8 @@ function detailRows(entityType: EntityType, row: AnyGeoRow): Array<[string, stri
     const kind = issueGeometryKind(i.geom_geojson);
     if (kind) rows.push(["Marked as", GEOMETRY_KIND_LABELS[kind]]);
     if (i.acres !== null && i.acres !== undefined) rows.push(["Area", `${formatAcres(i.acres)} acres`]);
-    rows.push(["Noted", new Date(i.created_at).toLocaleDateString()]);
-    if (i.resolved_at) rows.push(["Resolved", new Date(i.resolved_at).toLocaleDateString()]);
+    rows.push(["Noted", formatDate(i.created_at)]);
+    if (i.resolved_at) rows.push(["Resolved", formatDate(i.resolved_at)]);
   } else if (entityType === "asset") {
     const a = row as AssetGeo;
     push("Type", ASSET_TYPES[a.asset_type]?.label ?? a.asset_type);

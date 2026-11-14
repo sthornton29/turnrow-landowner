@@ -1047,7 +1047,7 @@ export default function TaxStatusClient({
                           ["Authority", s.authority_name],
                           ["Taxpayer as printed", s.taxpayer_name_printed],
                           ["C/O", s.care_of_printed],
-                          ["Delinquent date", s.delinquent_date],
+                          ["Delinquent date", formatDate(s.delinquent_date)],
                           ["Entity evidence", s.entity_evidence],
                           ["Notes", s.notes],
                         ]

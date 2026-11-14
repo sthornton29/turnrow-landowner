@@ -16,7 +16,7 @@ import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatAcres } from "@/lib/format";
+import { formatAcres, formatDate } from "@/lib/format";
 import {
   approxAcres,
   bboxOf,
@@ -3313,7 +3313,7 @@ export default function MapView({
       }
     }
     setPrintTitle(title);
-    setPrintSubtitle(new Date().toLocaleDateString());
+    setPrintSubtitle(formatDate(new Date()));
     setPrintError(null);
     // Item exclusions are per print session, never persisted.
     setPrintExcluded(new Set());
@@ -3497,7 +3497,7 @@ export default function MapView({
     const label = orgName?.trim() || "Turnrow";
     const text = serializeExport(exportFeatures, exportFormat, {
       documentName: `${label} boundaries`,
-      description: `Exported from Turnrow Landowner on ${new Date().toLocaleDateString()}`,
+      description: `Exported from Turnrow Landowner on ${formatDate(new Date())}`,
     });
     downloadTextFile(
       exportFileName(`${fileSlug(orgName)}-boundaries`, exportFormat),

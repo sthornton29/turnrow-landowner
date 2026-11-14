@@ -212,7 +212,7 @@ export default function IncomeRecordsClient({
               {rows.map((r) => (
                 <tr key={r.id} className={`border-t border-gray-100 align-top ${busy === r.id ? "opacity-50" : ""}`}>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-900">
-                    {r.received_date ?? r.year}
+                    {r.received_date ? formatDate(r.received_date) : r.year}
                     {r.period && r.period !== r.received_date && r.period !== String(r.year) ? (
                       <span className="block text-xs text-gray-500">{r.period}</span>
                     ) : null}

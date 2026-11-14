@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { formatAcres } from "@/lib/format";
+import { formatAcres, formatDate } from "@/lib/format";
 
 // A tapped parcel from the Neighbors overlay: public county records,
 // rendered live and never saved. The two actions hand off to the
@@ -87,7 +87,7 @@ export default function NeighborPanel({
       </div>
       <p className="mt-3 text-[11px] text-gray-400">
         Public records via {service ? `${service.county} County, ${service.state} GIS` : "the county GIS"}
-        {fetchedAt ? `, fetched ${fetchedAt.toLocaleDateString()}` : ""}. Not
+        {fetchedAt ? `, fetched ${formatDate(fetchedAt)}` : ""}. Not
         saved to your records.
       </p>
     </div>

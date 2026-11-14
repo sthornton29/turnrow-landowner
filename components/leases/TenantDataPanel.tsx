@@ -9,7 +9,7 @@
 // value; replacing takes the explicit per-cell action.
 
 import { matchCrop } from "@/lib/crops";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { formatAcres, formatDate, formatDateTime, formatDollars, formatNumber } from "@/lib/format";
 import type { CropAssumption } from "@/lib/leaseLogic";
 import type { TenantCropRow } from "@/lib/tenantData";
 
@@ -116,7 +116,7 @@ export default function TenantDataPanel({
         >
           {scopeNote ?? `from ${connectionLabel}`}
           {lastSyncedAt
-            ? `, last synced ${new Date(lastSyncedAt).toLocaleString()}`
+            ? `, last synced ${formatDateTime(lastSyncedAt)}`
             : ""}
         </span>
       </div>
@@ -267,7 +267,7 @@ export default function TenantDataPanel({
                                 </span>
                                 {priceValue.asOf ? (
                                   <span className="text-[10px] text-gray-500">
-                                    as of {new Date(priceValue.asOf).toLocaleDateString()}
+                                    as of {formatDate(priceValue.asOf)}
                                   </span>
                                 ) : null}
                                 {canUse && priceConflict !== null ? (

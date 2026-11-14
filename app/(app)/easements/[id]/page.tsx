@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { formatAcres, formatNumber } from "@/lib/format";
+import { formatAcres, formatDate, formatNumber } from "@/lib/format";
 import {
   EASEMENT_RELATIONSHIP_LABELS,
   easementShowsEmergencyPhoneProminently,
@@ -118,7 +118,7 @@ export default async function EasementSummaryPage({
             ? ["Width", `${formatNumber(easement.width_ft)} ft (informational)`]
             : ["Width", null],
           ["Recorded ref", easement.recorded_ref],
-          ["Expires", easement.expiration_date ?? "Permanent / indefinite"],
+          ["Expires", easement.expiration_date ? formatDate(easement.expiration_date) : "Permanent / indefinite"],
           [
             "Flowage elevation",
             easement.elevation_ft != null ? `${formatNumber(easement.elevation_ft)} ft` : null,

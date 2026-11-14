@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatAcres, formatDollars, formatNumber } from "@/lib/format";
+import { formatAcres, formatDate, formatDollars, formatNumber } from "@/lib/format";
 import {
   PAYMENT_STATUS_LABELS,
   STATUS_BADGE_CLASSES,
@@ -45,8 +45,7 @@ function formatFactor(f: Factor): string {
 
 function asOfText(s: ValueSource | null): string | null {
   if (!s?.as_of) return null;
-  const d = new Date(s.as_of);
-  return Number.isNaN(d.getTime()) ? s.as_of : d.toLocaleDateString();
+  return formatDate(s.as_of) || s.as_of;
 }
 
 // ---------------------------------------------------------------- source chips
@@ -435,7 +434,7 @@ export default function LeaseBreakdown({
               <tbody>
                 {x.schedule.map((s) => (
                   <tr key={s.id} className="border-b border-gray-100 last:border-0">
-                    <td className="px-4 py-2 tabular-nums">{new Date(s.dueDate + "T00:00:00").toLocaleDateString()}</td>
+                    <td className="px-4 py-2 tabular-nums">{formatDate(s.dueDate)}</td>
                     <td className="px-4 py-2">{s.label}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{formatDollars(s.expected)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{formatDollars(s.received)}</td>
@@ -467,7 +466,7 @@ export default function LeaseBreakdown({
               {x.unscheduledPayments.map((p, i) => (
                 <li key={i} className="flex justify-between gap-3">
                   <span className="text-gray-700">
-                    {new Date(p.date + "T00:00:00").toLocaleDateString()}
+                    {formatDate(p.date)}
                     {p.memo ? <span className="text-gray-500"> · {p.memo}</span> : null}
                   </span>
                   <span className="tabular-nums text-gray-900">{formatDollars(p.amount)}</span>

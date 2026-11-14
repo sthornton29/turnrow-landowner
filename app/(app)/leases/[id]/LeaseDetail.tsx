@@ -977,7 +977,7 @@ function sourceTagLine(e: CropAssumption): string | null {
     if (s && e[field] != null) {
       parts.push(
         `${names[field]}: ${VALUE_SOURCE_LABELS[s.kind]}` +
-          (s.as_of ? ` as of ${new Date(s.as_of).toLocaleDateString()}` : "")
+          (s.as_of ? ` as of ${formatDate(s.as_of)}` : "")
       );
     }
   }

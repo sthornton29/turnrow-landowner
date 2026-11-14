@@ -58,11 +58,11 @@ export default async function CostShareAwardPage({ params }: { params: Promise<{
           ["Agency", a.agency],
           ["Contract number", a.contract_number],
           ["Status", COST_SHARE_STATUS_LABELS[a.status] ?? a.status],
-          ["Signed", a.signed_date],
-          ["Ends", a.end_date],
+          ["Signed", formatDate(a.signed_date) || null],
+          ["Ends", formatDate(a.end_date) || null],
           ["Acres", a.acres != null ? formatAcres(a.acres) : null],
           ["Practices", a.practices],
-          ["Keep practices up until", a.obligations_until],
+          ["Keep practices up until", formatDate(a.obligations_until) || null],
           ["Notes", a.notes],
         ]}
       />

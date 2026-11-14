@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { formatDate } from "@/lib/format";
 import {
   IDENTIFIER_KINDS,
   IDENTIFIER_KIND_LABELS,
@@ -149,7 +150,7 @@ export default function ParcelIdentifiers({
             <span className="text-gray-500">{r.kind === "other" ? r.label || "Other" : IDENTIFIER_KIND_LABELS[r.kind as IdentifierKind] ?? r.kind}</span>
             <span className="font-medium tabular-nums text-gray-900">{r.value}</span>
             <span className="text-xs text-gray-400">
-              {SOURCE_LABEL[r.source] ?? r.source}, seen {new Date(r.last_seen_at).toLocaleDateString()}
+              {SOURCE_LABEL[r.source] ?? r.source}, seen {formatDate(r.last_seen_at)}
             </span>
             {r.kind !== "parcel_number" ? (
               <button onClick={() => remove(r.id)} aria-label="Remove" className="ml-auto text-xs text-gray-400 hover:text-red-600">

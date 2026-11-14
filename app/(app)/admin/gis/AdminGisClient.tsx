@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { formatDate } from "@/lib/format";
 import { identifierFieldsOf, type CountyGisService, type IdentifierFieldMapping, type LayerField } from "@/lib/gis";
 import { IDENTIFIER_KINDS, IDENTIFIER_KIND_LABELS, type IdentifierKind } from "@/lib/taxIdentifiers";
 
@@ -554,7 +555,7 @@ export default function AdminGisClient({
               </span>
               {s.last_verified_at ? (
                 <span className="text-xs text-gray-400">
-                  verified {s.last_verified_at.slice(0, 10)}
+                  verified {formatDate(s.last_verified_at)}
                 </span>
               ) : null}
               {s.extent_xmin === null ? (

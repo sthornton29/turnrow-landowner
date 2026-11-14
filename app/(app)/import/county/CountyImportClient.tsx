@@ -5,7 +5,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyDbError } from "@/lib/dbErrors";
-import { formatAcres, formatNumber, plural, todayISO } from "@/lib/format";
+import { formatAcres, formatDate, formatNumber, plural, todayISO } from "@/lib/format";
 import { toMultiPolygon } from "@/lib/geo/normalize";
 import { normalizeParcelNumber } from "@/lib/tax";
 import { harvestIdentifiers } from "@/lib/taxIdentifiers";
@@ -728,7 +728,7 @@ export default function CountyImportClient({
       setNewPropertyName("");
     }
 
-    const source = `Imported from ${service.display_name} county records on ${todayISO()}`;
+    const source = `Imported from ${service.display_name} county records on ${formatDate(todayISO())}`;
     // Every identifier the county's record carries (PPIN, folio, ...)
     // lands in the parcel's identifier store so tax statements match on
     // the county's own numbers. The parcel number itself mirrors by trigger.

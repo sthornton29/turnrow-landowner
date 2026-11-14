@@ -5,7 +5,7 @@
 // (amber until saved); nothing auto-saves.
 
 import { useCallback, useEffect, useState } from "react";
-import { formatDollars } from "@/lib/format";
+import { formatDate, formatDollars } from "@/lib/format";
 import type { RmaCachedData } from "@/lib/rma";
 import { resolveBenchmark, windowState } from "@/lib/rma";
 import { roundPriceForUse, type TenantPriceCard } from "@/lib/leasePricing";
@@ -79,7 +79,7 @@ export function TenantPriceCardView({
       </span>
       {card.asOf ? (
         <span className="text-xs text-gray-500">
-          as of {new Date(card.asOf).toLocaleDateString()}
+          as of {formatDate(card.asOf)}
         </span>
       ) : null}
       {card.isFinal ? (
