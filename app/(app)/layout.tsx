@@ -11,8 +11,8 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-dvh flex-col bg-gray-50">
       <AppHeader />
-      {/* pb-16 leaves room for the mobile bottom tab bar */}
-      <main className="flex-1 pb-16 md:pb-0">{children}</main>
+      {/* Leaves room for the mobile bottom tab bar (0 on desktop) */}
+      <main className="flex-1 pb-(--nav-h)">{children}</main>
       <MobileNav />
     </div>
   );

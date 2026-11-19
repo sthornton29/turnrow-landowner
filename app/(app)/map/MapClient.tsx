@@ -7,7 +7,7 @@ import type { SelectedFeature } from "@/components/map/types";
 const MapView = dynamic(() => import("@/components/map/MapView"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[calc(100dvh-3.5rem-4rem)] items-center justify-center text-sm text-gray-500 md:h-[calc(100dvh-3.5rem)]">
+    <div className="fixed inset-x-0 top-(--header-h) bottom-(--nav-h) flex items-center justify-center text-sm text-gray-500">
       Loading map...
     </div>
   ),

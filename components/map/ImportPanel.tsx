@@ -72,7 +72,7 @@ export default function ImportPanel({
     "w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-kelly-500 focus:outline-none";
 
   return (
-    <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-80 md:rounded-xl md:border">
+    <div className="pointer-events-auto fixed inset-x-0 bottom-(--nav-h) z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-80 md:rounded-xl md:border">
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Import from file</h2>

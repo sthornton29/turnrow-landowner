@@ -16,6 +16,23 @@
   --color-pine-900: #14532d;
 }
 
+/*
+ * Phone layout sizes. The page runs edge to edge (viewport-fit=cover in
+ * app/layout.tsx), so the bottom tab bar adds the iPhone's home-indicator
+ * strip below its 4rem of buttons. Anything that sits on top of the tab
+ * bar (bottom sheets, the map, sticky action bars) uses --nav-h so it
+ * clears the bar exactly on every phone.
+ */
+:root {
+  --header-h: 3.5rem;
+  --nav-h: calc(4rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 48rem) {
+  :root {
+    --nav-h: 0px;
+  }
+}
+
 html,
 body {
   height: 100%;
@@ -23,6 +40,24 @@ body {
 
 body {
   @apply bg-white text-gray-900 antialiased;
+  /* Landscape iPhones: keep content clear of the notch. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  /* Stop iOS from enlarging text on rotate. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Taps feel immediate on phones (no grey flash, no double-tap delay). */
+a,
+button,
+[role="button"],
+input,
+select,
+textarea,
+label {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 /* Mapbox popups/controls inherit odd fonts otherwise */

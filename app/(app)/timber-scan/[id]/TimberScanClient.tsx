@@ -941,7 +941,7 @@ export default function TimberScanClient({
 
           {/* Save bar */}
           {accepted.length > 0 ? (
-            <div className="sticky bottom-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-kelly-100 bg-kelly-50 p-3 shadow-md md:bottom-4">
+            <div className="sticky bottom-(--nav-h) z-20 flex flex-wrap items-center gap-3 rounded-xl border border-kelly-100 bg-kelly-50 p-3 shadow-md md:bottom-4">
               <span className="text-sm font-medium text-pine-900">
                 {formatNumber(accepted.length)} stand
                 {accepted.length === 1 ? "" : "s"} ready (

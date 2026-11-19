@@ -13,19 +13,21 @@ export default async function AskPage({
 }) {
   await requireOrg();
   const { q } = await searchParams;
+  // Pinned between the header and the tab bar (not sized from the screen
+  // height, which Chrome on iPhone reports wrongly) so the question box
+  // always sits just above the tabs.
   return (
-    <div
-      className="mx-auto flex max-w-3xl flex-col p-4 md:p-6"
-      style={{ height: "calc(100dvh - 8.5rem)" }}
-    >
-      <h1 className="text-2xl font-semibold text-gray-900">Ask about your land</h1>
-      <p className="mb-3 text-sm text-gray-500">
-        Questions about your own acres, leases, taxes, timber, easements, and
-        payments, answered from your records only. For how the app works, use
-        the Help Center.
-      </p>
-      <div className="min-h-0 flex-1 rounded-xl border border-gray-200 bg-white p-4">
-        <AssistantChat autoFocus initialQuestion={q?.trim() || null} />
+    <div className="fixed inset-x-0 top-(--header-h) bottom-(--nav-h) flex">
+      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col p-3 md:p-6">
+        <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">Ask about your land</h1>
+        <p className="mb-3 text-sm text-gray-500">
+          Questions about your own acres, leases, taxes, timber, easements, and
+          payments, answered from your records only.
+          <span className="hidden md:inline"> For how the app works, use the Help Center.</span>
+        </p>
+        <div className="min-h-0 flex-1 rounded-xl border border-gray-200 bg-white p-3 md:p-4">
+          <AssistantChat autoFocus initialQuestion={q?.trim() || null} />
+        </div>
       </div>
     </div>
   );

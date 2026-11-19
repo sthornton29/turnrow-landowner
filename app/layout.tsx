@@ -31,6 +31,10 @@ export const viewport: Viewport = {
   // content is sized responsively so page zoom is not needed.
   maximumScale: 1,
   userScalable: false,
+  // Draw edge to edge on iPhones so the bottom tab bar runs to the bottom
+  // of the screen; the bar pads itself by the home-indicator strip
+  // (env(safe-area-inset-bottom), which is 0 without this setting).
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

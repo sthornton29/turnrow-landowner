@@ -65,7 +65,7 @@ export default function NewLineDialog({
   const roadNeedsProperty = kind === "road" && properties.length === 0;
 
   return (
-    <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:w-80 md:rounded-xl md:border">
+    <div className="pointer-events-auto fixed inset-x-0 bottom-(--nav-h) z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-4 md:top-4 md:bottom-auto md:w-80 md:rounded-xl md:border">
       <h2 className="text-lg font-semibold text-gray-900">Save {KIND_LABEL[kind]}</h2>
 
       <form action={handleSubmit} className="mt-3 space-y-3">

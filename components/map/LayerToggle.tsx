@@ -55,7 +55,7 @@ export default function LayerToggle({
   const row = (key: keyof LayerVisibility, label: string, accent = "accent-kelly-500") => (
     <label
       key={key}
-      className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-0.5 text-[13px] text-gray-800 hover:bg-gray-50"
+      className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-1.5 text-[13px] md:py-0.5 text-gray-800 hover:bg-gray-50"
     >
       <input
         type="checkbox"
@@ -70,7 +70,7 @@ export default function LayerToggle({
     <label
       key={key}
       title={title}
-      className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-0.5 text-[13px] text-gray-800 hover:bg-gray-50"
+      className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-1.5 text-[13px] md:py-0.5 text-gray-800 hover:bg-gray-50"
     >
       <input
         type="checkbox"
@@ -100,7 +100,7 @@ export default function LayerToggle({
         "Show or hide every other name label: ag fields, pastures, timber, wetlands, pollinator habitats, cemeteries, roads, easements, parcels, assets, maintenance issues"
       )}
       <div className="mt-1 border-t border-gray-200 pt-1">
-        <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-0.5 text-[13px] text-gray-800 hover:bg-gray-50">
+        <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-1.5 text-[13px] md:py-0.5 text-gray-800 hover:bg-gray-50">
           <input
             type="checkbox"
             checked={neighborsOn}

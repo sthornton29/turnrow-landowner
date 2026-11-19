@@ -415,7 +415,7 @@ export default function AddPicker({
       {/* Phone: a full-height sheet (below a top strip, above the nav).
           Desktop: a centered modal wide enough for 3 columns, so the
           whole set is visible with minimal scrolling. */}
-      <div className="absolute inset-x-0 bottom-16 top-12 overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-3 shadow-2xl md:inset-auto md:left-1/2 md:top-1/2 md:max-h-[85vh] md:w-[42rem] md:max-w-[calc(100vw-2rem)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-xl md:border md:p-5">
+      <div className="absolute inset-x-0 bottom-(--nav-h) top-12 overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-3 shadow-2xl md:inset-auto md:left-1/2 md:top-1/2 md:max-h-[85vh] md:w-[42rem] md:max-w-[calc(100vw-2rem)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-xl md:border md:p-5">
         <div className="flex items-start justify-between gap-2">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{heading}</h2>

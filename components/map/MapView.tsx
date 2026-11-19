@@ -1881,10 +1881,23 @@ export default function MapView({
     const g = geomOf(row);
     const box = g ? fitBoundsOf([g]) : null;
     if (box) {
+      // On a phone the details sheet covers the lower half of the map, so
+      // the shape is fitted into the part still showing above it.
+      const phone = window.matchMedia("(max-width: 767px)").matches;
+      const sheet = phone ? Math.round(map.getContainer().clientHeight * 0.5) : 0;
       if (g?.type === "Point") {
-        map.flyTo({ center: box.slice(0, 2) as [number, number], zoom: 16 });
+        map.flyTo({
+          center: box.slice(0, 2) as [number, number],
+          zoom: 16,
+          // offset, not padding: padding passed to flyTo stays on the map
+          // afterward and would shift every later move.
+          offset: [0, -Math.round(sheet / 2)],
+        });
       } else {
-        map.fitBounds(box, { padding: 80, maxZoom: 16 });
+        map.fitBounds(box, {
+          padding: phone ? { top: 64, left: 32, right: 32, bottom: sheet + 24 } : 80,
+          maxZoom: 16,
+        });
       }
     }
   }, [mapLoaded, loading, focus, rowLists]);
@@ -3830,7 +3843,11 @@ export default function MapView({
       className={
         fullscreen
           ? "fixed inset-0 z-50 bg-black"
-          : "relative h-[calc(100dvh-3.5rem-4rem)] md:h-[calc(100dvh-3.5rem)]"
+          : // Pinned between the header and the tab bar rather than sized
+            // from the screen height: Chrome on iPhone reports a screen
+            // height that does not match what is visible, which left a
+            // blank band between the map and the tabs.
+            "fixed top-(--header-h) bottom-(--nav-h) left-[env(safe-area-inset-left,0px)] right-[env(safe-area-inset-right,0px)]"
       }
       onDragOver={(e) => {
         if (mode !== "view" || !dragHasFiles(e)) return;
@@ -3968,7 +3985,7 @@ export default function MapView({
 
       {/* Print setup panel */}
       {printOpen ? (
-        <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[62%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-72 md:rounded-xl md:border">
+        <div className="pointer-events-auto fixed inset-x-0 bottom-(--nav-h) z-30 max-h-[62%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-72 md:rounded-xl md:border">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">Print map</h2>
             <button
@@ -4168,7 +4185,7 @@ export default function MapView({
       {/* Export setup panel: what the map shows, as a KML or GeoJSON
           file. Same right-hand slot as the print setup. */}
       {exportOpen ? (
-        <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[62%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-72 md:rounded-xl md:border">
+        <div className="pointer-events-auto fixed inset-x-0 bottom-(--nav-h) z-30 max-h-[62%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:right-3 md:top-3 md:bottom-auto md:max-h-[calc(100%-2rem)] md:w-72 md:rounded-xl md:border">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">Export boundaries</h2>
             <button
@@ -4959,7 +4976,7 @@ export default function MapView({
           persisted exclusion set. No tap-to-ghost here: tapping the
           live map keeps meaning "open the thing". */}
       {filterOpen && !printOpen && !exportOpen && !importOpen ? (
-        <div className="pointer-events-auto fixed inset-x-0 bottom-16 z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:left-[13rem] md:top-3 md:bottom-auto md:max-h-[calc(100%-1.5rem)] md:w-80 md:rounded-xl md:border">
+        <div className="pointer-events-auto fixed inset-x-0 bottom-(--nav-h) z-30 max-h-[70%] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white p-4 shadow-2xl md:absolute md:inset-auto md:left-[13rem] md:top-3 md:bottom-auto md:max-h-[calc(100%-1.5rem)] md:w-80 md:rounded-xl md:border">
           <div className="flex items-start justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Filter the map</h2>
