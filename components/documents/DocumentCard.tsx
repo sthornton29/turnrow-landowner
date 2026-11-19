@@ -95,7 +95,7 @@ export default function DocumentCard({
             {error ? <p className="mt-0.5 text-xs text-red-600">{error}</p> : null}
           </div>
         ) : (
-          <p className="truncate text-sm font-medium text-gray-900">{title}</p>
+          <p className="line-clamp-2 text-sm font-medium text-gray-900 md:line-clamp-1">{title}</p>
         )}
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
           <DocTypeChip docType={doc.doc_type} />

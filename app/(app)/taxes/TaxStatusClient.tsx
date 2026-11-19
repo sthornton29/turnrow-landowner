@@ -293,6 +293,19 @@ export default function TaxStatusClient({
       .filter((r): r is NonNullable<typeof r> => r !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entities, entityFilter, parcels, yearLines, paidByStatement, linesByStatement, statements]);
+  // Each rollup row formatted once, for both the table (md and up) and
+  // the phone list below md, so the two can never show different figures.
+  const rollupRows = entityRollup.map((r) => ({
+    key: r.key,
+    name: r.name,
+    nameClass: r.key === NO_ENTITY ? "text-gray-500" : "text-gray-900",
+    coverage: `${formatNumber(r.covered)} of ${formatNumber(r.parcels)}`,
+    coverageClass: r.covered < r.parcels ? "font-medium text-amber-700" : "",
+    due: formatDollars(r.due),
+    paid: formatDollars(r.paid),
+    outstanding: formatDollars(r.outstanding),
+    outstandingClass: r.outstanding > 0.005 ? "font-medium text-red-700" : "",
+  }));
 
   // Midnight of today's Central date: the delinquent date itself counts
   // as delinquent, and the server and the browser agree on which day it is.
@@ -803,10 +816,11 @@ export default function TaxStatusClient({
         </div>
       </details>
 
-      {entityRollup.length > 0 ? (
+      {rollupRows.length > 0 ? (
         <section className="rounded-xl border border-gray-200 bg-white">
           <h2 className="border-b border-gray-200 px-4 py-3 text-base font-semibold text-gray-900">{year} by entity</h2>
-          <div className="overflow-x-auto">
+          {/* md and up: the table. */}
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
@@ -818,31 +832,64 @@ export default function TaxStatusClient({
                 </tr>
               </thead>
               <tbody>
-                {entityRollup.map((r) => (
-                  <tr key={r.key} className="border-b border-gray-100 last:border-0">
+                {rollupRows.map((row) => (
+                  <tr key={row.key} className="border-b border-gray-100 last:border-0">
                     <td className="px-4 py-2">
                       <button
-                        onClick={() => setEntityFilter(r.key)}
-                        className={"font-medium hover:underline " + (r.key === NO_ENTITY ? "text-gray-500" : "text-gray-900")}
+                        onClick={() => setEntityFilter(row.key)}
+                        className={"font-medium hover:underline " + row.nameClass}
                       >
-                        {r.name}
+                        {row.name}
                       </button>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">
-                      <span className={r.covered < r.parcels ? "font-medium text-amber-700" : ""}>
-                        {formatNumber(r.covered)} of {formatNumber(r.parcels)}
-                      </span>
+                      <span className={row.coverageClass}>{row.coverage}</span>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{formatDollars(r.due)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{formatDollars(r.paid)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{row.due}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{row.paid}</td>
                     <td className="px-4 py-2 text-right tabular-nums">
-                      <span className={r.outstanding > 0.005 ? "font-medium text-red-700" : ""}>{formatDollars(r.outstanding)}</span>
+                      <span className={row.outstandingClass}>{row.outstanding}</span>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {/* Phones: one row per entity, the name on its own line and the
+              same figures as label/value pairs, so nothing scrolls
+              sideways. Tapping a row shows that entity only, as the name
+              does in the table. */}
+          <ul className="divide-y divide-gray-100 overflow-hidden rounded-b-xl text-sm md:hidden">
+            {rollupRows.map((row) => (
+              <li key={row.key}>
+                <button
+                  type="button"
+                  onClick={() => setEntityFilter(row.key)}
+                  className="block w-full px-4 py-3 text-left hover:bg-gray-50"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={"min-w-0 flex-1 truncate font-medium " + row.nameClass}>{row.name}</span>
+                    <span aria-hidden="true" className="text-gray-400">
+                      &#8250;
+                    </span>
+                  </span>
+                  <span className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {[
+                      { label: "Parcels covered", value: row.coverage, cls: row.coverageClass },
+                      { label: "Due", value: row.due, cls: "" },
+                      { label: "Paid", value: row.paid, cls: "" },
+                      { label: "Outstanding", value: row.outstanding, cls: row.outstandingClass },
+                    ].map((f) => (
+                      <span key={f.label} className="block min-w-0">
+                        <span className="block text-xs text-gray-500">{f.label}</span>
+                        <span className={"block tabular-nums " + f.cls}>{f.value}</span>
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
 

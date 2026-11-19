@@ -22,6 +22,7 @@ import { cropAssumptions } from "@/lib/leaseLogic";
 import { STRUCTURE_LABELS, structureOf } from "@/lib/leaseExplain";
 import RentUpload from "@/components/payments/RentUpload";
 import EntityFilterChips from "@/components/entities/EntityFilterChips";
+import ChipRow from "@/components/layout/ChipRow";
 
 export const metadata = { title: "Income" };
 
@@ -242,11 +243,17 @@ export default async function IncomePage({
         >
           Income records
         </Link>
-        <div className="ml-auto flex flex-wrap justify-end gap-1">
+        {/* 21 years wrapped into five rows on a phone; there they are one
+            swipeable line, newest last, with the chosen year in view. */}
+        <ChipRow
+          activeKey={String(selectedYear)}
+          className="w-[calc(100%+2rem)] gap-1 md:ml-auto md:w-auto md:justify-end"
+        >
           {years.map((y) => (
             <Link
               key={y}
               href={`/income?year=${y}${filtering ? `&entity=${selectedKeys.join(",")}` : ""}`}
+              data-active={y === selectedYear ? "true" : undefined}
               className={
                 "rounded-lg px-3 py-1.5 text-sm font-medium " +
                 (y === selectedYear
@@ -257,7 +264,7 @@ export default async function IncomePage({
               {y}
             </Link>
           ))}
-        </div>
+        </ChipRow>
       </div>
 
       {hasEntities ? (
@@ -271,8 +278,8 @@ export default async function IncomePage({
 
       {/* Expected vs received by year */}
       <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="mb-3 flex items-center gap-4">
-          <h2 className="text-base font-semibold text-gray-900">
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <h2 className="w-full text-base font-semibold text-gray-900 md:w-auto">
             Expected vs received by year
           </h2>
           <span className="flex items-center gap-1.5 text-xs text-gray-600">
@@ -288,8 +295,14 @@ export default async function IncomePage({
             Taxes paid
           </span>
         </div>
-        <div className="flex items-end gap-6 overflow-x-auto pb-1" style={{ height: 180 }}>
-          {chartYears.map((c) => (
+        {/* Laid out right to left (newest first in the markup) so a
+            screen too narrow for ten years opens on the latest ones,
+            with older years a swipe to the left. */}
+        <div
+          className="flex flex-row-reverse items-end gap-6 overflow-x-auto pb-1"
+          style={{ height: 180 }}
+        >
+          {[...chartYears].reverse().map((c) => (
             <div key={c.year} className="flex h-full min-w-28 flex-col justify-end">
               <div className="flex h-[calc(100%-1.5rem)] items-end justify-center gap-[2px]">
                 <div className="flex w-8 flex-col items-center justify-end self-stretch">

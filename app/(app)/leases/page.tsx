@@ -39,7 +39,7 @@ export default async function LeasesPage() {
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <SectionTabs active="/leases" />
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-gray-600">
           Agricultural and hunting leases. Income shows on the{" "}
           <Link href="/income" className="font-medium text-kelly-700 hover:underline">
@@ -50,7 +50,7 @@ export default async function LeasesPage() {
         {isAdmin ? (
           <Link
             href="/leases/new"
-            className="rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
+            className="shrink-0 whitespace-nowrap rounded-lg bg-kelly-500 px-4 py-2 text-sm font-semibold text-white hover:bg-kelly-600"
           >
             + New lease
           </Link>

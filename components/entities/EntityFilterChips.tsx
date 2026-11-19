@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import ChipRow from "@/components/layout/ChipRow";
 import { NO_ENTITY } from "@/lib/entities";
 // (parseEntityParam lives in lib/entities.ts so server pages can parse
 // the same URL format this component writes.)
@@ -90,8 +91,9 @@ export default function EntityFilterChips({
     <button
       key={key || "all"}
       onClick={onClick}
+      data-active={active ? "true" : undefined}
       className={
-        "rounded-full border px-3 py-1 text-sm font-medium " +
+        "rounded-full border px-3 py-1.5 text-sm font-medium md:py-1 " +
         (active
           ? "border-kelly-500 bg-kelly-50 text-pine-900"
           : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")
@@ -101,8 +103,9 @@ export default function EntityFilterChips({
     </button>
   );
 
+  // One swipeable line on a phone (it wrapped to four rows there).
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <ChipRow activeKey={selected.join(",")}>
       {chip("", "All entities", selectedSet.size === 0, () => {
         persist([]);
         router.push(hrefFor([]));
@@ -111,6 +114,6 @@ export default function EntityFilterChips({
         chip(e.id, e.name, selectedSet.has(e.id), () => toggle(e.id))
       )}
       {chip(NO_ENTITY, "No entity", selectedSet.has(NO_ENTITY), () => toggle(NO_ENTITY))}
-    </div>
+    </ChipRow>
   );
 }

@@ -599,11 +599,13 @@ export default async function DashboardPage({
         />
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Three across on a phone (two across took six screen-heights of
+          tiles); four across from tablet width up, as before. */}
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3">
         {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="text-2xl font-semibold tabular-nums text-gray-900">{s.value}</p>
-            <p className="mt-0.5 text-sm text-gray-500">{s.label}</p>
+          <div key={s.label} className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 sm:p-4">
+            <p className="text-lg font-semibold tabular-nums text-gray-900 sm:text-2xl">{s.value}</p>
+            <p className="mt-0.5 text-xs leading-snug text-gray-500 sm:text-sm">{s.label}</p>
           </div>
         ))}
       </div>

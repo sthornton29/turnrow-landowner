@@ -315,6 +315,70 @@ export default function PaymentsSection({
     );
   }
 
+  // A schedule row's controls: the payment form while recording against
+  // it, else Record payment and (for schedule managers) Delete. One
+  // function for the table and the phone cards, so the handlers and the
+  // disabled rule are written once; only the sizing differs (on a phone
+  // each button is at least 40px tall to tap).
+  function rowActions(e: ExpectedRow, received: number, phone: boolean) {
+    if (recordingFor === e.id) return paymentForm(e.id, Math.max(e.expected_amount - received, 0));
+    return (
+      <span className={phone ? "mt-1 flex items-center justify-between gap-2" : "flex items-center gap-2"}>
+        <button
+          onClick={() => setRecordingFor(e.id)}
+          className={
+            phone
+              ? "inline-flex min-h-10 items-center text-sm font-medium text-kelly-700 hover:underline"
+              : "text-sm font-medium text-kelly-700 hover:underline"
+          }
+        >
+          Record payment
+        </button>
+        {canManageSchedule ? (
+          <button
+            onClick={() => deleteExpected(e)}
+            disabled={busy}
+            className={
+              phone
+                ? "inline-flex min-h-10 items-center px-3 text-sm font-medium text-red-600 hover:underline disabled:opacity-60"
+                : "text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+            }
+            title="Remove this expected payment; recorded payments stay"
+          >
+            Delete
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+
+  // Each schedule row formatted once, for both the table (md and up) and
+  // the phone cards below md, so the two can never show different figures.
+  const scheduleRows = expected.map((e) => {
+    const received = receivedByExpected.get(e.id) ?? 0;
+    const status = paymentStatus(e.expected_amount, received, e.due_date, today);
+    const lapsed = lease ? isLapsedExpectedRow(lease, e, received) : false;
+    return {
+      e,
+      received,
+      due: formatDate(e.due_date),
+      expectedText: formatDollars(e.expected_amount),
+      receivedText: received > 0 ? formatDollars(received) : "",
+      badge: lapsed ? (
+        <span
+          className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+          title="This row is for a year after the lease ended, so it is not counted as owed."
+        >
+          No longer expected
+        </span>
+      ) : (
+        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}>
+          {PAYMENT_STATUS_LABELS[status]}
+        </span>
+      ),
+    };
+  });
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -355,82 +419,72 @@ export default function PaymentsSection({
                 : "No expected payments yet. Complete the terms and press Generate expected payments."))}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
-                <th className="px-3 py-2">Due</th>
-                <th className="px-3 py-2">Label</th>
-                <th className="px-3 py-2 text-right">Expected</th>
-                <th className="px-3 py-2 text-right">Received</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {expected.map((e) => {
-                const received = receivedByExpected.get(e.id) ?? 0;
-                const status = paymentStatus(e.expected_amount, received, e.due_date, today);
-                const lapsed = lease ? isLapsedExpectedRow(lease, e, received) : false;
-                return (
-                  <tr key={e.id} className="border-b border-gray-100 last:border-0 align-top">
-                    <td className="whitespace-nowrap px-3 py-2">{formatDate(e.due_date)}</td>
+        <>
+          {/* Phones: one card per expected payment with the same figures
+              and the same controls, so nothing scrolls sideways. It comes
+              BEFORE the table so that on desktop the table is still the
+              last child when nothing follows it, and space-y-3 adds no
+              margin below it there. */}
+          <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white text-sm md:hidden">
+            {scheduleRows.map((row) => (
+              <li key={row.e.id} className="px-3 py-2.5">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-medium text-gray-900">
+                      {row.e.label}
+                      <span className="font-normal text-gray-400"> · {row.e.year}</span>
+                    </p>
+                    <p className="text-xs text-gray-500">Due {row.due}</p>
+                  </div>
+                  <span className="shrink-0 pt-0.5">{row.badge}</span>
+                </div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-4">
+                  <div>
+                    <dt className="text-xs text-gray-500">Expected</dt>
+                    <dd className="tabular-nums">{row.expectedText}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-gray-500">Received</dt>
+                    <dd className="tabular-nums">
+                      {row.receivedText || <span className="text-gray-400">None yet</span>}
+                    </dd>
+                  </div>
+                </dl>
+                {rowActions(row.e, row.received, true)}
+              </li>
+            ))}
+          </ul>
+          {/* md and up: the table. */}
+          <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white md:block">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <th className="px-3 py-2">Due</th>
+                  <th className="px-3 py-2">Label</th>
+                  <th className="px-3 py-2 text-right">Expected</th>
+                  <th className="px-3 py-2 text-right">Received</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {scheduleRows.map((row) => (
+                  <tr key={row.e.id} className="border-b border-gray-100 last:border-0 align-top">
+                    <td className="whitespace-nowrap px-3 py-2">{row.due}</td>
                     <td className="px-3 py-2">
-                      {e.label}
-                      <span className="text-gray-400"> · {e.year}</span>
+                      {row.e.label}
+                      <span className="text-gray-400"> · {row.e.year}</span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right">
-                      {formatDollars(e.expected_amount)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right">
-                      {received > 0 ? formatDollars(received) : ""}
-                    </td>
-                    <td className="px-3 py-2">
-                      {lapsed ? (
-                        <span
-                          className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-                          title="This row is for a year after the lease ended, so it is not counted as owed."
-                        >
-                          No longer expected
-                        </span>
-                      ) : (
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[status]}`}
-                        >
-                          {PAYMENT_STATUS_LABELS[status]}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      {recordingFor === e.id ? (
-                        paymentForm(e.id, Math.max(e.expected_amount - received, 0))
-                      ) : (
-                        <span className="flex items-center gap-2">
-                          <button
-                            onClick={() => setRecordingFor(e.id)}
-                            className="text-sm font-medium text-kelly-700 hover:underline"
-                          >
-                            Record payment
-                          </button>
-                          {canManageSchedule ? (
-                            <button
-                              onClick={() => deleteExpected(e)}
-                              disabled={busy}
-                              className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
-                              title="Remove this expected payment; recorded payments stay"
-                            >
-                              Delete
-                            </button>
-                          ) : null}
-                        </span>
-                      )}
-                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{row.expectedText}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{row.receivedText}</td>
+                    <td className="px-3 py-2">{row.badge}</td>
+                    <td className="px-3 py-2">{rowActions(row.e, row.received, false)}</td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {payments.length > 0 ? (

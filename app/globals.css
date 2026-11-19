@@ -48,16 +48,12 @@ body {
   text-size-adjust: 100%;
 }
 
-/* Taps feel immediate on phones (no grey flash, no double-tap delay). */
-a,
-button,
-[role="button"],
-input,
-select,
-textarea,
-label {
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+/* Sideways-scrolling rows (chip rows, tab strips) without a scrollbar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Mapbox popups/controls inherit odd fonts otherwise */

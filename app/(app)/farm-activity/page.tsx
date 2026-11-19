@@ -302,8 +302,8 @@ export default async function FarmActivityPage({
             farm software.
           </p>
         </div>
-        <form className="ml-auto flex flex-wrap gap-2" method="get">
-          <select name="year" defaultValue={year} className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
+        <form className="flex w-full flex-wrap gap-2 md:ml-auto md:w-auto" method="get">
+          <select name="year" defaultValue={year} className="min-w-0 max-w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
             {(years.length ? years : [currentYear]).map((y) => (
               <option key={y} value={y}>
                 {y}
@@ -314,7 +314,7 @@ export default async function FarmActivityPage({
             <select
               name="entity"
               defaultValue={entityFilter}
-              className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              className="min-w-0 max-w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
             >
               <option value="">All entities</option>
               {(entities ?? []).map((e) => (
@@ -328,7 +328,7 @@ export default async function FarmActivityPage({
           <select
             name="connection"
             defaultValue={connectionFilter ? tenantKey(connectionFilter, entityScoped ?? null) : ""}
-            className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+            className="min-w-0 max-w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
           >
             <option value="">All tenants</option>
             {tenantOptionList.map((t) => (
@@ -340,7 +340,7 @@ export default async function FarmActivityPage({
           <select
             name="property"
             defaultValue={propertyFilter}
-            className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+            className="min-w-0 max-w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
           >
             <option value="">All properties</option>
             {(properties ?? []).map((p) => (
