@@ -175,7 +175,9 @@ export default async function TimberTaxSummaryPage({
       {s.sales.length > 0 ? (
         <section className="rounded-xl border border-gray-200 bg-white p-4">
           <h2 className="mb-2 font-semibold text-gray-900">Timber sales</h2>
-          <table className="w-full text-sm">
+          {/* Swipes sideways inside the card on a phone, not the page. */}
+          <div className="-mx-4 overflow-x-auto px-4">
+          <table className="w-full text-sm [&_td+td]:pl-3 [&_th+th]:pl-3">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-1">Sale</th>
@@ -206,6 +208,7 @@ export default async function TimberTaxSummaryPage({
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       ) : null}
 
@@ -216,7 +219,8 @@ export default async function TimberTaxSummaryPage({
             Up to $10,000 per property per year can be deducted right away{s.isTrust ? " (not for a trust)" : ""}; the rest is
             amortized over 84 months. Cost-share excluded from income is netted out first.
           </p>
-          <table className="w-full text-sm">
+          <div className="-mx-4 overflow-x-auto px-4">
+          <table className="w-full text-sm [&_td+td]:pl-3 [&_th+th]:pl-3">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-1">Property</th>
@@ -240,6 +244,7 @@ export default async function TimberTaxSummaryPage({
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       ) : null}
 
