@@ -17,6 +17,21 @@ const nullable = (type: "string" | "number" | "integer", description: string) =>
 export const HANDWRITING_RULE =
   "IMPORTANT: handwritten marks, notes, check marks, circles, and highlighter on these pages are the owner's own annotations. Ignore handwriting for EVERY field; read only printed text.";
 
+// What "unsure" means. Without this the reader listed fields it had left
+// null because the bill does not print them (assessed value, ratio, a
+// due date with no year), and clearly printed values it could not
+// classify: every 2026 Lawrence notice came back with its one printed
+// "APPR VALUE" marked unsure, read correctly each time. A mark is for a
+// reading that needs a second look at the paper, nothing else.
+//
+// A null field is listed in exactly one case: something IS printed there
+// and cannot be read at all. That mark must reach the review screen (it
+// is the only sign the blank box should hold a number), so nothing in
+// code drops marks on blank fields: a check that did was tried here and
+// threw away the mark on a notice whose appraised value was smeared out.
+export const UNSURE_RULE =
+  "unsure_fields is ONLY for print you could not read with confidence: characters that are blurry, faint, cut off by the scan, or covered by handwriting or a stamp, or two printed numbers that could each be the field. Record your best reading and list the field; when a printed value cannot be read at all, leave it null and list it. NEVER list a field you left null because the bill does not print it (an assessed value, ratio, or acres that is not on the bill; a date left null because no year is printed): null is the complete answer. NEVER list text or a number whose characters are clear, whatever else is odd about it: the bill does not say what kind of value it is, it does not multiply out to the tax, the county misspelled or abbreviated it, or the county printed it cut short (a legal description that stops mid-phrase or reads strangely is recorded exactly as printed). A clearly printed bill has an EMPTY unsure_fields list.";
+
 export const TAX_SEGMENT_TOOL: Anthropic.Tool = {
   name: "record_tax_pages",
   description:
@@ -74,7 +89,7 @@ export const TAX_STATEMENT_TOOL: Anthropic.Tool = {
     properties: {
       county: nullable("string", "County (without the word County)"),
       state: nullable("string", "Two-letter state"),
-      authority_name: nullable("string", "Taxing authority exactly as printed"),
+      authority_name: nullable("string", "The taxing authority's office as printed, without the officeholder's own name (e.g. 'Lawrence County Revenue Commissioner')"),
       tax_year: nullable("integer", "Tax year the statement covers"),
       billing_key: nullable("string", "The number the county bills on, exactly as printed (account, receipt, bill, key, or parcel number)"),
       billing_kind: { type: ["string", "null"], enum: ["account_number", "receipt_number", "key_number", "bill_number", "parcel_number", "other", null] },
@@ -97,15 +112,15 @@ export const TAX_STATEMENT_TOOL: Anthropic.Tool = {
           properties: {
             line_type: { type: "string", enum: ["real_property", "personal_property"], description: "personal_property for business personal property lines (often parcel 00-00-00... or an exemption code like PP)" },
             identifiers: { type: "array", description: "EVERY labeled number on this line (parcel number, PPIN, PIN, account, key, receipt, ...), each as printed", items: IDENTIFIER_ITEM },
-            appraised_value: nullable("number", "Appraised or market value, dollars"),
-            assessed_value: nullable("number", "Assessed value, dollars"),
+            appraised_value: nullable("number", "The line's main printed value, dollars, filled whenever the bill prints a property value for the line: the one labeled appraised ('APPR VALUE', 'Appraised Value', 'Total Value'); on a bill with no appraised label, the market value (the same number as market_value). Never the assessed value."),
+            assessed_value: nullable("number", "Assessed value, dollars, ONLY when the bill prints one; never worked out from another value"),
             tax_due: nullable("number", "Tax due for THIS line, dollars"),
             exemptions: nullable("string", "Exemption codes or text on the line, as printed"),
             legal_description: nullable("string", "Legal description printed for the line, verbatim"),
             property_address: nullable("string", "Property or situs address if printed"),
             acres: nullable("number", "Acres if printed"),
-            market_value: nullable("number", "Fair market value (or total appraised MARKET value) if printed, dollars"),
-            current_use_value: nullable("number", "Current use value if printed (Alabama farm and timber land), dollars"),
+            market_value: nullable("number", "Fair market value, dollars, ONLY when the bill's own label says market (or it prints a total appraised MARKET value); null for a value labeled only appraised. Filling this never empties appraised_value."),
+            current_use_value: nullable("number", "Current use value, dollars, ONLY when the bill's own label says current use (Alabama farm and timber land); null otherwise"),
             land_value: nullable("number", "Land value if printed separately, dollars"),
             improvement_value: nullable("number", "Improvements / buildings value if printed, dollars"),
             assessment_ratio: nullable("number", "Assessment ratio or class percent if printed, as a percent (10, 20); Class III is 10, Class II 20"),
@@ -120,7 +135,7 @@ export const TAX_STATEMENT_TOOL: Anthropic.Tool = {
       unsure_fields: {
         type: "array",
         items: { type: "string" },
-        description: "Field names you are not confident about (blurry, ambiguous, partially visible); for lines use lines[i].field",
+        description: "Fields where printed characters could not be read with confidence (blurry, faint, cut off, covered), whether you recorded a best reading or had to leave it null; for lines use lines[i].field. Never a field left null because the bill does not print it, and never clearly printed text that merely looks odd. Empty when everything was clearly printed.",
       },
     },
     required: ["county", "state", "authority_name", "tax_year", "billing_key", "billing_kind", "taxpayer_name", "care_of", "mailing_address", "total_tax", "due_date", "delinquent_date", "header_identifiers", "lines", "unsure_fields"],
@@ -132,4 +147,4 @@ export const TAX_SEGMENT_PROMPT = (firstPage: number, count: number) =>
   `These are pages ${firstPage} to ${firstPage + count - 1} of a file of property tax statements. For EVERY page, record the statement header printed on it. The billing_key is the number the county bills on (an account number covering several parcels, else a receipt, bill, or key number, else the parcel number), exactly as printed. total_tax is the statement's total, which whole-account bills repeat on every page. ${HANDWRITING_RULE}`;
 
 export const TAX_STATEMENT_PROMPT =
-  `These pages are ONE property tax statement (it may be several pages, a photo, or a scan). Record the header and EVERY parcel line printed on it. For each line capture EVERY labeled number exactly as printed as an identifier pair (label as printed, best-guess kind, value). Many Alabama bills print BOTH a market value and a current use value: put each in its own field (market_value, current_use_value), and keep appraised_value as the total value the bill labels appraised. Fill land, improvement, assessment ratio, tax district, millage, and timber acres only when printed. Unrecognized labels keep kind 'other' with the label. Mark business personal property lines as personal_property. Keep the taxpayer name exactly as printed, including any C/O. Dates as YYYY-MM-DD, dollars as plain numbers. ${HANDWRITING_RULE} List every field you are unsure about in unsure_fields.`;
+  `These pages are ONE property tax statement (it may be several pages, a photo, or a scan). Record the header and EVERY parcel line printed on it. For each line capture EVERY labeled number exactly as printed as an identifier pair (label as printed, best-guess kind, value). VALUES: appraised_value is the line's main value and is filled on EVERY line the bill prints a property value for: the value labeled appraised ('APPR VALUE', 'Appraised Value', 'Total Value'), or, on a bill with no appraised label, its market value (a bill printing 'MARKET VALUE' and 'ASSESSED VALUE' has the market number in BOTH appraised_value and market_value). market_value and current_use_value are filled only from a label that says market or current use: a bill whose value is labeled only appraised leaves both null, and you do not try to decide which kind of value it is. Some Alabama bills print BOTH a market value and a current use value: put each in its own field, and keep appraised_value as the total value the bill labels appraised. Fill assessed value, land, improvement, assessment ratio, tax district, millage, acres, and timber acres only when the bill prints them under their own label; never work one value out from another or from the tax. Unrecognized labels keep kind 'other' with the label. Mark business personal property lines as personal_property. Keep the taxpayer name exactly as printed, including any C/O: a 'C/O ...' line printed under the name is part of taxpayer_name ('JOHN A DOE C/O DOE FARMS LLC'), and the name after C/O also goes in care_of. Dates as YYYY-MM-DD, dollars as plain numbers. ${HANDWRITING_RULE} ${UNSURE_RULE}`;

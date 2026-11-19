@@ -88,6 +88,28 @@ describe.skipIf(!lawrence)("Lawrence County 2024 (whole-account statement)", () 
     }
     expect(personal).toBeGreaterThanOrEqual(1);
   });
+  it("records the one printed APPR VALUE as the appraised value and marks nothing the notice does not print", () => {
+    // Lawrence prints a single "APPR VALUE" per parcel: no market or
+    // current use split, no assessed value, no year on its due dates. In
+    // November 2026 the reader marked exactly those fields unsure on
+    // every notice, with every number read correctly, which held each
+    // statement out of "Confirm all ready".
+    const s = lawrence!;
+    for (const st of s.statements) {
+      const key = String(st.extraction.billing_key);
+      const raw = (st.extraction.lines as Array<Record<string, unknown>>) ?? [];
+      for (const l of raw.filter((x) => x.line_type !== "personal_property")) {
+        expect(typeof l.appraised_value, key).toBe("number");
+        expect(l.market_value ?? null, key).toBeNull();
+        expect(l.current_use_value ?? null, key).toBeNull();
+        expect(l.assessed_value ?? null, key).toBeNull();
+      }
+      const marks = ((st.extraction.unsure_fields as string[]) ?? []).filter((u) =>
+        /appraised_value|assessed_value|market_value|current_use_value|assessment_ratio|due_date|delinquent_date/.test(u)
+      );
+      expect(marks, key).toEqual([]);
+    }
+  });
   it("matches the typo'd taxpayer to the entity and keeps a personal property line parcel-free", () => {
     const s = lawrence!;
     for (const st of s.statements) {
@@ -149,6 +171,23 @@ describe.skipIf(!morgan)("Morgan County 2024 (two single-parcel statements in on
     expect(s.groups).toHaveLength(2);
     expect(s.groups.map((g) => g.pages)).toEqual([[1], [2]]);
     for (const st of s.statements) expect(linesOf(st)).toHaveLength(1);
+  });
+  it("keeps the printed market value as the appraised value too, beside the assessed value", () => {
+    // Morgan prints MARKET VALUE and ASSESSED VALUE and no appraised
+    // label. The appraised value must still be filled (it is the value
+    // the reports read): instructions that sent each value only to "the
+    // field its label names" left it blank.
+    const expected = [
+      { market: 444900, assessed: 4020 },
+      { market: 18800, assessed: 1880 },
+    ];
+    for (const [i, st] of morgan!.statements.entries()) {
+      const l = (st.extraction.lines as Array<Record<string, unknown>>)[0];
+      expect(l.appraised_value).toBe(expected[i].market);
+      expect(l.market_value).toBe(expected[i].market);
+      expect(l.assessed_value).toBe(expected[i].assessed);
+      expect(l.current_use_value ?? null).toBeNull();
+    }
   });
   it("captures the parcel, key, and receipt numbers and matches despite the space format", () => {
     const s = morgan!;

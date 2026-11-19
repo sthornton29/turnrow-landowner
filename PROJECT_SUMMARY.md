@@ -1,5 +1,39 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-19 (TAX READER: WHAT "UNSURE" MEANS; committed and pushed to
+main that day). The three 2026 Lawrence
+notices for Albemarle (account 8080 with 45 parcels, 35460, 856470) were
+read with every number right and the appraised value marked unsure, which
+kept each statement out of "Confirm all ready". Cause: the instructions
+said only "list every field you are unsure about", so the reader listed
+fields it had left blank because the notice does not print them (assessed
+value, ratio, due dates with no year) and the one printed "APPR VALUE"
+because the notice does not say market or current use. FIX, in
+app/api/extract/taxTools.ts only (UNSURE_RULE and the VALUES part of
+TAX_STATEMENT_PROMPT): a mark is for print that could not be read; a
+field the bill does not print is null and never listed; a printed value
+that cannot be read at all is null AND listed; clear text is never listed
+for being odd, misspelled, or cut short by the county. appraised_value is
+the line's main value (the appraised label, else the market value, which
+then fills both fields); market_value and current_use_value come only
+from their own labels. authority_name is the office without the
+officeholder's name. TRIED AND REMOVED: dropping marks on blank fields in
+code. On a copy of a notice with the appraised value smeared out, the
+reader left it null and listed it, and that check threw the mark away. Do
+not add it back. CHECKED with the live reader: 8080 reads 45 lines that
+equal an independent transcription and add up to 14,820.56, with no marks,
+every run; 35460 and 856470 no marks; damaged copies (value smeared, pen
+over the value, tax smeared) are marked every run. The four fixture
+snapshots were rewritten with the new instructions (17 statements, same
+numbers, 2 descriptive marks left where there were 61) and
+lib/taxFixtures.test.ts gained two tests (Lawrence: appraised filled and
+nothing marked that the notice does not print; Morgan: the market value
+is also the appraised value). One wording along the way left Morgan's
+appraised value blank and the tests still passed, so a change to the
+reader's instructions means re-running the fixtures and reading the
+snapshot diff value by value (fixtures/tax-statements/README.txt;
+TAX_FIXTURES_DIR reads PDFs in a folder outside the repo).
+
 2026-11-14 (PRE-ROLLOUT REVIEW before inviting the rest of the family;
 LIVE since that afternoon: migrations 0052 and 0053 APPLIED, main
 deployed, the live isolation test passed). Eight read-only section

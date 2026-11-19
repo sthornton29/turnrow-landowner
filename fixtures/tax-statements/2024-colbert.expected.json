@@ -49,7 +49,7 @@
         "mailing_address": "PO BOX 356, COURTLAND, AL 35618-0356",
         "total_tax": 510.1,
         "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "ACCOUNT NUMBER",
@@ -73,7 +73,15 @@
             "exemptions": null,
             "legal_description": null,
             "property_address": "0",
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -90,18 +98,20 @@
             "exemptions": null,
             "legal_description": null,
             "property_address": "0",
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].line_type",
-          "lines[1].line_type",
-          "lines[0].property_address",
-          "lines[1].property_address",
-          "care_of"
-        ]
+        "unsure_fields": []
       }
     }
   ],
-  "written_at": "2026-08-22T02:44:42.793Z"
+  "written_at": "2026-11-19T21:50:55.757Z"
 }

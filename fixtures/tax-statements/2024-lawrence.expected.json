@@ -515,8 +515,8 @@
         "care_of": "ALBEMARLE CORP",
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 1142,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -545,14 +545,18 @@
             "exemptions": "H1",
             "legal_description": "BEG SW COR OF NW1/4 OF SE1/4 TH N APP 55",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].acres",
-          "lines[0].legal_description"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -566,12 +570,12 @@
         "tax_year": 2024,
         "billing_key": "215450",
         "billing_kind": "account_number",
-        "taxpayer_name": "T M L L C",
+        "taxpayer_name": "TMLLC",
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 155.98,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -600,15 +604,18 @@
             "exemptions": null,
             "legal_description": "BEG AT INT OF JESSE JACKSON PARKWAY & CO",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].property_address",
-          "lines[0].acres",
-          "care_of"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -637,8 +644,8 @@
         "care_of": null,
         "mailing_address": "POB 356, COURTLAND, AL 35618",
         "total_tax": 13647.18,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -682,7 +689,15 @@
             "exemptions": null,
             "legal_description": "W 1/2 NW 1/4 AND S 30AC OF SE 1/4 NW 1/4",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -704,7 +719,15 @@
             "exemptions": null,
             "legal_description": "BEG AT SW COR OF SEC 34; TH N 660', E 13",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -726,7 +749,15 @@
             "exemptions": null,
             "legal_description": "NE1/4 OF NE1/4 SE1/4 OF NE1/4 EXCEPT W O",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -748,7 +779,15 @@
             "exemptions": null,
             "legal_description": "BEG AT NE COR OF NE 1/4 OF NW 1/4 OF SEC",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -770,7 +809,15 @@
             "exemptions": null,
             "legal_description": "BEG AT NW COR OF NE1/4 OF NW1/4 TH E ALG",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -792,7 +839,15 @@
             "exemptions": null,
             "legal_description": "W 1/2 OF SW 1/4 OF SEC 25SEC 25 T4S R9W",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -814,7 +869,15 @@
             "exemptions": null,
             "legal_description": "BEG AT SE COR OF SEC 4 TH W 328 0' TH N",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -836,7 +899,15 @@
             "exemptions": null,
             "legal_description": "A TRACT OF LAND BEG SE COR OF SEC 17 N 2",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -858,7 +929,15 @@
             "exemptions": null,
             "legal_description": "BEG 665' N OF SE COR OF SEC 19 TH N 690'",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -880,7 +959,15 @@
             "exemptions": null,
             "legal_description": "BEG 120 W OF NE COR OF SEC TH W 2825 S 2",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -902,7 +989,15 @@
             "exemptions": null,
             "legal_description": "BEG 1050' E OF SW COR OF SE1/4 OF NW1/4",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -924,7 +1019,15 @@
             "exemptions": null,
             "legal_description": "ALL THAT PORTION OF S1/2 OF SEC 31 WHICH",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -940,13 +1043,21 @@
                 "value": "958240"
               }
             ],
-            "appraised_value": 163700,
-            "assessed_value": null,
-            "tax_due": 72.6,
-            "exemptions": null,
             "legal_description": "BEG 1320' N OF SE COR OF SEC 19 TH N 820",
             "property_address": null,
-            "acres": null
+            "appraised_value": 163700,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 72.6,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -962,13 +1073,21 @@
                 "value": "957411"
               }
             ],
-            "appraised_value": 1048400,
-            "assessed_value": null,
-            "tax_due": 442.2,
-            "exemptions": null,
             "legal_description": "BEG 660' S OF & 20' W OF NE COR OF SEC 2",
             "property_address": null,
-            "acres": null
+            "appraised_value": 1048400,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 442.2,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -984,13 +1103,21 @@
                 "value": "957412"
               }
             ],
-            "appraised_value": 720100,
-            "assessed_value": null,
-            "tax_due": 291.3,
-            "exemptions": null,
             "legal_description": "W 1/2 OF SEC LESS A STRIP 809' WIDE OFF",
             "property_address": null,
-            "acres": null
+            "appraised_value": 720100,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 291.3,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1006,13 +1133,21 @@
                 "value": "958313"
               }
             ],
-            "appraised_value": 337800,
-            "assessed_value": null,
-            "tax_due": 148.5,
-            "exemptions": null,
             "legal_description": "BEG 1100' E OF NW COR SEC 15; TH E 1570'",
             "property_address": null,
-            "acres": null
+            "appraised_value": 337800,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 148.5,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1028,13 +1163,21 @@
                 "value": "959100"
               }
             ],
-            "appraised_value": 622400,
-            "assessed_value": null,
-            "tax_due": 2109.4,
-            "exemptions": null,
             "legal_description": "BEG AT NE COR OF SEC 31 & RUN W 675' S 1",
             "property_address": null,
-            "acres": null
+            "appraised_value": 622400,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 2109.4,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1050,13 +1193,21 @@
                 "value": "958070"
               }
             ],
-            "appraised_value": 572300,
-            "assessed_value": null,
-            "tax_due": 223.2,
-            "exemptions": null,
             "legal_description": "W1/2 OF W1/2 S 3 T4S R7W",
             "property_address": null,
-            "acres": null
+            "appraised_value": 572300,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 223.2,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1072,13 +1223,21 @@
                 "value": "958416"
               }
             ],
-            "appraised_value": 146500,
-            "assessed_value": null,
-            "tax_due": 70.3,
-            "exemptions": null,
             "legal_description": "BEG NW COR OF NE1/4 OF SW1/4 TH S 750' S",
             "property_address": null,
-            "acres": null
+            "appraised_value": 146500,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 70.3,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1094,13 +1253,21 @@
                 "value": "959102"
               }
             ],
-            "appraised_value": 148900,
-            "assessed_value": null,
-            "tax_due": 96.9,
-            "exemptions": null,
             "legal_description": "BEG SE COR OF NE1/4 TH W 1310' N 1145' S",
             "property_address": null,
-            "acres": null
+            "appraised_value": 148900,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 96.9,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1116,13 +1283,21 @@
                 "value": "962328"
               }
             ],
-            "appraised_value": 354800,
-            "assessed_value": null,
-            "tax_due": 314.8,
-            "exemptions": null,
             "legal_description": "NE1/4 OF SEC 7 SEC 7 T5S R7W 1=400' 2",
             "property_address": null,
-            "acres": null
+            "appraised_value": 354800,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 314.8,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1138,13 +1313,21 @@
                 "value": "957405"
               }
             ],
-            "appraised_value": 123100,
-            "assessed_value": null,
-            "tax_due": 37.2,
-            "exemptions": null,
             "legal_description": "BEG AT THE NE COR OF SEC RUN W 305' S TO",
             "property_address": null,
-            "acres": null
+            "appraised_value": 123100,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 37.2,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1160,13 +1343,21 @@
                 "value": "958073"
               }
             ],
-            "appraised_value": 545100,
-            "assessed_value": null,
-            "tax_due": 212.4,
-            "exemptions": null,
             "legal_description": "BEG 1050S N OF SE COR SEC 4; TH W 3290S'",
             "property_address": null,
-            "acres": null
+            "appraised_value": 545100,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 212.4,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1182,13 +1373,21 @@
                 "value": "962325"
               }
             ],
-            "appraised_value": 446000,
-            "assessed_value": null,
-            "tax_due": 159.6,
-            "exemptions": null,
             "legal_description": "W 1/2 OF NW 1/4 AND SE 1/4 OF NW 1/4 OF",
             "property_address": null,
-            "acres": null
+            "appraised_value": 446000,
+            "market_value": null,
+            "current_use_value": null,
+            "assessed_value": null,
+            "assessment_ratio": null,
+            "land_value": null,
+            "improvement_value": null,
+            "tax_due": 159.6,
+            "exemptions": null,
+            "tax_district": null,
+            "millage": null,
+            "acres": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1210,7 +1409,15 @@
             "exemptions": null,
             "legal_description": "BEG AT NW COR OF SEC 20; TH E 3370'S S 2",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1232,7 +1439,15 @@
             "exemptions": null,
             "legal_description": "NE 1/4 OF NW 1/4 LYING E OF JERUSALEM RD",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1254,7 +1469,15 @@
             "exemptions": null,
             "legal_description": "TOWN OF COURTLAND LOT 99 S 30 T 4S R 7W",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1276,7 +1499,15 @@
             "exemptions": null,
             "legal_description": "BEG 1300' N 40' E OF SW COR OF SE 1/4 TH",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1298,7 +1529,15 @@
             "exemptions": null,
             "legal_description": "BEG SW COR OF SEC 20 TH N 280' SE ALG RO",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1320,7 +1559,15 @@
             "exemptions": null,
             "legal_description": "BEG AT SW COR OF SW 1/4 OF SW 1/4 OF SEC",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1342,7 +1589,15 @@
             "exemptions": null,
             "legal_description": "NW1/4 & SW1/4 X",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1364,7 +1619,15 @@
             "exemptions": null,
             "legal_description": "S1/2 OF SE1/4 S1/2 OF NE1/4 OF SE1/4 NW1",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1386,7 +1649,15 @@
             "exemptions": null,
             "legal_description": "BEG AT SE COR OF SEC 19; TH W 1345'S N 1",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1408,7 +1679,15 @@
             "exemptions": null,
             "legal_description": "W 1/2 OF NW1/4 AND NE 1/4 OF NW 1/4 OF S",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1430,7 +1709,15 @@
             "exemptions": null,
             "legal_description": "E 1/2 OF SW 1/4 AND SE 1/4 OF NW 1/4 OF",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1452,7 +1739,15 @@
             "exemptions": null,
             "legal_description": "PAR BEG AT PT WHERE N ROW CEMETERY RD IN",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1474,7 +1769,15 @@
             "exemptions": null,
             "legal_description": "BEG AT NE COR OF SEC TH W 3290' TH N 920",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1496,7 +1799,15 @@
             "exemptions": null,
             "legal_description": "COM AT SE COR OF SEC 19; TH W 1345'S TO",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1518,7 +1829,15 @@
             "exemptions": null,
             "legal_description": "17 AC OFF S/S OF SW 1/4 OF SE 1/4 S 20 T",
             "property_address": null,
-            "acres": 17
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1540,7 +1859,15 @@
             "exemptions": null,
             "legal_description": "A TRACT OF LAND BEG AT SW/C OF SEC 16 E",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1562,7 +1889,15 @@
             "exemptions": null,
             "legal_description": "NE 1/4; E1/2 OF SE1/4; E 33 ACS OFF THE",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1584,7 +1919,15 @@
             "exemptions": null,
             "legal_description": "ALL OF SE1/4 OF SW1/4 S OF R/R ROW S 29",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1606,7 +1949,15 @@
             "exemptions": null,
             "legal_description": "ALL BEG AT NE COR OF NW 1/4 OF SW 1/4 TH",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1628,7 +1979,15 @@
             "exemptions": null,
             "legal_description": "LOTS 100. 101. 105 106 AND 107 TOWN OF C",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -1650,23 +2009,18 @@
             "exemptions": null,
             "legal_description": "BEG 340' OF NE COR OF SEC 32; TH NW ALG",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[1].legal_description",
-          "lines[7].legal_description",
-          "lines[9].legal_description",
-          "lines[0].legal_description",
-          "lines[3].legal_description",
-          "lines[4].legal_description",
-          "lines[6].legal_description",
-          "lines[8].legal_description",
-          "lines[10].legal_description",
-          "lines[5].legal_description",
-          "lines[11].legal_description",
-          "lines[2].legal_description"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -1684,8 +2038,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 202.8,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -1714,14 +2068,18 @@
             "exemptions": null,
             "legal_description": "ALL THAT PORTION OF S1/2 OF SEC 31 LYING",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].exemptions",
-          "lines[0].legal_description",
-          "lines[0].assessed_value"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -1739,8 +2097,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 185.63,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -1769,13 +2127,19 @@
             "exemptions": null,
             "legal_description": "BEG AT NW COR OF NE 1/4 OF NE 1/4 OF SEC",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
         "unsure_fields": [
-          "taxpayer_name",
-          "lines[0].legal_description",
-          "lines[0].assessed_value"
+          "taxpayer_name"
         ]
       }
     },
@@ -1794,8 +2158,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 358,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -1824,14 +2188,18 @@
             "exemptions": "",
             "legal_description": "BEG AT A PT ALG S ROW OF HWY 20 2070' NW",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].exemptions",
-          "lines[0].acres"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -1849,8 +2217,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 166.5,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -1879,14 +2247,18 @@
             "exemptions": "",
             "legal_description": "BEG AT INT OF N/BDY OF SEC 29 AND N/ROW",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].acres",
-          "lines[0].exemptions"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -1904,8 +2276,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 5.4,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -1934,15 +2306,18 @@
             "exemptions": "",
             "legal_description": "COM AT NW COR OF SEC 29; TH E 1870'S TO",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].legal_description",
-          "lines[0].acres",
-          "lines[0].exemptions"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -1960,8 +2335,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 163.2,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -1990,14 +2365,18 @@
             "exemptions": null,
             "legal_description": "BEG AT NW COR OF SEC 18; TH E 2770'S, S",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].legal_description",
-          "lines[0].acres"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -2015,8 +2394,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 55.7,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -2045,14 +2424,18 @@
             "exemptions": "",
             "legal_description": "BEG AT COR OF SEC; TH N 1050' SE ALG DRK",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].acres",
-          "lines[0].exemptions"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -2070,8 +2453,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 40,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -2100,13 +2483,18 @@
             "exemptions": null,
             "legal_description": "BEG AT NE COR OF SEC 13; TH S 1985'S, W",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].legal_description"
-        ]
+        "unsure_fields": []
       }
     },
     {
@@ -2124,8 +2512,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 85.2,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -2154,11 +2542,18 @@
             "exemptions": null,
             "legal_description": "THE SE 1/4 SEC 12 LESS LAND N A ND SW'LY",
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
         "unsure_fields": [
-          "lines[0].assessed_value",
           "lines[0].legal_description"
         ]
       }
@@ -2178,8 +2573,8 @@
         "care_of": null,
         "mailing_address": "PO BOX 356, COURTLAND AL 35618-0356",
         "total_tax": 91.65,
-        "due_date": "2024-10-01",
-        "delinquent_date": "2025-01-01",
+        "due_date": null,
+        "delinquent_date": null,
         "header_identifiers": [
           {
             "label": "Account #",
@@ -2208,15 +2603,20 @@
             "exemptions": "PP",
             "legal_description": null,
             "property_address": null,
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].assessed_value",
-          "lines[0].legal_description"
-        ]
+        "unsure_fields": []
       }
     }
   ],
-  "written_at": "2026-08-22T02:50:00.064Z"
+  "written_at": "2026-11-19T21:55:54.205Z"
 }

@@ -40,7 +40,7 @@
       "extraction": {
         "county": "Colbert",
         "state": "AL",
-        "authority_name": "Colbert County - Tommy L Oswalt Revenue Commissioner",
+        "authority_name": "Colbert County Revenue Commissioner",
         "tax_year": 2026,
         "billing_key": "1234",
         "billing_kind": "account_number",
@@ -73,7 +73,15 @@
             "exemptions": null,
             "legal_description": null,
             "property_address": "0",
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           },
           {
             "line_type": "real_property",
@@ -90,18 +98,20 @@
             "exemptions": null,
             "legal_description": null,
             "property_address": "0",
-            "acres": null
+            "acres": null,
+            "market_value": null,
+            "current_use_value": null,
+            "land_value": null,
+            "improvement_value": null,
+            "assessment_ratio": null,
+            "tax_district": null,
+            "millage": null,
+            "timber_acres": null
           }
         ],
-        "unsure_fields": [
-          "lines[0].property_address",
-          "lines[1].property_address",
-          "lines[0].acres",
-          "lines[1].acres",
-          "care_of"
-        ]
+        "unsure_fields": []
       }
     }
   ],
-  "written_at": "2026-09-08T18:35:43.486Z"
+  "written_at": "2026-11-19T21:56:40.031Z"
 }

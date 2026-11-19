@@ -11,9 +11,14 @@ import path from "path";
 import Anthropic from "@anthropic-ai/sdk";
 import { PDFDocument } from "pdf-lib";
 import { TAX_SEGMENT_PROMPT, TAX_SEGMENT_TOOL, TAX_STATEMENT_PROMPT, TAX_STATEMENT_TOOL } from "@/app/api/extract/taxTools";
+import { mergeUnsureFields } from "@/app/api/extract/unsureIndex";
 import { groupPages, type PageHeader } from "@/lib/taxSegment";
 
-const DIR = path.join(process.cwd(), "fixtures", "tax-statements");
+// TAX_FIXTURES_DIR=<folder> reads the PDFs in another folder instead and
+// writes each .expected.json beside its PDF there: the way to see what
+// the reader returns for a statement that should not be committed (a
+// customer's bill, a damaged copy made to test the unsure marks).
+const DIR = (process.env.TAX_FIXTURES_DIR ?? "").trim() || path.join(process.cwd(), "fixtures", "tax-statements");
 const live = process.env.TAX_FIXTURES_LIVE === "1";
 // TAX_FIXTURES_ONLY=2026-colbert limits the run to one fixture (by file
 // stem) so adding a statement never re-extracts and rewrites the
@@ -113,7 +118,9 @@ describe.skipIf(!live || files.length === 0)("tax fixture snapshots (live)", () 
         }
         merged.lines = results.flatMap((r) => (Array.isArray(r.lines) ? (r.lines as unknown[]) : []));
         merged.header_identifiers = results.flatMap((r) => (Array.isArray(r.header_identifiers) ? (r.header_identifiers as unknown[]) : []));
-        merged.unsure_fields = [...new Set(results.flatMap((r) => (Array.isArray(r.unsure_fields) ? (r.unsure_fields as unknown[]).map(String) : [])))];
+        // The same merge /api/extract applies, so a snapshot holds the
+        // marks the review screen would be handed.
+        merged.unsure_fields = mergeUnsureFields(results);
         statements.push({ pages: g.pages, extraction: merged });
       }
       const snapshot = { file: f, total_pages: total, pages, groups, statements, written_at: new Date().toISOString() };
