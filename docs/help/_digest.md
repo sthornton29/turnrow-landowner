@@ -1,6 +1,6 @@
 # Turnrow Landowner capabilities digest
 
-Generated 2026-11-20, version 0.1.0, build b43c95c. Compiled from docs/help; regenerate with npm run help:build.
+Generated 2026-11-20, version 0.1.0, build f86fd18. Compiled from docs/help; regenerate with npm run help:build.
 
 # What Turnrow Landowner does NOT do
 
@@ -1259,9 +1259,20 @@ Parcels not yet on a statement for the year are listed by property (expand one t
 
 A statement is how the county billed you: a county, the number it bills on (an account number, a receipt or key number, or the parcel number), the taxpayer as printed, the tax year, the total, and the due and delinquent dates. Under it are its **lines**, one per parcel block printed on the statement, each with the numbers the county printed for it, its appraised and assessed values, and its tax. One statement can cover a whole account across many parcels, or a single parcel. Tap **Details** on a statement to see its lines, its payments, and the uploaded file.
 
-The page counts a parcel as covered for a year when a line links to it. Business personal property lines are never parcels: they count in what you owe and paid, under the statement's entity, but not in parcel coverage.
+The page counts a parcel as covered for a year when a line links to it. Business personal property lines are never parcels: they count in what you owe and paid, under the statement's entity, but not in parcel coverage. See Personal property bills below.
 
 A statement whose lines do not add up to its total shows an amber chip with both figures. It is never hidden. Saved lines cannot be edited. If a line was misread, have an admin delete the statement under **Details** and upload the bill again, correcting the line in the review before confirming. Deleting also removes the payments recorded on the statement, so note them first.
+
+## Personal property bills
+
+Some bills tax business contents or equipment instead of land. The county usually prints a parcel number of all zeros or the code PP, and the bill belongs to an owner and an account, not to a parcel. The app reads these as **personal property**. Nothing has to be matched, the statement is marked **Personal property**, and its tax counts in what you owe and paid under the statement's entity, never in parcel coverage or a property's per-acre figures.
+
+- **What it covers.** Give the bill a name in your own words, such as "Contents within business", in the upload review or under **Details** on the statement. Handwritten notes on a bill are not read, so type it once. It is one name per county account: saving it sets it on every year of that account, and next year's bill arrives with it filled in. Any statement can carry one, not only personal property.
+- **The Personal property section** on this page lists each personal property account for the tax year shown: what it covers, the entity, the tax for the last year billed and for this year with the change, this year's value, and whether it is paid. **Details** opens the statement.
+- **A bill that has not come in.** An account that was billed last year with nothing on file for this year is listed first and marked **Not on file**, with a link to upload it. Parcel coverage cannot catch this one, because no parcel is waiting on it.
+- In the Property tax report, personal property has its own row beside the properties, apart from lines that still need matching to a parcel.
+
+Like the lines themselves, the Personal property section is visible to admins only.
 
 ## Uploading statements
 
@@ -1336,7 +1347,7 @@ Tick **Remember these due and delinquent dates** in the review to make those dat
 
 ## What it is
 
-On the Property Taxes page, **Tax report** reads every bill you uploaded together with the county's own parcel records. In this order it shows: the year's tax and why it changed, things worth a look (with dollars and a deadline where there is one), whether each parcel is getting current use and how its acres compare, tax per acre and as a share of income by property, the values printed on the bills, next year's bills where the county records already show them, the dates to know, and tax paid by calendar year. Pick the year, entity, property, or county at the top; **Print or save PDF** prints it.
+On the Property Taxes page, **Tax report** reads every bill you uploaded together with the county's own parcel records. In this order it shows: the year's tax and why it changed, things worth a look (with dollars and a deadline where there is one), whether each parcel is getting current use and how its acres compare, tax per acre and as a share of income by property (with a **Personal property** row for bills on business contents or equipment, which have no parcel, and a **Not tied to a parcel** row for lines still to be matched), the values printed on the bills, next year's bills where the county records already show them, the dates to know, and tax paid by calendar year. Pick the year, entity, property, or county at the top; **Print or save PDF** prints it.
 
 The report is a worksheet to help you prepare, not legal or tax advice, and it says so under its title. Confirm deadlines and figures with the county, and tax questions with your accountant.
 

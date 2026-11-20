@@ -18,6 +18,7 @@ import {
 import { IDENTIFIER_KIND_LABELS, type IdentifierKind, type PrintedIdentifier } from "@/lib/taxIdentifiers";
 import { confirmLineParcel, countyLookup, importParcelHref, loadStoredIdentifiers } from "@/components/taxes/taxLearn";
 import { matchLineViaCounty, type CountyLineMatch } from "@/lib/taxMatch";
+import { isPersonalPropertyStatement, labelForAccount, personalPropertyAccounts, statementsToRelabel } from "@/lib/personalProperty";
 import TaxChangeReport from "@/components/taxes/TaxChangeReport";
 import EntityDocuments from "@/components/documents/EntityDocuments";
 import { NO_ENTITY } from "@/lib/entities";
@@ -113,6 +114,10 @@ export default function TaxStatusClient({
   const [deleting, setDeleting] = useState<string | null>(null); // the statement being deleted
   const [resolveParcelId, setResolveParcelId] = useState<Record<string, string>>({});
   const [editingEntity, setEditingEntity] = useState<string | null>(null);
+  // "What it covers" being edited on one statement (migration 0055).
+  const [editingLabel, setEditingLabel] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [savingLabel, setSavingLabel] = useState(false);
   // The live county lookup tier (migration 0042) for the Unmatched
   // section: what the county's GIS answered for each line's numbers,
   // a note when it could not be asked, and the manual match's
@@ -176,6 +181,16 @@ export default function TaxStatusClient({
     ? allYearStatements.filter((s) => (linesByStatement.get(s.id) ?? []).some((l) => entityOfLine(l) === entityFilter))
     : allYearStatements;
   const visibleLines = entityFilter ? yearLines.filter((l) => entityOfLine(l) === entityFilter) : yearLines;
+  // Personal property (business contents, equipment) is billed by
+  // account with no parcel, so it is followed by account: what each bill
+  // covers, this year against the last year billed, and the account that
+  // was billed last year with nothing on file for this one. Parcel
+  // coverage below can never catch that missing bill.
+  const labelOf = (s: TaxStatementRow) => (s.label ?? "").trim() || labelForAccount(statements, s);
+  const personalRows = personalPropertyAccounts(statements, lines, year).filter(
+    (r) => !entityFilter || (r.entity_id ?? NO_ENTITY) === entityFilter
+  );
+  const personalMissing = personalRows.filter((r) => r.missing);
   const coveredParcelIds = new Set(
     visibleLines.filter((l) => l.line_type === "real_property" && l.parcel_id).map((l) => l.parcel_id!)
   );
@@ -442,6 +457,31 @@ export default function TaxStatusClient({
     reload();
   }
 
+  // What a bill covers, in the owner's words. One label per county
+  // account: saving it here writes it to every year's statement on the
+  // account, and next year's upload starts with it filled in.
+  async function saveLabel(statement: TaxStatementRow) {
+    if (savingLabel) return;
+    setError(null);
+    setSavingLabel(true);
+    const label = labelDraft.trim() || null;
+    const ids = [statement.id, ...statementsToRelabel(statements, statement, label)];
+    const { error: err } = await supabase.from("tax_statements").update({ label }).in("id", ids);
+    setSavingLabel(false);
+    if (err) {
+      setError(friendlyDbError(err, "Could not save what the bill covers. Please try again."));
+      return;
+    }
+    setEditingLabel(null);
+    reload();
+  }
+
+  // Opens a statement in the list below and brings it into view.
+  function showStatement(id: string) {
+    setExpanded(id);
+    window.setTimeout(() => document.getElementById(`statement-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  }
+
   // Deletes the statement, its lines and payments (cascade), and the
   // documents attached to it (rows and files). A shared multi-statement
   // source PDF stays in Documents. The statement goes FIRST: if that
@@ -660,7 +700,9 @@ export default function TaxStatusClient({
                   <td className="px-2 py-1.5 text-right tabular-nums">{formatDollars(l.tax_due)}</td>
                   <td className="px-2 py-1.5">
                     {l.line_type === "personal_property" ? (
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">Personal property</span>
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600" title="Business contents or equipment: taxed to the owner, not to a parcel">
+                        Personal property, no parcel
+                      </span>
                     ) : parcel ? (
                       <span>
                         <Link href={`/parcels/${parcel.id}`} className="font-medium text-kelly-700 hover:underline">
@@ -741,7 +783,8 @@ export default function TaxStatusClient({
               <li key={s.id} className="flex flex-wrap items-baseline gap-x-2">
                 <span>
                   {s.tax_year} · {s.county ? `${s.county} · ` : ""}
-                  {statementLabel(s)}: {formatDollars(Math.max(s.amount_due - (paidByStatement.get(s.id) ?? 0), 0))} unpaid, delinquent since{" "}
+                  {statementLabel(s)}
+                  {labelOf(s) ? ` (${labelOf(s)})` : ""}: {formatDollars(Math.max(s.amount_due - (paidByStatement.get(s.id) ?? 0), 0))} unpaid, delinquent since{" "}
                   {formatDate(s.delinquent_date)}
                 </span>
                 <button
@@ -969,6 +1012,79 @@ export default function TaxStatusClient({
         </section>
       ) : null}
 
+      {/* Personal property: bills with no parcel, followed by account. */}
+      {personalRows.length > 0 ? (
+        <section className="rounded-xl border border-gray-200 bg-white">
+          <h2 className="border-b border-gray-200 px-4 py-3 text-base font-semibold text-gray-900">
+            Personal property
+            <span className="ml-2 text-sm font-normal text-gray-500">business contents and equipment, billed by account with no parcel</span>
+          </h2>
+          {personalMissing.length > 0 ? (
+            <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900">
+              {plural(personalMissing.length, "personal property bill")} from {year - 1} {personalMissing.length === 1 ? "has" : "have"} no {year} bill on
+              file.
+            </p>
+          ) : null}
+          <ul className="divide-y divide-gray-100">
+            {personalRows.map((r) => {
+              const st = r.statementId ? statementById.get(r.statementId) : null;
+              const status = st ? statusOf(st) : null;
+              const diff = r.tax !== null && r.priorTax !== null ? Math.round((r.tax - r.priorTax) * 100) / 100 : null;
+              const change =
+                diff === null
+                  ? null
+                  : diff === 0
+                    ? `Same as ${r.priorYear}`
+                    : `${diff > 0 ? "Up" : "Down"} ${formatDollars(Math.abs(diff))}${r.priorTax ? ` (${Math.round((Math.abs(diff) / r.priorTax) * 100)}%)` : ""} from ${r.priorYear}`;
+              return (
+                <li key={r.key} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 text-sm">
+                  <span className="min-w-0 flex-1 basis-56">
+                    <span className={"block font-medium " + (r.label ? "text-gray-900" : "text-gray-500")}>{r.label ?? "Not labeled yet"}</span>
+                    <span className="block text-xs text-gray-500">
+                      {[r.county, r.account_number ? `${ACCOUNT_KIND_LABEL[r.account_kind ?? "other"] ?? "Number"} ${r.account_number}` : null, r.taxpayer]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      {r.entity_id ? (
+                        <span className="ml-1 rounded-full bg-kelly-50 px-2 py-0.5 font-medium text-pine-900">{entityName(r.entity_id)}</span>
+                      ) : null}
+                    </span>
+                  </span>
+                  <span className="grid grid-cols-3 gap-x-5 tabular-nums">
+                    <span>
+                      <span className="block text-xs text-gray-500">{r.priorYear ?? year - 1} tax</span>
+                      {r.priorTax !== null ? formatDollars(r.priorTax) : <span className="text-gray-400">none</span>}
+                    </span>
+                    <span>
+                      <span className="block text-xs text-gray-500">{year} tax</span>
+                      {r.tax !== null ? formatDollars(r.tax) : <span className="font-medium text-amber-900">Not on file</span>}
+                    </span>
+                    <span>
+                      <span className="block text-xs text-gray-500">{year} value</span>
+                      {r.appraised !== null ? formatDollars(r.appraised) : <span className="text-gray-400">not printed</span>}
+                    </span>
+                  </span>
+                  <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                    {change ? <span className="text-xs text-gray-600">{change}</span> : null}
+                    {st && status ? (
+                      <>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TAX_STATUS_CLASSES[status]}`}>{TAX_STATUS_LABELS[status]}</span>
+                        <button type="button" onClick={() => showStatement(st.id)} className="text-sm text-gray-500 hover:underline">
+                          Details
+                        </button>
+                      </>
+                    ) : canUpload ? (
+                      <Link href="/taxes/upload" className="text-sm font-medium text-kelly-700 hover:underline">
+                        Upload the {year} bill
+                      </Link>
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
       {selected.size > 0 ? (
         <div className="sticky top-16 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-kelly-100 bg-kelly-50 p-3 shadow-md">
           <span className="text-sm font-medium text-pine-900">{selected.size} selected</span>
@@ -1011,6 +1127,8 @@ export default function TaxStatusClient({
               const sLines = linesByStatement.get(s.id) ?? [];
               const parcelCount = new Set(sLines.filter((l) => l.parcel_id).map((l) => l.parcel_id)).size;
               const unmatched = sLines.filter((l) => l.line_type === "real_property" && !l.parcel_id).length;
+              const personal = isPersonalPropertyStatement(sLines);
+              const covers = labelOf(s);
               const statementPayments = payments.filter((p) => p.tax_statement_id === s.id);
               return (
                 <li
@@ -1035,6 +1153,10 @@ export default function TaxStatusClient({
                       <span className="font-medium text-gray-900">
                         {s.county ? `${s.county} · ` : ""}
                         {statementLabel(s)}
+                        {covers ? <span className="font-normal text-gray-700"> · {covers}</span> : null}
+                        {personal ? (
+                          <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">Personal property</span>
+                        ) : null}
                       </span>
                       <span className="block text-xs text-gray-500">
                         {s.taxpayer_name_printed ?? ""}
@@ -1043,7 +1165,7 @@ export default function TaxStatusClient({
                             {entityName(s.entity_id)}
                           </span>
                         ) : null}
-                        {` · ${sLines.length} line${sLines.length === 1 ? "" : "s"}`}
+                        {personal ? " · no parcel" : ` · ${sLines.length} line${sLines.length === 1 ? "" : "s"}`}
                         {parcelCount > 0 ? `, ${parcelCount} parcel${parcelCount === 1 ? "" : "s"}` : ""}
                         {unmatched > 0 ? <span className="ml-1 text-amber-800">{unmatched} unmatched</span> : null}
                         {s.due_date ? ` · due ${formatDate(s.due_date)}` : ""}
@@ -1108,6 +1230,49 @@ export default function TaxStatusClient({
                               <dd className="text-gray-900">{value}</dd>
                             </div>
                           ))}
+                        <div>
+                          <dt className="text-xs text-gray-500">What it covers</dt>
+                          <dd className="text-gray-900">
+                            {editingLabel === s.id ? (
+                              <span className="flex flex-wrap items-center gap-1.5">
+                                <input
+                                  value={labelDraft}
+                                  onChange={(e) => setLabelDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveLabel(s);
+                                    if (e.key === "Escape") setEditingLabel(null);
+                                  }}
+                                  placeholder="e.g. Contents within business"
+                                  maxLength={120}
+                                  autoFocus
+                                  className={`${inputClass} min-w-0 flex-1`}
+                                />
+                                <button onClick={() => saveLabel(s)} disabled={savingLabel} className="text-xs font-medium text-kelly-700 hover:underline disabled:opacity-50">
+                                  {savingLabel ? "Saving..." : "Save"}
+                                </button>
+                                <button onClick={() => setEditingLabel(null)} className="text-xs text-gray-500 hover:underline">
+                                  Cancel
+                                </button>
+                                {s.account_number ? (
+                                  <span className="basis-full text-xs text-gray-500">Saved for every year of this account.</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              <>
+                                {covers ?? <span className="text-gray-500">Not set</span>}{" "}
+                                <button
+                                  onClick={() => {
+                                    setLabelDraft(covers ?? "");
+                                    setEditingLabel(s.id);
+                                  }}
+                                  className="text-xs font-medium text-kelly-700 hover:underline"
+                                >
+                                  {covers ? "Change" : "Add"}
+                                </button>
+                              </>
+                            )}
+                          </dd>
+                        </div>
                         <div>
                           <dt className="text-xs text-gray-500">Entity</dt>
                           <dd className="text-gray-900">

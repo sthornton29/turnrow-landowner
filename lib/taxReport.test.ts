@@ -354,11 +354,16 @@ describe("payments are spread over the whole statement", () => {
     expect(member.bottom.paid).toBe(450);
     expect(member.bottom.outstanding).toBe(450);
     const rows = (r: typeof admin) => r.paidByYear.map((p) => [p.year, p.entity, p.property, p.amount]);
+    // The admin sees the line and so knows it is personal property; the
+    // member cannot, so the same $50 is simply not tied to a parcel.
     expect(rows(admin)).toEqual([
+      [2026, "Albemarle Corporation", "Green", 450],
+      [2026, "Albemarle Corporation", "Personal property", 50],
+    ]);
+    expect(rows(member)).toEqual([
       [2026, "Albemarle Corporation", "Green", 450],
       [2026, "Albemarle Corporation", "Not tied to a parcel", 50],
     ]);
-    expect(rows(member)).toEqual(rows(admin));
   });
 
   it("with an entity filter, keeps the entity's own lines that are not tied to a parcel", () => {
@@ -370,10 +375,13 @@ describe("payments are spread over the whole statement", () => {
     expect(e1.bottom.tax).toBe(1000);
     expect(e1.bottom.paid).toBe(500);
     expect(e1.findings.find((f) => f.kind === "unmatched")?.title).toBe("1 bill line not tied to a parcel");
-    expect(e1.properties.find((p) => p.name === "Not tied to a parcel")?.tax).toBe(100);
+    // Personal property is its own row, apart from the line still to match.
+    expect(e1.properties.find((p) => p.name === "Not tied to a parcel")?.tax).toBe(60);
+    expect(e1.properties.find((p) => p.name === "Personal property")?.tax).toBe(40);
     expect(e1.paidByYear.map((p) => [p.property, p.amount])).toEqual([
       ["Green", 450],
-      ["Not tied to a parcel", 50],
+      ["Not tied to a parcel", 30],
+      ["Personal property", 20],
     ]);
     // Another entity's view never picks them up, and neither does a view
     // narrowed to one property.

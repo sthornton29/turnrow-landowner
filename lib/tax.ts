@@ -25,6 +25,9 @@ export interface TaxStatementRow {
   due_date: string | null;
   delinquent_date: string | null;
   notes: string | null;
+  // What the bill covers, in the owner's words (migration 0055); kept
+  // the same on every statement of one county account.
+  label?: string | null;
 }
 
 export interface TaxStatementLineRow {

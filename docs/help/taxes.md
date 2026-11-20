@@ -4,7 +4,7 @@ route: /taxes
 group: Property Taxes
 order: 1
 updated: 2026-11-20
-keywords: property tax, statement, upload, account, parcel match, PPIN, identifiers, lines, reconcile, completeness, unpaid, delinquent, past due, due date, last day to pay, batch pay, check number, county calendar, remember dates, confirm all ready, delete statement, assessed value, appraised value, personal property, tax year, entity, taxpayer, change report, year over year, effective rate, current use, class iii, homestead, exemption, appeal, spike, pdf
+keywords: property tax, statement, upload, account, parcel match, personal property, business personal property, contents within business, equipment, no parcel, what it covers, label, bill not on file, PPIN, identifiers, lines, reconcile, completeness, unpaid, delinquent, past due, due date, last day to pay, batch pay, check number, county calendar, remember dates, confirm all ready, delete statement, assessed value, appraised value, personal property, tax year, entity, taxpayer, change report, year over year, effective rate, current use, class iii, homestead, exemption, appeal, spike, pdf
 ---
 ## What this page is for
 
@@ -25,9 +25,20 @@ Parcels not yet on a statement for the year are listed by property (expand one t
 
 A statement is how the county billed you: a county, the number it bills on (an account number, a receipt or key number, or the parcel number), the taxpayer as printed, the tax year, the total, and the due and delinquent dates. Under it are its **lines**, one per parcel block printed on the statement, each with the numbers the county printed for it, its appraised and assessed values, and its tax. One statement can cover a whole account across many parcels, or a single parcel. Tap **Details** on a statement to see its lines, its payments, and the uploaded file.
 
-The page counts a parcel as covered for a year when a line links to it. Business personal property lines are never parcels: they count in what you owe and paid, under the statement's entity, but not in parcel coverage.
+The page counts a parcel as covered for a year when a line links to it. Business personal property lines are never parcels: they count in what you owe and paid, under the statement's entity, but not in parcel coverage. See Personal property bills below.
 
 A statement whose lines do not add up to its total shows an amber chip with both figures. It is never hidden. Saved lines cannot be edited. If a line was misread, have an admin delete the statement under **Details** and upload the bill again, correcting the line in the review before confirming. Deleting also removes the payments recorded on the statement, so note them first.
+
+## Personal property bills
+
+Some bills tax business contents or equipment instead of land. The county usually prints a parcel number of all zeros or the code PP, and the bill belongs to an owner and an account, not to a parcel. The app reads these as **personal property**. Nothing has to be matched, the statement is marked **Personal property**, and its tax counts in what you owe and paid under the statement's entity, never in parcel coverage or a property's per-acre figures.
+
+- **What it covers.** Give the bill a name in your own words, such as "Contents within business", in the upload review or under **Details** on the statement. Handwritten notes on a bill are not read, so type it once. It is one name per county account: saving it sets it on every year of that account, and next year's bill arrives with it filled in. Any statement can carry one, not only personal property.
+- **The Personal property section** on this page lists each personal property account for the tax year shown: what it covers, the entity, the tax for the last year billed and for this year with the change, this year's value, and whether it is paid. **Details** opens the statement.
+- **A bill that has not come in.** An account that was billed last year with nothing on file for this year is listed first and marked **Not on file**, with a link to upload it. Parcel coverage cannot catch this one, because no parcel is waiting on it.
+- In the Property tax report, personal property has its own row beside the properties, apart from lines that still need matching to a parcel.
+
+Like the lines themselves, the Personal property section is visible to admins only.
 
 ## Uploading statements
 

@@ -104,6 +104,11 @@ export interface ParcelRow {
   cuSaves: number | null; // a year, when on current use and a market value is known
 }
 
+// The two rows for tax that no property carries. Personal property is a
+// kind of bill, not a problem; "not tied to a parcel" is work to do.
+export const PERSONAL_PROPERTY_ROW = "Personal property";
+export const NOT_TIED_ROW = "Not tied to a parcel";
+
 export interface PropertyRow {
   id: string;
   name: string;
@@ -674,20 +679,32 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
       });
     }
   }
-  // Lines in view with no parcel (unmatched lines and personal property)
-  // are still tax in the totals: one row, so the property table adds up.
-  const looseTax = (y: number) => r2(scopedLines.filter((l) => l.tax_year === y && !l.parcel_id).reduce((s, l) => s + Number(l.tax_due), 0));
-  if (looseTax(year) > 0 || years.some((y) => looseTax(y) > 0)) {
-    props.push({
-      id: "",
-      name: "Not tied to a parcel",
-      acres: 0,
-      tax: looseTax(year),
-      perAcre: null,
-      income: null,
-      pctIncome: null,
-      trend: years.map((y) => ({ year: y, tax: looseTax(y) })),
-    });
+  // Lines in view with no parcel are still tax in the totals, so the
+  // property table adds up. They are two different things and get a row
+  // each: personal property (business contents and equipment, which never
+  // has a parcel) and real-property lines still waiting to be matched.
+  const noParcelTax = (y: number, personal: boolean) =>
+    r2(
+      scopedLines
+        .filter((l) => l.tax_year === y && !l.parcel_id && (l.line_type === "personal_property") === personal)
+        .reduce((s, l) => s + Number(l.tax_due), 0)
+    );
+  for (const [name, personal] of [
+    [PERSONAL_PROPERTY_ROW, true],
+    [NOT_TIED_ROW, false],
+  ] as const) {
+    if (noParcelTax(year, personal) > 0 || years.some((y) => noParcelTax(y, personal) > 0)) {
+      props.push({
+        id: "",
+        name,
+        acres: 0,
+        tax: noParcelTax(year, personal),
+        perAcre: null,
+        income: null,
+        pctIncome: null,
+        trend: years.map((y) => ({ year: y, tax: noParcelTax(y, personal) })),
+      });
+    }
   }
   props.sort((a, b) => b.tax - a.tax);
 
@@ -798,7 +815,7 @@ export function buildTaxReport(inp: ReportInput): TaxReport {
       if (inp.propertyScope && (pid ? !inp.propertyScope.has(pid) : !(inp.entityId && st.entity_id === inp.entityId))) continue;
       const eid = (pid ? propEntity.get(pid) : null) ?? st.entity_id;
       const entity = eid ? (entName.get(eid) ?? "Entity") : "No entity";
-      const property = pid ? (propName.get(pid) ?? "") : "Not tied to a parcel";
+      const property = pid ? (propName.get(pid) ?? "") : l?.line_type === "personal_property" ? PERSONAL_PROPERTY_ROW : NOT_TIED_ROW;
       const y = Number(pay.paid_date.slice(0, 4));
       const key = `${y}|${entity}|${property}`;
       const cur = paidAgg.get(key) ?? { year: y, entity, property, amount: 0 };

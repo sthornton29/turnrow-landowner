@@ -1,5 +1,63 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-20 (PERSONAL PROPERTY BILLS; migration 0055 applied to the live
+database and the code committed and pushed to main that day). Stuart
+sent the 2026 Lawrence notice for account 14620 (ALBEMARLE CORP, parcel
+00-00-00-0-000-000.000, PPIN 1020, exemption PP, $36.19 on a $7,651
+value; he writes "Contents Within Business" on it by hand) and asked for
+an elegant way to handle bills that attach to no parcel. The reader
+already typed them personal_property and nothing had to be matched, but
+the bill had no home: it read "1 line" under an account number, its tax
+sat with unmatched lines under "Not tied to a parcel" in the tax report,
+and nothing would notice a year's bill never arriving (parcel coverage
+cannot: no parcel waits on it). Five years of this account were on file
+(2021 to 2025) with no 2026. BUILT, rules in lib/personalProperty.ts:
+(1) tax_statements.label (0055), "What it covers" in the owner's words.
+One label per county account (county + account number, state left out
+on purpose): saving it under Details or in the upload review writes it
+to every year's statement on the account, and the next upload on that
+account arrives with it filled in. Any statement can carry one. The
+reader still ignores handwriting; the label is typed once. (2) A
+statement whose every line is personal property is marked Personal
+property on the Property Taxes page and in the upload review, which
+explains there is no parcel to match. (3) A Personal property section on
+the Property Taxes page, one row per account: label, entity, the last
+year billed against this year with the change, this year's value, paid
+status; an account billed last year with nothing on file this year is
+listed first as Not on file with an upload link (flagged for that one
+year only; a bill with no account number is never called missing). The
+section follows the entity filter and, like the lines, shows for admins
+only (row level security hides personal property lines from other
+members). (4) The tax report's by-property table and paid-by-year table
+give personal property its own row (PERSONAL_PROPERTY_ROW), apart from
+"Not tied to a parcel", which is now only lines still to match; a
+member who cannot see the line still sees that share as not tied to a
+parcel. Income still routes personal property to Unassigned. VERIFIED:
+lib/personalProperty.test.ts (13), taxReport tests updated; a scripted
+browser signed in as a scratch admin uploaded the REAL statement through
+the upload screen against a local dev server (22 checks: read as
+Lawrence 2026 account 14620 $36.19 personal property, Ready with nothing
+unsure; label saved and copied to the account's other years; section,
+statement row, Details edit, tax report row; a second upload arrived with
+the label filled in); scratch org, user, and stored files removed. 1153
+tests pass, tsc clean. Stuart's own 2026 bill for 14620 was NOT uploaded
+or labeled by me. Help: taxes.md (Personal property bills), tax-report.md.
+
+ALSO 2026-11-20, data only (after the entry below): the fourth Dupes
+parcel 06 01 12 0 000 002.001 (PPIN 956810, account 856470) was created
+from the part of the Dupes outline no parcel covered (36.7 ac; the
+county's map never drew the split, it is still inside Brackin Farms'
+002.000) and matched for 2021 to 2026, the two 2023 bills combined into
+one $89.40 line; 25 lines from 2021 to 2025 were matched to the five
+parcels imported that day; Albemarle-Trinity's outline was put back
+after its Courtland lot was moved to the new Downtown Courtland
+property, and Sykes Pond and Shop Area took in the parcels imported
+minutes before the fix deployed. Still unmatched: account 215450 TMLLC
+(PPIN 958680, six years, importable from the county), account 871470
+(PPIN 957521, 2021 to 2025), one 2024 additional bill on 386910. The
+service role cannot insert parcels (the parcel-number trigger needs the
+private schema): the Dupes parcel went in through the app's file import.
+
 2026-11-20 (IMPORTED PARCELS NOT ON THE MAP; migration 0054 applied to the
 live database and the code committed and pushed to main that day).
 Stuart imported two parcels from the Property Taxes page's "Import this

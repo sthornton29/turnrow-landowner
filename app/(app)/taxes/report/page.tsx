@@ -452,7 +452,7 @@ export default async function TaxReportPage({
             </thead>
             <tbody>
               {r.properties.map((p) => (
-                <tr key={p.id || "not-tied"} className="border-t border-gray-100">
+                <tr key={p.id || p.name} className="border-t border-gray-100">
                   <td className="px-3 py-2 font-medium text-gray-900">{p.name}</td>
                   <td className="px-3 py-2 text-right text-gray-700">{p.acres > 0 ? formatAcres(p.acres) : "-"}</td>
                   <td className="px-3 py-2 text-right text-gray-900">{formatDollars(p.tax)}</td>

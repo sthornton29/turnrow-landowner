@@ -12,7 +12,7 @@ export const metadata = { title: "Upload tax statements" };
 export default async function TaxUploadPage() {
   const { supabase, profile } = await requireAdmin("/taxes");
 
-  const [parcels, properties, entities, aliases, accounts, identifiers, defaults] = await Promise.all([
+  const [parcels, properties, entities, aliases, accounts, identifiers, defaults, labeled] = await Promise.all([
     supabase.from("parcels").select("id, parcel_number, county, property_id").order("parcel_number"),
     supabase.from("properties").select("id, name, entity_id").order("name"),
     supabase.from("entities").select("id, name").order("name"),
@@ -20,6 +20,9 @@ export default async function TaxUploadPage() {
     supabase.from("entity_accounts").select("county, state, account_number, entity_id"),
     supabase.from("parcel_identifiers").select("parcel_id, kind, value, normalized"),
     supabase.from("county_tax_defaults").select("*"),
+    // What earlier statements say each account covers (migration 0055):
+    // a bill on a known account arrives with that label filled in.
+    supabase.from("tax_statements").select("county, account_number, tax_year, label").not("label", "is", null),
   ]);
 
   const propertyName = new Map((properties.data ?? []).map((p) => [p.id, p.name]));
@@ -48,6 +51,7 @@ export default async function TaxUploadPage() {
       }))}
       storedIdentifiers={(identifiers.data ?? []) as Array<{ parcel_id: string; kind: string; value: string; normalized: string }>}
       countyDefaults={defaults.data ?? []}
+      accountLabels={(labeled.data ?? []) as Array<{ county: string | null; account_number: string | null; tax_year: number; label: string | null }>}
     />
   );
 }

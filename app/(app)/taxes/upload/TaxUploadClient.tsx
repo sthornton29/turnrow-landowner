@@ -15,6 +15,7 @@ import { careOfTarget, matchEntity, matchLine, matchLineViaCounty, type CountyLi
 import { extractFile, extractStored } from "@/components/documents/classify";
 import { confirmLineParcel, confirmStatementEntity, countyLookup, importParcelHref, type CountyLearn } from "@/components/taxes/taxLearn";
 import { mergeSameParcelLines } from "@/lib/taxLineMerge";
+import { isPersonalPropertyStatement, labelForAccount, statementsToRelabel } from "@/lib/personalProperty";
 
 // ---------------------------------------------------------------- types
 
@@ -101,6 +102,10 @@ interface StatementDraft {
   // calendar was used instead; shown beside the dates.
   datesNote: string | null;
   notes: string;
+  // What the bill covers, in the owner's words (migration 0055): filled
+  // in from the account's earlier statements, saved for every year of
+  // the account.
+  label: string;
   entityId: string;
   entityEvidence: string | null;
   // Set when the taxpayer name was close to an entity but not safely one
@@ -177,7 +182,11 @@ export default function TaxUploadClient({
   accounts,
   storedIdentifiers,
   countyDefaults,
+  accountLabels = [],
 }: {
+  // What earlier statements say each account covers (migration 0055), so
+  // a bill on a known account arrives with its label filled in.
+  accountLabels?: Array<{ county: string | null; account_number: string | null; tax_year: number; label: string | null }>;
   orgId: string;
   parcels: ParcelRef[];
   properties: Array<{ id: string; name: string; entity_id: string | null }>;
@@ -195,6 +204,9 @@ export default function TaxUploadClient({
   const [stored, setStored] = useState<StoredIdentifier[]>(storedIdentifiers);
   const [parcelList, setParcelList] = useState<ParcelRef[]>(parcels);
   const [confirmingAll, setConfirmingAll] = useState(false);
+  // A ref, not state: drafts are built inside the long-running read of a
+  // file, and a label saved earlier in the session has to be seen there.
+  const labelsRef = useRef(accountLabels);
   // Parcels this session created with "Create the parcel", by county and
   // normalized number, so nothing ever creates the same one twice (a save
   // that failed after its parcel was created, two lines for one parcel).
@@ -356,6 +368,7 @@ export default function TaxUploadClient({
       datesEdited: false,
       datesNote: null,
       notes: "",
+      label: "",
       entityId: g.entity_id ?? "",
       entityEvidence: g.entity_evidence,
       entityPick: null,
@@ -485,6 +498,7 @@ export default function TaxUploadClient({
       datesEdited: false,
       datesNote: dates.note,
       notes: "",
+      label: labelForAccount(labelsRef.current, { county, account_number: str(x.billing_key) || (g.billing_key ?? "") }) ?? "",
       entityId,
       entityEvidence,
       entityPick,
@@ -744,6 +758,7 @@ export default function TaxUploadClient({
         due_date: s.dueDate || null,
         delinquent_date: s.delinquentDate || null,
         notes: s.notes.trim() || null,
+        label: s.label.trim() || null,
         entity_id: entity?.id ?? null,
         entity_evidence: entity ? s.entityEvidence : null,
       })
@@ -905,6 +920,20 @@ export default function TaxUploadClient({
       );
       if (datesErr) patchStatement(s.localId, { error: `Saved. The dates could not be remembered for ${county} County, so they were not changed for next time.` });
     }
+
+    // What the bill covers is one label per account: the other years of
+    // this account take it too, and the next statement read in this
+    // session starts with it.
+    const label = s.label.trim();
+    if (label && account && county) {
+      const { data: same } = await supabase.from("tax_statements").select("id, county, account_number, label").eq("organization_id", orgId).ilike("county", county);
+      const ids = statementsToRelabel((same ?? []) as Array<{ id: string; county: string | null; account_number: string | null; label: string | null }>, { id: statementId, county, account_number: account }, label);
+      if (ids.length > 0) {
+        const { error: labelErr } = await supabase.from("tax_statements").update({ label }).in("id", ids);
+        if (labelErr) patchStatement(s.localId, { error: "Saved. The label could not be copied to this account's other years; set it on the Property Taxes page." });
+      }
+      labelsRef.current = [...labelsRef.current, { county, account_number: account, tax_year: s.taxYear, label }];
+    }
     patchStatement(s.localId, { status: "saved", open: false });
   }
 
@@ -1055,6 +1084,9 @@ export default function TaxUploadClient({
             return `${ix.length} lines combined: lines ${list} match this parcel and will be saved as one line of ${formatDollars(sum)}.`;
           };
           const entity = s.entityId ? entityById.get(s.entityId) : null;
+          // Every line is personal property: business contents or
+          // equipment, taxed to the owner with no parcel to match.
+          const personal = isPersonalPropertyStatement(s.lines.map((l) => ({ line_type: l.lineType })));
           const border =
             s.status === "saved" ? "border-kelly-200" : s.status === "skipped" ? "border-gray-200" : issues.length ? "border-amber-300" : "border-gray-200";
           return (
@@ -1069,6 +1101,8 @@ export default function TaxUploadClient({
                   {s.account ? <span className="font-normal text-gray-500"> · {IDENTIFIER_KIND_LABELS[(s.accountKind as IdentifierKind) ?? "other"] ?? "Number"} {s.account}</span> : null}
                 </span>
                 <span className="text-xs text-gray-600">{s.taxpayer || "No taxpayer read"}</span>
+                {personal ? <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">Personal property</span> : null}
+                {s.label.trim() ? <span className="text-xs text-gray-700">{s.label.trim()}</span> : null}
                 {entity ? (
                   <span className="rounded-full bg-kelly-50 px-2 py-0.5 text-xs font-medium text-pine-900">{entity.name}</span>
                 ) : (
@@ -1110,6 +1144,13 @@ export default function TaxUploadClient({
                       {s.partsUnsure.length > 0
                         ? `The reader was unsure about ${s.partsUnsure.map(lineFieldLabel).join(", ")} on a line it could not point to. Check every line against the bill, along with the fields outlined in amber.`
                         : "The reader was not sure of the fields outlined in amber. Check them against the bill before confirming."}
+                    </p>
+                  ) : null}
+                  {personal ? (
+                    <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                      <span className="font-semibold text-gray-900">Personal property bill.</span> It taxes business contents or equipment, not land, so there is no
+                      parcel to match. It is filed under {entity ? entity.name : "the entity you pick below"} and followed from year to year under Personal property on
+                      the Property Taxes page. Say what it covers so it is easy to recognize.
                     </p>
                   ) : null}
                   {/* Header */}
@@ -1186,6 +1227,16 @@ export default function TaxUploadClient({
                     <Field label="Notes">
                       <input value={s.notes} onChange={(e) => patchStatement(s.localId, { notes: e.target.value })} className={inputClass} />
                     </Field>
+                    <Field label={personal ? "What it covers" : "What it covers (optional)"}>
+                      <input
+                        value={s.label}
+                        onChange={(e) => patchStatement(s.localId, { label: e.target.value })}
+                        placeholder={personal ? "e.g. Contents within business" : "Your own name for this bill"}
+                        maxLength={120}
+                        className={inputClass}
+                      />
+                      <p className="mt-1 text-xs text-gray-500">Remembered for this account every year.</p>
+                    </Field>
                   </div>
                   {dateProblem ? (
                     <p className="text-xs font-medium text-red-700">Check the dates. {dateProblem} The statement cannot be saved until they agree with the tax year.</p>
@@ -1200,7 +1251,7 @@ export default function TaxUploadClient({
                   {/* Lines */}
                   <div>
                     <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium text-gray-800">Parcel lines</p>
+                      <p className="text-sm font-medium text-gray-800">{personal ? "Lines" : "Parcel lines"}</p>
                       <span className="text-xs text-gray-500">
                         Lines sum to {formatDollars(r.lineTotal)}
                         {r.gap !== null && !r.reconciled ? <span className="text-amber-800"> (gap {formatDollars(r.gap)} against the statement total)</span> : null}

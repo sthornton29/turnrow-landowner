@@ -3,12 +3,12 @@ title: Property tax report
 route: /taxes/report
 group: Property Taxes
 order: 4
-updated: 2026-11-14
+updated: 2026-11-20
 keywords: tax report, protest packet, appeal packet, protest letter, worksheet, re-read bills, reread, tax paid by year, accountant, deduction, value history, property tax report, current use, cuapp, market value, land value per acre, taxable value, assessed value, millage, mills, tax district, bill check, ties out, acreage, deed acres, county acres, timber acres, homestead, enrolled, missing bill, no bills on file, delinquent, unpaid, last day to pay, tax per acre, share of income, next year, cap on increases, board of equalization, protest, valuation notice, deadlines
 ---
 ## What it is
 
-On the Property Taxes page, **Tax report** reads every bill you uploaded together with the county's own parcel records. In this order it shows: the year's tax and why it changed, things worth a look (with dollars and a deadline where there is one), whether each parcel is getting current use and how its acres compare, tax per acre and as a share of income by property, the values printed on the bills, next year's bills where the county records already show them, the dates to know, and tax paid by calendar year. Pick the year, entity, property, or county at the top; **Print or save PDF** prints it.
+On the Property Taxes page, **Tax report** reads every bill you uploaded together with the county's own parcel records. In this order it shows: the year's tax and why it changed, things worth a look (with dollars and a deadline where there is one), whether each parcel is getting current use and how its acres compare, tax per acre and as a share of income by property (with a **Personal property** row for bills on business contents or equipment, which have no parcel, and a **Not tied to a parcel** row for lines still to be matched), the values printed on the bills, next year's bills where the county records already show them, the dates to know, and tax paid by calendar year. Pick the year, entity, property, or county at the top; **Print or save PDF** prints it.
 
 The report is a worksheet to help you prepare, not legal or tax advice, and it says so under its title. Confirm deadlines and figures with the county, and tax questions with your accountant.
 
