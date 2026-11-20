@@ -1553,7 +1553,7 @@ function LineCard({
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-gray-500 sm:col-span-3">The boundary can be drawn or imported from county records later.</p>
+              <p className="text-[11px] text-gray-500 sm:col-span-3">A parcel created here has no boundary, so it will not show on the map until one is drawn or imported from county records.</p>
             </div>
           ) : null}
         </div>

@@ -1,5 +1,49 @@
 # Turnrow Landowner: Project Summary
 
+2026-11-20 (IMPORTED PARCELS NOT ON THE MAP; migration 0054 applied to the
+live database and the code committed and pushed to main that day).
+Stuart imported two parcels from the Property Taxes page's "Import this
+parcel" prompt (07 09 30 3 102 030.000 into Albemarle-Trinity, 07 09 31 0
+000 002.000 into Shop Area) and neither showed on the map. Both were
+saved correctly with their county boundaries. Cause: the map draws
+PROPERTY outlines and the Parcels layer starts off (LAYER_DEFAULTS in
+components/map/MapView.tsx, deliberate), and the county import left the
+property's outline alone: "Set property boundary to merged outline"
+starts unticked for a property that already has a boundary, so a drawn
+or surveyed boundary is never replaced without asking. A parcel added
+that way sat outside its property's outline (0% inside, checked) and was
+nowhere to be seen. FIX: a property that already has a boundary now
+GROWS to take new parcels in. Migration 0054 adds
+add_parcels_to_property_boundary(property, parcel ids): unions the named
+parcels of that property into its boundary, changes nothing already
+inside it, skips a parcel the boundary already covers (90% or more, so
+the county's version of land a drawn boundary already holds adds no
+slivers), SECURITY INVOKER. The import panel
+(app/(app)/import/county/CountyImportClient.tsx, rules in
+lib/importBoundary.ts) shows, for a property WITH a boundary, "Property
+boundary:" with three choices: Add these parcels to it (default),
+Replace it with the outline of all its parcels (the old ticked box,
+still warns), Leave it as it is (warns that the parcels show only with
+the Parcels layer on). A property with no boundary keeps the ticked
+checkbox. "View on map" and "Done, view on map" now zoom to the parcel
+when exactly one was imported (the selection outline shows with the
+Parcels layer off), else the property. Opened from the Property Taxes
+page (importParcelHref passes from=taxes and the year), the import's
+toast also offers "Back to Property Taxes", where the line waits with
+the new parcel picked. The upload review's "Create the parcel..." note
+now says such a parcel has no boundary and will not show on the map.
+DATA: the two properties' outlines were extended with the new function
+(Albemarle-Trinity 57.60 to 58.04 ac, Shop Area 1689.32 to 1691.59 ac);
+both parcels now lie 100% inside. Their two tax lines (35460 line 1,
+8080 line 45) were still unmatched, and four more 2026 lines name
+parcels not in the account (PPIN 956810, 958305, 958428, 958897).
+VERIFIED: lib/importBoundary.test.ts (7); lib/propertyBoundary.live.test.ts
+(BOUNDARY_TEST=1, scratch org through an admin's own session, deleted
+afterward); a scripted browser signed in as a scratch admin pressed
+Confirm and import for all four cases against a local dev server (17
+checks); both parcels seen on the live map; 1140 tests pass, tsc clean.
+Help: import-county.md and taxes.md.
+
 2026-11-19 (TAX READER: WHAT "UNSURE" MEANS; committed and pushed to
 main that day). The three 2026 Lawrence
 notices for Albemarle (account 8080 with 45 parcels, 35460, 856470) were

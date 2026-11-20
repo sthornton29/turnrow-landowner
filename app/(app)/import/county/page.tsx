@@ -1,4 +1,5 @@
 import { requireOrg } from "@/lib/auth";
+import { importReturnTo } from "@/lib/importBoundary";
 import CountyImportClient from "./CountyImportClient";
 
 export const metadata = { title: "Import from county records" };
@@ -8,10 +9,12 @@ export default async function CountyImportPage({
 }: {
   // The map's Neighbors overlay links here with a service, mode, and
   // seed preselected (run=1 fires the search on arrival); a plain visit
-  // carries none of these and behaves exactly as before.
-  searchParams: Promise<{ service?: string; mode?: string; q?: string; run?: string }>;
+  // carries none of these and behaves exactly as before. The Property
+  // Taxes page adds from=taxes (and the year it was showing) so the
+  // import can offer the way back to match the line.
+  searchParams: Promise<{ service?: string; mode?: string; q?: string; run?: string; from?: string; year?: string }>;
 }) {
-  const { service, mode, q, run } = await searchParams;
+  const { service, mode, q, run, from, year } = await searchParams;
   const { supabase, profile, isAdmin } = await requireOrg();
 
   const [
@@ -59,6 +62,7 @@ export default async function CountyImportPage({
       knownAliases={knownAliases}
       entities={entities ?? []}
       isAdmin={isAdmin}
+      returnTo={importReturnTo(from, year)}
       initial={{
         serviceId: service,
         mode: mode === "entity" || mode === "owner" || mode === "parcel" ? mode : undefined,

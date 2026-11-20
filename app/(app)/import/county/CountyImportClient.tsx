@@ -19,6 +19,7 @@ import {
 import { ENTITY_TYPE_LABELS, guessEntityType } from "@/lib/entities";
 import MiniParcelSketch from "@/components/county/MiniParcelSketch";
 import { identifierFieldsOf, type CountyGisService, type EntityParcelFeature } from "@/lib/gis";
+import { defaultBoundaryMode, effectiveBoundaryMode, importMapFocus, type BoundaryMode } from "@/lib/importBoundary";
 import type { LandEntityType } from "@/types/db";
 import type { MultiPolygon } from "geojson";
 
@@ -102,8 +103,13 @@ export default function CountyImportClient({
   knownAliases,
   entities,
   initial,
+  returnTo = null,
   isAdmin = false,
 }: {
+  // Set when the page was opened from another page's "Import this parcel"
+  // link (the Property Taxes page): after an import the user is offered
+  // the way back, to finish what they came from.
+  returnTo?: { href: string; label: string } | null;
   orgId: string;
   // A new property and a new entity are an admin's to create (the map
   // and the file import follow the same rule), so only admins are
@@ -168,7 +174,10 @@ export default function CountyImportClient({
   const [importedPropertyIds, setImportedPropertyIds] = useState<Set<string>>(
     new Set()
   );
-  const [toast, setToast] = useState<{ message: string; focus: string } | null>(
+  // Every parcel added or updated this session: when it is exactly one,
+  // "Done, view on map" zooms to that parcel instead of its property.
+  const [touchedParcelIds, setTouchedParcelIds] = useState<string[]>([]);
+  const [toast, setToast] = useState<{ message: string; focus: string | null } | null>(
     null
   );
 
@@ -188,15 +197,18 @@ export default function CountyImportClient({
   const [newEntityName, setNewEntityName] = useState("");
   const [newEntityType, setNewEntityType] = useState<LandEntityType>("llc");
   const [newEntityNotes, setNewEntityNotes] = useState("");
-  // "Set property boundary to merged outline". Its starting position
-  // depends on the target: ON for a property with no boundary yet, OFF
-  // for one that already has a boundary (hand-drawn or surveyed), which
-  // the merge would replace. A choice made by hand is remembered for the
-  // target it was made on and starts over when the target changes.
-  const [mergeChoice, setMergeChoice] = useState<{ target: string; on: boolean } | null>(null);
+  // What the import does to the target property's boundary
+  // (lib/importBoundary.ts). The start depends on the target: a property
+  // with no boundary yet gets the merged outline of its parcels; one that
+  // already has a boundary (hand-drawn or surveyed) GROWS to take the new
+  // parcels in, which changes nothing already inside it. Replacing that
+  // boundary with the merged outline, or leaving it alone, is a choice
+  // made by hand; it is remembered for the target it was made on and
+  // starts over when the target changes.
+  const [boundaryChoice, setBoundaryChoice] = useState<{ target: string; mode: BoundaryMode } | null>(null);
   // Properties whose boundary was set from parcels earlier in this
-  // session: merging again loses nothing, so they keep the box ticked
-  // as more parcels are added.
+  // session: merging again loses nothing, so they keep the merged
+  // outline as more parcels are added.
   const [mergedThisSession, setMergedThisSession] = useState<Set<string>>(new Set());
   const [dupChoices, setDupChoices] = useState<Record<string, "skip" | "update">>({});
   const [importing, setImporting] = useState(false);
@@ -206,8 +218,12 @@ export default function CountyImportClient({
     assignMode === "existing" ? (localProperties.find((p) => p.id === propertyId) ?? null) : null;
   const targetHasOwnBoundary =
     !!targetProperty?.has_boundary && !mergedThisSession.has(targetProperty.id);
-  const mergeOutline =
-    mergeChoice && mergeChoice.target === mergeTarget ? mergeChoice.on : !targetHasOwnBoundary;
+  const boundaryMode = effectiveBoundaryMode(
+    boundaryChoice && boundaryChoice.target === mergeTarget
+      ? boundaryChoice.mode
+      : defaultBoundaryMode(targetHasOwnBoundary),
+    targetHasOwnBoundary
+  );
 
   const service = services.find((s) => s.id === serviceId) ?? null;
   const rowById = useMemo(
@@ -764,10 +780,12 @@ export default function CountyImportClient({
     const failures: string[] = [];
     let importedCount = 0;
     let addedCount = 0;
-    // Updated parcels that belong to the target property. A parcel marked
+    // The parcels this click added and updated, by id. A parcel marked
     // Update stays on the property it is already on, which may not be the
-    // one chosen in the form.
-    let updatedOnTarget = 0;
+    // one chosen in the form, so the ones on the target are kept apart.
+    const addedIds: string[] = [];
+    const updatedIds: string[] = [];
+    const updatedOnTargetIds: string[] = [];
     const importedNow: string[] = [];
     const newSessionParcels: typeof sessionParcels = [];
 
@@ -797,7 +815,8 @@ export default function CountyImportClient({
         .eq("id", existingId);
       await saveHarvestedIdentifiers(existingId, row.attributes);
       importedCount++;
-      if (existingPropertyId === targetPropertyId) updatedOnTarget++;
+      updatedIds.push(existingId);
+      if (existingPropertyId === targetPropertyId) updatedOnTargetIds.push(existingId);
       importedNow.push(row.localId);
     }
 
@@ -848,6 +867,7 @@ export default function CountyImportClient({
       await saveHarvestedIdentifiers(data.id, row.attributes);
       importedCount++;
       addedCount++;
+      addedIds.push(data.id as string);
       importedNow.push(row.localId);
       newSessionParcels.push({
         id: data.id,
@@ -857,19 +877,35 @@ export default function CountyImportClient({
       });
     }
 
-    // Merged property outline: only for a property whose parcels changed
+    // The property's boundary: only for a property whose parcels changed
     // in this import (a parcel added to it, or one of its own parcels
     // updated). Updating a parcel on another property leaves the chosen
-    // property's boundary alone.
-    if (targetPropertyId && mergeOutline && addedCount + updatedOnTarget > 0) {
-      const { error: mErr } = await supabase.rpc("set_property_boundary_from_parcels", {
-        p_property_id: targetPropertyId,
-      });
+    // property's boundary alone. "merge" replaces the boundary with the
+    // outline of all its parcels; "add" joins just these parcels onto the
+    // boundary it has (migration 0054), so a parcel put into a property
+    // shows on the map as part of it.
+    const changedOnTarget = [...addedIds, ...updatedOnTargetIds];
+    if (targetPropertyId && boundaryMode !== "keep" && changedOnTarget.length > 0) {
+      const { error: mErr } =
+        boundaryMode === "merge"
+          ? await supabase.rpc("set_property_boundary_from_parcels", {
+              p_property_id: targetPropertyId,
+            })
+          : await supabase.rpc("add_parcels_to_property_boundary", {
+              p_property_id: targetPropertyId,
+              p_parcel_ids: changedOnTarget,
+            });
       if (mErr) {
         failures.push(
-          "Property outline: " + friendlyDbError(mErr, "it could not be set from the parcels.")
+          "Property outline: " +
+            friendlyDbError(
+              mErr,
+              boundaryMode === "merge"
+                ? "it could not be set from the parcels."
+                : "the new parcels could not be added to it. They are saved; turn on the Parcels layer on the map to see them."
+            )
         );
-      } else {
+      } else if (boundaryMode === "merge") {
         const mergedId = targetPropertyId;
         setMergedThisSession((prev) => new Set(prev).add(mergedId));
       }
@@ -910,6 +946,7 @@ export default function CountyImportClient({
     if (importedNow.length > 0) {
       setImportedIds((prev) => new Set([...prev, ...importedNow]));
       setSessionParcels((prev) => [...prev, ...newSessionParcels]);
+      setTouchedParcelIds((prev) => [...prev, ...addedIds, ...updatedIds]);
       if (targetPropertyId) {
         const touchedId = targetPropertyId;
         setImportedPropertyIds((prev) => new Set(prev).add(touchedId));
@@ -957,9 +994,8 @@ export default function CountyImportClient({
           : "") +
         "." +
         repeatNote,
-      focus: targetPropertyId
-        ? `property:${targetPropertyId}`
-        : `parcel:${toUpdate[0]?.existingId ?? ""}`,
+      // One parcel: the map zooms to that parcel. Several: the property.
+      focus: importMapFocus([...addedIds, ...updatedIds], targetPropertyId),
     });
   }
 
@@ -1104,24 +1140,55 @@ export default function CountyImportClient({
               className={`${inputClass} min-w-56 bg-white`}
             />
           )}
-          <label className="flex items-center gap-1.5 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={mergeOutline}
-              onChange={(e) => setMergeChoice({ target: mergeTarget, on: e.target.checked })}
-              className="h-4 w-4 accent-kelly-500"
-            />
-            Set property boundary to merged outline
-          </label>
+          {targetHasOwnBoundary ? (
+            // The property already has a boundary: three choices, and the
+            // default joins the new parcels onto it.
+            <label className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700">
+              Property boundary:
+              <select
+                value={boundaryMode}
+                onChange={(e) => setBoundaryChoice({ target: mergeTarget, mode: e.target.value as BoundaryMode })}
+                className={`${inputClass} bg-white`}
+              >
+                <option value="add">Add these parcels to it</option>
+                <option value="merge">Replace it with the outline of all its parcels</option>
+                <option value="keep">Leave it as it is</option>
+              </select>
+            </label>
+          ) : (
+            <label className="flex items-center gap-1.5 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={boundaryMode === "merge"}
+                onChange={(e) => setBoundaryChoice({ target: mergeTarget, mode: e.target.checked ? "merge" : "keep" })}
+                className="h-4 w-4 accent-kelly-500"
+              />
+              Set property boundary to merged outline
+            </label>
+          )}
         </div>
-        {/* The merge replaces whatever boundary the property has. For
-            one that was drawn or surveyed, that is said before it happens. */}
-        {mergeOutline && targetHasOwnBoundary && targetProperty ? (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            This replaces the boundary {targetProperty.name} has now with the
-            outline of its parcels. Leave the box unticked to keep the current
-            boundary.
-          </p>
+        {/* What the choice does to a boundary the property already has,
+            said before it happens. Replacing a drawn or surveyed boundary
+            is the one that loses something, so it reads as a warning. */}
+        {targetHasOwnBoundary && targetProperty ? (
+          boundaryMode === "add" ? (
+            <p className="text-sm text-gray-600">
+              {targetProperty.name}{"'"}s boundary grows to take in the new
+              parcels, so they show on the map as part of it. Nothing already
+              inside the boundary changes.
+            </p>
+          ) : boundaryMode === "merge" ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              This replaces the boundary {targetProperty.name} has now with the
+              outline of its parcels.
+            </p>
+          ) : (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              The parcels are saved to {targetProperty.name}, but its boundary
+              stays as it is. They will show on the map only while the Parcels
+              layer is switched on.
+            </p>
+          )
         ) : null}
 
         {/* Which entity holds this property. Suggest only: a known owner
@@ -1246,16 +1313,17 @@ export default function CountyImportClient({
     );
 
   // Appears once anything has been imported this session. The map focus
-  // takes one entity, so a single touched property zooms to it; several
+  // takes one entity: a single parcel zooms to that parcel, several
+  // parcels on one property zoom to the property, and several properties
   // open the map fitted to everything.
+  const doneFocus =
+    importedPropertyIds.size === 1
+      ? importMapFocus(touchedParcelIds, Array.from(importedPropertyIds)[0])
+      : null;
   const doneButton =
     importedPropertyIds.size > 0 ? (
       <Link
-        href={
-          importedPropertyIds.size === 1
-            ? `/map?focus=property:${Array.from(importedPropertyIds)[0]}`
-            : "/map"
-        }
+        href={doneFocus ? `/map?focus=${doneFocus}` : "/map"}
         className="rounded-lg border border-kelly-500 bg-white px-3 py-1.5 text-sm font-medium text-kelly-700 hover:bg-kelly-50"
       >
         Done, view on map
@@ -1361,11 +1429,18 @@ export default function CountyImportClient({
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-kelly-100 bg-kelly-50 p-3 text-sm">
           <span className="font-medium text-pine-900">{toast.message}</span>
           <Link
-            href={`/map?focus=${toast.focus}`}
+            href={toast.focus ? `/map?focus=${toast.focus}` : "/map"}
             className="font-medium text-kelly-700 hover:underline"
           >
             View on map
           </Link>
+          {/* Opened from another page's "Import this parcel": the way back
+              to finish there (match the tax line to the new parcel). */}
+          {returnTo ? (
+            <Link href={returnTo.href} className="font-medium text-kelly-700 hover:underline">
+              {returnTo.label}
+            </Link>
+          ) : null}
           <button
             onClick={() => setToast(null)}
             aria-label="Dismiss"

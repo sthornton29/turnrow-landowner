@@ -569,7 +569,7 @@ export default function TaxStatusClient({
         {(suggestion?.notInAccount ?? []).map((c) => (
           <span key={`${c.kind}|${c.value}|${c.parcel_number}`} className="max-w-md text-right text-xs text-pine-900">
             {IDENTIFIER_KIND_LABELS[c.kind]} {c.value} resolved via {c.service_label} to parcel {c.parcel_number}, which is not in your account.{" "}
-            <Link href={importParcelHref(c.service_id, c.parcel_number)} className="font-medium text-kelly-700 hover:underline">
+            <Link href={importParcelHref(c.service_id, c.parcel_number, year)} className="font-medium text-kelly-700 hover:underline">
               Import this parcel
             </Link>
           </span>

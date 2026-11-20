@@ -226,7 +226,11 @@ export async function countyLookup(args: {
 }
 
 // The county import page, seeded to that parcel with the search already
-// run (the same link the map's Neighbors overlay uses).
-export function importParcelHref(serviceId: string, parcelNumber: string): string {
-  return `/import/county?service=${encodeURIComponent(serviceId)}&mode=parcel&q=${encodeURIComponent(parcelNumber)}&run=1`;
+// run (the same link the map's Neighbors overlay uses). The Property
+// Taxes page opens it in the same tab, so it passes the year it is
+// showing: after the import the page offers "Back to Property Taxes",
+// where the line is waiting with the new parcel already picked.
+export function importParcelHref(serviceId: string, parcelNumber: string, backToTaxesYear?: number): string {
+  const back = backToTaxesYear ? `&from=taxes&year=${encodeURIComponent(String(backToTaxesYear))}` : "";
+  return `/import/county?service=${encodeURIComponent(serviceId)}&mode=parcel&q=${encodeURIComponent(parcelNumber)}&run=1${back}`;
 }
